@@ -21,6 +21,8 @@ Apex is a non-traditional, premium portfolio tracking web application built arou
 
 There are no manual balance fields to keep in sync. Your complete financial picture — net worth, investments, liabilities, income, expenses — emerges naturally from your transaction history.
 
+**The Project is in Development**
+
 ---
 
 ## Screenshots
