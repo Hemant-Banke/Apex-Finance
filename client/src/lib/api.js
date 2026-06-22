@@ -78,6 +78,20 @@ export const marketAPI = {
   ohlc:   (symbol, days) => api.get('/market/ohlc',   { params: days ? { symbol, days } : { symbol } }),
 };
 
+// Statement import (parse PDF / HTML / image)
+export const importAPI = {
+  parse: (formData) => api.post('/import/parse', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  }),
+};
+
+// Transaction categories (default + user-defined)
+export const categoriesAPI = {
+  getAll:  (type) => api.get('/categories', { params: type ? { type } : {} }),
+  create:  (data) => api.post('/categories', data),
+  delete:  (code) => api.delete(`/categories/${encodeURIComponent(code)}`),
+};
+
 // Net Worth store
 export const networthAPI = {
   getDaily: (days) => api.get('/networth/daily', { params: days ? { days } : {} }),

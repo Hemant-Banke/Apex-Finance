@@ -11,11 +11,23 @@ const transactionRoutes = require('./routes/transactions');
 const dashboardRoutes = require('./routes/dashboard');
 const networthRoutes = require('./routes/networth');
 const marketRoutes   = require('./routes/market');
+const categoryRoutes = require('./routes/categories');
+const importRoutes   = require('./routes/import');
 
 const app = express();
 
-// Connect to MongoDB
+// Connect to MongoDB then seed default data
+const mongoose = require('mongoose');
 connectDB();
+mongoose.connection.once('open', async () => {
+  try {
+    const Category = require('./models/Category');
+    const { seedDefaultCategories } = require('./data/defaultCategories');
+    await seedDefaultCategories(Category);
+  } catch (e) {
+    console.error('Category seed failed:', e.message);
+  }
+});
 
 // Middleware
 app.use(helmet());
@@ -28,7 +40,9 @@ app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/networth', networthRoutes);
-app.use('/api/market',  marketRoutes);
+app.use('/api/market',      marketRoutes);
+app.use('/api/categories', categoryRoutes);
+app.use('/api/import',    importRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

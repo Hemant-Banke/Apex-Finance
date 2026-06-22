@@ -7,7 +7,8 @@ import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
-import { Filter, ArrowLeftRight, X, Pencil, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Filter, ArrowLeftRight, X, Pencil, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import ImportModal from '../components/import/ImportModal';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
 
@@ -18,6 +19,7 @@ export default function Transactions() {
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState({ account: '', type: '', page: 1 });
   const [showFilter, setShowFilter] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [editTx, setEditTx] = useState(null);
   const [deleteTx, setDeleteTx] = useState(null);
   const limit = 25;
@@ -53,10 +55,15 @@ export default function Transactions() {
           <p className="heading-sm mb-2">Transactions</p>
           <h1 className="heading-lg">{total} total</h1>
         </div>
-        <button onClick={() => setShowFilter(!showFilter)}
-          className={`btn-ghost ${showFilter ? '!border-[var(--color-border-hover)]' : ''}`}>
-          <Filter size={14} /> Filter
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => setShowImport(true)} className="btn-ghost">
+            <Upload size={14} /> Import
+          </button>
+          <button onClick={() => setShowFilter(!showFilter)}
+            className={`btn-ghost ${showFilter ? '!border-[var(--color-border-hover)]' : ''}`}>
+            <Filter size={14} /> Filter
+          </button>
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -151,6 +158,14 @@ export default function Transactions() {
           </p>
         </div>
       )}
+
+      {/* Import statement modal */}
+      <ImportModal
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        accounts={accounts}
+        onSuccess={() => { setShowImport(false); loadTxns(); }}
+      />
 
       {/* Edit Modal — AssetTransactionForm for buy/sell, TransactionForm for everything else */}
       <Modal open={!!editTx} onClose={() => setEditTx(null)}

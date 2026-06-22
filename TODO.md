@@ -1,0 +1,12 @@
+# TODO
+- Account Creation - Types picker
+- Import statement - Pdf
+    - ask password only if pdf is locked
+    - password unlock does not work
+- Better Datepicker
+- Expense and Income categories
+    - Defualt cateogries
+    - Predicting categories adaptively
+- Import transaction in account page
+- Filter imported transactions by date, to add specific transactions
+- 

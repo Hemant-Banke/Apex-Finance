@@ -1,9 +1,7 @@
 import { useState } from 'react';
 import { transactionsAPI } from '../../lib/api';
-import {
-  formatCurrency,
-  TRANSACTION_TYPES, EXPENSE_CATEGORIES, INCOME_CATEGORIES
-} from '../../lib/utils';
+import { formatCurrency, TRANSACTION_TYPES } from '../../lib/utils';
+import CategoryPicker from './CategoryPicker';
 import { ArrowRight } from 'lucide-react';
 
 const FORM_TYPES = TRANSACTION_TYPES.filter(t => !['buy', 'sell'].includes(t.value));
@@ -48,9 +46,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
 
   const isTransfer   = form.type === 'transfer';
   const isAdjustment = form.type === 'adjustment';
-  const cats = form.type === 'expense' ? EXPENSE_CATEGORIES
-             : form.type === 'income'  ? INCOME_CATEGORIES
-             : [];
+  const hasCategoryPicker = form.type === 'expense' || form.type === 'income';
 
   // Adjustment preview (only meaningful when we have the live account balance)
   const currentCash     = account?.balance ?? null;
@@ -175,17 +171,14 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
       )}
 
       {/* Category */}
-      {cats.length > 0 && (
+      {hasCategoryPicker && (
         <div>
           <label className="label block" style={{ marginBottom: 8 }}>Category</label>
-          <select value={form.category} onChange={e => set({ category: e.target.value })} className="input-field">
-            <option value="">Select category</option>
-            {cats.map(c => (
-              <option key={c} value={c}>
-                {c.charAt(0).toUpperCase() + c.slice(1).replace(/_/g, ' ')}
-              </option>
-            ))}
-          </select>
+          <CategoryPicker
+            value={form.category}
+            onChange={cat => set({ category: cat })}
+            transactionType={form.type}
+          />
         </div>
       )}
 

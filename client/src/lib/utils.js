@@ -52,10 +52,18 @@ export function getTransactionSign(type) {
   return ''; // transfer, adjustment: amount carries its own sign
 }
 
+export function formatCategoryCode(code) {
+  if (!code || code === 'general') return '';
+  // Strip prefix (tp_, ts_, tpu_, tsu_) from the most specific part
+  const last = code.split('/').pop();
+  const clean = last.replace(/^t[sp]u?_/, '');
+  return clean.charAt(0).toUpperCase() + clean.slice(1).replace(/_/g, ' ');
+}
+
 export function getTransactionName(tx) {
   const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : '';
-  if (tx.type === 'income')  return `Income: ${cap(tx.category)}`;
-  if (tx.type === 'expense') return `Expense: ${cap(tx.category)}`;
+  if (tx.type === 'income')  return `Income: ${formatCategoryCode(tx.category) || cap(tx.category)}`;
+  if (tx.type === 'expense') return `Expense: ${formatCategoryCode(tx.category) || cap(tx.category)}`;
   if (tx.type === 'transfer')   return 'Transfer';
   if (tx.type === 'adjustment') return 'Adjustment';
   if (tx.type === 'buy')  return `Buy Asset: ${cap(tx.assetSymbol || tx.assetName || 'Unknown')}`;
