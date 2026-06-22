@@ -35,16 +35,4 @@ async function getAccountCashBalance(accountId) {
   return (main[0]?.balance || 0) + (incoming[0]?.total || 0);
 }
 
-/**
- * Balance aggregation branches for use in $switch expressions.
- * Transfer is excluded (returns 0 via default) — callers that need transfer
- * handling must separately query incoming transfers.
- * For total net-worth aggregations, transfers net to zero so this is correct.
- */
-const balanceBranches = [
-  { case: { $in: ['$type', ['income', 'sell']] }, then: '$amount' },
-  { case: { $in: ['$type', ['expense', 'buy']] }, then: { $multiply: ['$amount', -1] } },
-  { case: { $eq: ['$type', 'adjustment'] }, then: '$amount' },
-];
-
-module.exports = { getAccountCashBalance, balanceBranches };
+module.exports = { getAccountCashBalance };

@@ -45,13 +45,7 @@ router.get('/:id', async (req, res) => {
 
     // Asset holdings (only for non-debt accounts) — served from stored AccountHoldings document
     if (!account.isDebt) {
-      let holdingsDoc = await AccountHoldings.findOne({ account: account._id }).lean();
-      // const holdingsEmpty = !holdingsDoc || Object.keys(holdingsDoc.holdings || {}).length === 0;
-      // if (holdingsEmpty) {
-      //   // Lazy-init or fix stale empty doc from old Map-type serialisation bug
-      //   await holdingsService.rebuildForAccount(account._id, req.user._id);
-      //   holdingsDoc = await AccountHoldings.findOne({ account: account._id }).lean();
-      // }
+      const holdingsDoc = await AccountHoldings.findOne({ account: account._id }).lean();
       accountObj.holdings = holdingsService.holdingsToArray(holdingsDoc);
     } else {
       accountObj.holdings = [];
@@ -73,13 +67,7 @@ router.get('/:id/holdings', async (req, res) => {
 
     if (account.isDebt) return res.json([]);
 
-    let holdingsDoc = await AccountHoldings.findOne({ account: req.params.id }).lean();
-    // const holdingsEmpty = !holdingsDoc || Object.keys(holdingsDoc.holdings || {}).length === 0;
-    // if (holdingsEmpty) {
-    //   await holdingsService.rebuildForAccount(req.params.id, req.user._id);
-    //   holdingsDoc = await AccountHoldings.findOne({ account: req.params.id }).lean();
-    // }
-
+    const holdingsDoc = await AccountHoldings.findOne({ account: req.params.id }).lean();
     res.json(holdingsService.holdingsToArray(holdingsDoc));
   } catch (error) {
     console.error(error);

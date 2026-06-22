@@ -10,9 +10,9 @@ const accountRoutes = require('./routes/accounts');
 const transactionRoutes = require('./routes/transactions');
 const dashboardRoutes = require('./routes/dashboard');
 const networthRoutes = require('./routes/networth');
-const marketRoutes   = require('./routes/market');
+const marketRoutes = require('./routes/market');
 const categoryRoutes = require('./routes/categories');
-const importRoutes   = require('./routes/import');
+const importRoutes = require('./routes/import');
 
 const app = express();
 
@@ -40,9 +40,9 @@ app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/networth', networthRoutes);
-app.use('/api/market',      marketRoutes);
+app.use('/api/market', marketRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/import',    importRoutes);
+app.use('/api/import', importRoutes);
 
 // Health check
 app.get('/api/health', (req, res) => {

@@ -46,7 +46,6 @@ export function AuthProvider({ children }) {
     localStorage.setItem('apex_token', token);
     localStorage.setItem('apex_user', JSON.stringify(userData));
     setUser(userData);
-    // networthAPI.ensure().catch(() => {});
     return userData;
   };
 

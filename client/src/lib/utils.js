@@ -37,19 +37,16 @@ export function getTransactionColor(type) {
     buy: 'text-[var(--color-accent)]',
     transfer: 'text-[var(--color-chart-warm)]',
     adjustment: 'text-[var(--color-text-secondary)]',
-    // legacy
-    deposit: 'text-[var(--color-success)]',
-    withdrawal: 'text-[var(--color-danger)]',
   };
   return colors[type] || 'text-[var(--color-text-secondary)]';
 }
 
 export function getTransactionSign(type) {
-  const positive = ['income', 'sell', 'deposit'];
-  const negative = ['expense', 'buy', 'withdrawal'];
+  const positive = ['income', 'sell'];
+  const negative = ['expense', 'buy'];
   if (positive.includes(type)) return '+';
   if (negative.includes(type)) return '-';
-  return ''; // transfer, adjustment: amount carries its own sign
+  return '';
 }
 
 export function formatCategoryCode(code) {
@@ -99,17 +96,6 @@ export const TRANSACTION_TYPES = [
   { value: 'adjustment', label: 'Adjustment' },
   { value: 'buy', label: 'Buy Asset' },
   { value: 'sell', label: 'Sell Asset' },
-];
-
-export const EXPENSE_CATEGORIES = [
-  'rent', 'food', 'transportation', 'utilities', 'entertainment',
-  'healthcare', 'education', 'shopping', 'insurance', 'subscriptions',
-  'travel', 'personal', 'gifts', 'other'
-];
-
-export const INCOME_CATEGORIES = [
-  'salary', 'freelance', 'business', 'rental', 'dividends',
-  'interest', 'capital_gains', 'gifts', 'other'
 ];
 
 export const ASSET_TYPES = [
