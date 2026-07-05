@@ -25,12 +25,17 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Don't redirect on auth endpoint failures (wrong password shows error in-page)
+    // Don't redirect for login/register — wrong credentials should show an in-page error.
+    // All other 401s (including /auth/me on session restore) redirect to login.
     const url = error.config?.url || '';
-    if (error.response?.status === 401 && !url.includes('/auth/')) {
+    const isUnauthenticatedEndpoint = url.includes('/auth/login') || url.includes('/auth/register');
+    if (error.response?.status === 401 && !isUnauthenticatedEndpoint) {
       localStorage.removeItem('apex_token');
       localStorage.removeItem('apex_user');
       window.location.href = '/login';
+      // Return a never-resolving promise so catch blocks in pages don't fire
+      // while the browser is navigating away
+      return new Promise(() => {});
     }
     return Promise.reject(error);
   }

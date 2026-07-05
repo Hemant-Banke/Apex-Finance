@@ -1,27 +1,10 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
+const { DAY_MS, YF_HEADERS } = require('../utils/constants');
+const { mapQuoteType, nowMs, toDateStr_from_ms, todayMs } = require('../utils/helpers');
 
 const router = express.Router();
 router.use(protect);
-
-const YF_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-  'Accept': 'application/json'
-};
-
-function mapQuoteType(quoteType) {
-  const map = {
-    EQUITY:         'stock',
-    ETF:            'etf',
-    CRYPTOCURRENCY: 'crypto',
-    MUTUALFUND:     'mutual_fund',
-    BOND:           'bond',
-    FUTURE:         'commodity',
-    CURRENCY:       'other',
-    INDEX:          'other'
-  };
-  return map[quoteType] || 'other';
-}
 
 // GET /api/market/search?q=QUERY
 router.get('/search', async (req, res) => {
@@ -59,19 +42,16 @@ router.get('/price', async (req, res) => {
   if (!symbol || !date) return res.status(400).json({ message: 'symbol and date are required' });
 
   try {
-    const requestedDate = new Date(date);
-    const today         = new Date();
-    today.setHours(0, 0, 0, 0);
+    const requestedDate = new Date(date).getTime();
+    const today         = todayMs();
 
     // For today/future, fetch a short window ending now
     const isToday = requestedDate >= today;
-    const endDate = new Date(isToday ? today : requestedDate);
-    endDate.setDate(endDate.getDate() + 1);
-    const startDate = new Date(endDate);
-    startDate.setDate(startDate.getDate() - 7); // 7-day window to cover weekends/holidays
+    const endDate = (isToday ? today : requestedDate) + DAY_MS;
+    const startDate = endDate - 7 * DAY_MS; // 7-day window to cover weekends/holidays
 
-    const period1 = Math.floor(startDate.getTime() / 1000);
-    const period2 = Math.floor(endDate.getTime()   / 1000);
+    const period1 = Math.floor(startDate / 1000);
+    const period2 = Math.floor(endDate   / 1000);
 
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=1d`;
     const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(5000) });
@@ -93,14 +73,14 @@ router.get('/price', async (req, res) => {
     // For historical — find the last valid close on or before the requested date
     const timestamps = result.timestamp || [];
     const closes     = result.indicators?.quote?.[0]?.close || [];
-    const endTs      = endDate.getTime() / 1000;
+    const endTs      = endDate / 1000;
 
     let price = null;
     let actualDate = null;
     for (let i = timestamps.length - 1; i >= 0; i--) {
       if (timestamps[i] < endTs && closes[i] != null) {
         price = closes[i];
-        actualDate = new Date(timestamps[i] * 1000).toISOString().split('T')[0];
+        actualDate = toDateStr_from_ms(timestamps[i] * 1000);
         break;
       }
     }
@@ -123,17 +103,20 @@ router.get('/ohlc', async (req, res) => {
 
   const daysNum = days ? parseInt(days, 10) : null;
 
+  // Set Chart Interval
   let interval = '1d';
   if (daysNum && daysNum <= 2)          interval = '1h';
   else if (!daysNum || daysNum > 365)   interval = '1wk';
 
-  const now      = Math.floor(Date.now() / 1000);
+  // Set Chart Period
+  const now = nowMs();
+  const period2      = Math.floor(now / 1000);
   const period1  = daysNum
-    ? Math.floor((Date.now() - daysNum * 24 * 60 * 60 * 1000) / 1000)
-    : Math.floor((Date.now() - 10 * 365 * 24 * 60 * 60 * 1000) / 1000);
+    ? Math.floor((now - daysNum * DAY_MS) / 1000)
+    : Math.floor((now - 10 * 365 * DAY_MS) / 1000);  // 10 Years
 
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${now}&interval=${interval}`;
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?period1=${period1}&period2=${period2}&interval=${interval}`;
     const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(10000) });
     if (!resp.ok) return res.status(502).json({ message: 'OHLC data unavailable' });
 
@@ -148,7 +131,7 @@ router.get('/ohlc', async (req, res) => {
     const candles = timestamps
       .map((ts, i) => {
         const d = new Date(ts * 1000);
-        const dateStr = interval === '1h'
+        const dateStr = (interval === '1h')
           ? `${d.toISOString().slice(0, 10)}T${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`
           : d.toISOString().slice(0, 10);
         return {

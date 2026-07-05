@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { ToastProvider } from './context/ToastContext';
 import AppShell from './components/layout/AppShell';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -35,7 +36,8 @@ function PublicRoute({ children }) {
 function App() {
   return (
     <AuthProvider>
-      <Router>
+      <ToastProvider>
+        <Router>
         <Routes>
           {/* Public routes */}
           <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
@@ -71,7 +73,8 @@ function App() {
           {/* Catch all */}
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
-      </Router>
+        </Router>
+      </ToastProvider>
     </AuthProvider>
   );
 }

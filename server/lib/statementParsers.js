@@ -21,18 +21,38 @@ function uid() { return `import_${Date.now()}_${++_txCounter}`; }
 
 // Produce a short, human-readable description from raw bank narration
 function cleanNarration(raw) {
+  if (!raw) return '';
+  
   let s = raw
-    .replace(/\b(UPIINT|IMPS|NEFT|RTGS|NWD|FT|NACH|ECS|AUTOPAY|MANDATE)\b[-–]*/gi, '')
-    .replace(/\b\d{10,}\b/g, '')
-    .replace(/[A-Z0-9]{4,}@[A-Z0-9]+/gi, '')
-    .replace(/\b(HDFC|UTIB|YESB|PUNB|SBIN|KKBK|CITI|FDRL|IDFB)\w*[-]?\w*\b/gi, '')
-    .replace(/-{2,}/g, ' ')
-    .replace(/\s{2,}/g, ' ')
+    // 1. Payment rail identifiers + trailing separators
+    .replace(/\b(UPI(INT)?|IMPS|NEFT|RTGS|NWD|FT|NACH|ECS|AUTOPAY|MANDATE|ACH|INB|MMT|CMS)\b[-–_/]*/gi, ' ')
+    // 2. Any IFSC code (4 letters + 0 + 6 alphanumeric is the RBI format)
+    .replace(/\b[A-Z]{4}0[A-Z0-9]{6}\b/gi, ' ')
+    // 3. UPI handles (vpa@bank)
+    .replace(/\b[A-Za-z0-9._-]{3,}@[A-Za-z0-9.-]+\b/g, ' ')
+    // 4. Long numeric IDs (UTR, transaction refs, phone numbers)
+    .replace(/\b\d{10,}\b/g, ' ')
+    // 5. Date-like patterns (DDMMYYYY, DD/MM/YY, YYYYMMDD)
+    .replace(/\b\d{2}[-/]?\d{2}[-/]?\d{2,4}\b/g, ' ')
+    // 6. Common junk fragments
+    .replace(/\b(REF|TXN|TRF|PYT|PMT|RCV|DR|CR|BIL|PAY|TO|FROM|VIA|BY)\b\s*[:#-]?/gi, ' ')
+    // 7. Standalone short alphanumeric tokens that look like codes (5+ chars mixed letters+digits)
+    .replace(/\b(?=\w*\d)(?=\w*[A-Za-z])\w{5,}\b/g, ' ')
+    // 8. Collapse separators and whitespace
+    .replace(/[-–_/]{2,}/g, ' ')
+    .replace(/\s+/g, ' ')
     .trim();
-  return s.split(' ').filter(Boolean)
+
+  s = s.split(' ').filter(Boolean)
     .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
-    .join(' ')
-    .slice(0, 80);
+    .join(' ');
+
+  // Word-boundary-aware truncation
+  if (s.length > 100) {
+    s = s.slice(0, 100).replace(/\s\S*$/, '').trim();
+  }
+
+  return s;
 }
 
 function buildTx({ date, narration, amount, type, source }) {

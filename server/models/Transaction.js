@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { TRANSACTION_TYPES, ASSET_TYPES } = require('../utils/constants');
 
 const transactionSchema = new mongoose.Schema({
   user: {
@@ -14,7 +15,7 @@ const transactionSchema = new mongoose.Schema({
   type: {
     type: String,
     required: [true, 'Please specify transaction type'],
-    enum: ['income', 'expense', 'transfer', 'adjustment', 'buy', 'sell']
+    enum: TRANSACTION_TYPES
   },
   category: {
     type: String,
@@ -42,13 +43,17 @@ const transactionSchema = new mongoose.Schema({
   },
   assetType: {
     type: String,
-    enum: ['stock', 'bond', 'mutual_fund', 'etf', 'crypto', 'gold', 'commodity', 'epf_nps', 'fd', 'other', null]
+    enum: ASSET_TYPES
   },
   units: {
     type: Number
   },
   pricePerUnit: {
     type: Number
+  },
+  usesCashBalance: {
+    type: Boolean,
+    default: false
   },
   // Transfer-related
   toAccount: {
@@ -58,7 +63,7 @@ const transactionSchema = new mongoose.Schema({
   notes: {
     type: String,
     trim: true,
-    maxlength: 500
+    maxlength: 100
   }
 }, {
   timestamps: true

@@ -1,13 +1,18 @@
 const express = require('express');
 const { body, validationResult } = require('express-validator');
-const Account = require('../models/Account');
-const Transaction = require('../models/Transaction');
+const Account             = require('../models/Account');
+const Transaction         = require('../models/Transaction');
 const DailyAccountBalance = require('../models/DailyAccountBalance');
-const AccountHoldings = require('../models/AccountHoldings');
-const { protect } = require('../middleware/auth');
-const { getAccountCashBalance } = require('../utils/balance');
-const dv = require('../services/dailyValueService');
-const holdingsService = require('../services/holdingsService');
+const AccountHoldings     = require('../models/AccountHoldings');
+const DailyNetworth       = require('../models/DailyNetWorth');
+
+const { protect }             = require('../middleware/auth');
+const { DAY_MS, ACCOUNT_TYPES }              = require('../utils/constants');
+const { midnight, toDateStr, toDateStr_from_ms, todayStr } = require('../utils/helpers');
+const { getAccountBalance, getAccountAssetBalance }   = require('../services/accountBalance');
+const { fetchLatestPrices }   = require('../services/marketDataService');
+const txService               = require('../services/transactionService');
+const holdingsService         = require('../services/holdingsService');
 
 const router = express.Router();
 router.use(protect);
@@ -15,17 +20,14 @@ router.use(protect);
 // @route   GET /api/accounts
 router.get('/', async (req, res) => {
   try {
-    const accounts = await Account.find({ user: req.user._id }).sort({ createdAt: -1 });
+    const accounts       = await Account.find({ user: req.user._id }).sort({ createdAt: -1 });
+    const fetchLatestBal = req.query.fetchLatestBal === 'true';
 
-    const accountsWithBalance = await Promise.all(
-      accounts.map(async (account) => {
-        const accountObj = account.toObject();
-        accountObj.balance = await getAccountCashBalance(account._id);
-        return accountObj;
-      })
-    );
+    accounts.map(account => {
+      accounts.balanceDetail = await getAccountBalance(account, req.user, fetchLatestBal);
+    })
 
-    res.json(accountsWithBalance);
+    res.json(accounts);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -36,22 +38,25 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const account = await Account.findOne({ _id: req.params.id, user: req.user._id });
-    if (!account) {
-      return res.status(404).json({ message: 'Account not found' });
-    }
+    if (!account) return res.status(404).json({ message: 'Account not found' });
+    const obj = account.toObject();
 
-    const accountObj = account.toObject();
-    accountObj.balance = await getAccountCashBalance(account._id);
+    // Fetch both balance-related docs in parallel
+    const [acctBalanceDoc, holdings] = await Promise.all([
+      DailyAccountBalance.findOne({ account: account._id, user: req.user._id }).lean(),
+      account.isDebt ? [] : AccountHoldings.findOne({ account: account._id, user: req.user._id }).lean().holdings,
+    ]);
 
-    // Asset holdings (only for non-debt accounts) — served from stored AccountHoldings document
-    if (!account.isDebt) {
-      const holdingsDoc = await AccountHoldings.findOne({ account: account._id }).lean();
-      accountObj.holdings = holdingsService.holdingsToArray(holdingsDoc);
-    } else {
-      accountObj.holdings = [];
-    }
+    // Holdings (non-debt accounts only)
+    obj.holdings = holdings;
 
-    res.json(accountObj);
+    // Expose the pre-computed balance time series for charting
+    obj.accountBalances = acctBalanceDoc ?? null;
+
+    const fetchLatestBal  = req.query.fetchLatestBal === 'true';
+    obj.balanceDetail     = await getAccountBalance(account, req.user, fetchLatestBal, acctBalanceDoc, holdings);
+
+    res.json(obj);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -59,45 +64,76 @@ router.get('/:id', async (req, res) => {
 });
 
 // @route   GET /api/accounts/:id/holdings
-// Returns the full AccountHoldings document as an array (builds lazily if needed)
 router.get('/:id/holdings', async (req, res) => {
   try {
     const account = await Account.findOne({ _id: req.params.id, user: req.user._id }).lean();
     if (!account) return res.status(404).json({ message: 'Account not found' });
-
     if (account.isDebt) return res.json([]);
 
-    const holdingsDoc = await AccountHoldings.findOne({ account: req.params.id }).lean();
-    res.json(holdingsService.holdingsToArray(holdingsDoc));
+    const holdingsDoc = await AccountHoldings.findOne({ account: req.params.id, user: req.user._id }).lean();
+    res.json(holdingsDoc.holdings);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
   }
 });
 
-// @route   GET /api/accounts/:id/daily?days=N
-// Returns [{date, value}] for the account's daily cash balance history.
+// @route   GET /api/accounts/:id/daily?days=N&fetchLatestBal=true
+// Returns [{ date, cashValue, assetValue, totalValue }] for the account balance history.
+// cashTS (length N) covers startDate → T (today).
+// assetTS (length N-1) covers startDate → T-1 (yesterday, settled).
+// The last entry (today) always has cashValue from cashTS; assetValue is:
+//   - null           if fetchLatestBal is not set (no settled prices for today yet)
+//   - live price sum if fetchLatestBal=true
 router.get('/:id/daily', async (req, res) => {
   try {
     const account = await Account.findOne({ _id: req.params.id, user: req.user._id }).lean();
     if (!account) return res.status(404).json({ message: 'Account not found' });
 
-    const doc = await DailyAccountBalance.findOne({ account: req.params.id }).lean();
-    if (!doc || !doc.values.length) return res.json([]);
+    const [doc, holdingsDoc] = await Promise.all([
+      DailyAccountBalance.findOne({ account: req.params.id, user: req.user._id }).lean(),
+      account.isDebt ? null : AccountHoldings.findOne({ account: req.params.id, user: req.user._id }).lean(),
+    ]);
+    if (!doc || !(doc.cashTS?.length || doc.assetTS?.length)) return res.json([]);
 
-    const docStartMs = doc.startDate.getTime();
-    let sliceStart   = 0;
+    const cashTS     = doc.cashTS  || [];
+    const assetTS    = doc.assetTS || [];
+    const docStartMs = midnight(doc.startDate);
+    const totalDays  = cashTS.length; // N entries, last = T
+    const reqDays = parseInt(req.query.days) || null;
 
+    let sliceStart = 0;
     if (req.query.days) {
-      const cutoffMs = doc.endDate.getTime() - (parseInt(req.query.days) - 1) * dv.DAY_MS;
+      const cutoffMs = midnight(doc.endDate) - (parseInt(req.query.days) - 1) * DAY_MS;
       if (cutoffMs > docStartMs) {
-        sliceStart = Math.round((cutoffMs - docStartMs) / dv.DAY_MS);
+        sliceStart = Math.round((cutoffMs - docStartMs) / DAY_MS);
       }
     }
 
-    const result = [];
-    for (let i = Math.max(0, sliceStart); i < doc.values.length; i++) {
-      result.push({ date: dv.toDateStr(new Date(docStartMs + i * dv.DAY_MS)), value: doc.values[i] });
+    // Live asset value for today (T), if requested
+    let liveAssetValueToday = null;
+    if (req.query.fetchLatestBal === 'true' && !account.isDebt) {
+      liveAssetValueToday = await getAccountAssetBalance(account, req.user, true, doc, holdingsDoc.holdings)?.value;
+    }
+
+    const todayStr = todayStr();
+    const result   = [];
+    for (let i = Math.max(0, sliceStart); i < totalDays; i++) {
+      const dateStr   = toDateStr_from_ms(docStartMs + i * DAY_MS);
+      const cashValue = cashTS[i] ?? 0;
+      // assetTS[i] exists for i < N-1 (settled up to T-1)
+      // For i = N-1 (today): use live fetch result or null
+      const isToday   = dateStr === todayStr;
+      const assetValue = isToday
+        ? liveAssetValueToday
+        : (assetTS[i] ?? null);
+
+      result.push({
+        date:       dateStr,
+        cashValue,
+        assetValue,
+        totalValue: cashValue + (assetValue ?? 0),
+      });
     }
 
     res.json(result);
@@ -110,18 +146,27 @@ router.get('/:id/daily', async (req, res) => {
 // @route   POST /api/accounts
 router.post('/', [
   body('name').trim().notEmpty().withMessage('Account name is required'),
-  body('type').isIn(['bank', 'brokerage', 'retirement', 'debt', 'wallet', 'other']).withMessage('Invalid account type'),
+  body('type').isIn(ACCOUNT_TYPES).withMessage('Invalid account type'),
   body('initialBalance').optional().isNumeric().withMessage('Initial balance must be a number')
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
     const { initialBalance, ...accountData } = req.body;
     const account = await Account.create({ ...accountData, user: req.user._id });
 
+    // Create related stores
+    await Promise.all([
+      DailyAccountBalance.create({ account: account._id, user: req.user._id, startDate: new Date(), endDate: new Date() }),
+      AccountHoldings.create({ account: account._id, user: req.user._id }),
+    ]);
+
+    // Create NetWorth store if it doesn't already exist
+    const nwDoc = await DailyNetWorth.findOne({ user: userId }).select('user').lean();
+    if (!nwDoc) await DailyNetworth.create({ user: req.user._id, startDate: new Date(), endDate: new Date() });
+
+    // Make initial transaction
     const initAmount = parseFloat(initialBalance);
     if (!isNaN(initAmount) && initAmount !== 0) {
       const adjustmentAmount = account.isDebt ? -Math.abs(initAmount) : initAmount;
@@ -134,8 +179,7 @@ router.post('/', [
         notes:    'Opening balance',
         date:     new Date()
       });
-      // Update both networth and account balance stores
-      dv.onTransactionCreate(req.user._id, openingTx).catch(console.error);
+      txService.onCreate(req.user._id, openingTx).catch(console.error);
     }
 
     res.status(201).json(account);
@@ -153,11 +197,7 @@ router.put('/:id', async (req, res) => {
       req.body,
       { new: true, runValidators: true }
     );
-
-    if (!account) {
-      return res.status(404).json({ message: 'Account not found' });
-    }
-
+    if (!account) return res.status(404).json({ message: 'Account not found' });
     res.json(account);
   } catch (error) {
     console.error(error);
@@ -169,14 +209,12 @@ router.put('/:id', async (req, res) => {
 router.delete('/:id', async (req, res) => {
   try {
     const account = await Account.findOneAndDelete({ _id: req.params.id, user: req.user._id });
-    if (!account) {
-      return res.status(404).json({ message: 'Account not found' });
-    }
+    if (!account) return res.status(404).json({ message: 'Account not found' });
 
     await Promise.all([
       Transaction.deleteMany({ account: account._id }),
-      DailyAccountBalance.deleteOne({ account: account._id }),
-      AccountHoldings.deleteOne({ account: account._id }),
+      DailyAccountBalance.deleteOne({ account: account._id, user: req.user._id }),
+      AccountHoldings.deleteOne({ account: account._id, user: req.user._id }),
     ]);
 
     res.json({ message: 'Account and related data deleted' });

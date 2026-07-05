@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { ACCOUNT_TYPES } = require('../utils/constants');
 
 const accountSchema = new mongoose.Schema({
   user: {
@@ -15,12 +16,12 @@ const accountSchema = new mongoose.Schema({
   type: {
     type: String,
     required: [true, 'Please specify account type'],
-    enum: ['bank', 'brokerage', 'retirement', 'debt', 'wallet', 'other']
+    enum: ACCOUNT_TYPES
   },
   description: {
     type: String,
     trim: true,
-    maxlength: 500
+    maxlength: 100
   },
   currency: {
     type: String,

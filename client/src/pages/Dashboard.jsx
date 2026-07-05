@@ -4,6 +4,7 @@ import { dashboardAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { formatCurrency, formatDate, getTransactionColor, getTransactionSign, getTransactionName } from '../lib/utils';
 import { TrendingUp, TrendingDown, ArrowUpRight, Wallet, BarChart3, ArrowRight } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import ChartTooltip from '../components/charts/ChartTooltip';
@@ -26,6 +27,7 @@ function StatCard({ label, value, sub, color, icon: Icon }) {
 
 export default function Dashboard() {
   const { user } = useAuth();
+  const toast = useToast();
   const [summary,  setSummary]  = useState(null);
   const [incExp,   setIncExp]   = useState([]);
   const [holdings, setHoldings] = useState([]);
@@ -43,7 +45,7 @@ export default function Dashboard() {
       setSummary(s.data);
       setIncExp(ie.data);
       setHoldings(h.data);
-    } catch (e) { console.error('Dashboard load error:', e); }
+    } catch (e) { toast.error(e.response?.data?.message || 'Failed to load dashboard'); }
     finally { setLoading(false); }
   };
 

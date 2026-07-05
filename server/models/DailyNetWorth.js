@@ -2,9 +2,10 @@ const mongoose = require('mongoose');
 
 /**
  * One document per user.
- * values[i] = cumulative net worth on (startDate + i days).
+ * valuesTS = cumulative net worth time series. [0, ..., T-1]
  * startDate/endDate stored as UTC-midnight Date objects.
- * lastValue mirrors values[values.length-1] for fast current-networth reads.
+ * settledValue mirrors T-1 value for fast last net-worth reads.
+ * lastCashValue mirrors T value for fast last cash balance reads.
  */
 const dailyNetWorthSchema = new mongoose.Schema({
   user: {
@@ -15,8 +16,9 @@ const dailyNetWorthSchema = new mongoose.Schema({
   },
   startDate:  { type: Date, required: true },
   endDate:    { type: Date, required: true },
-  values:     { type: [Number], default: [] },
-  lastValue:  { type: Number, default: 0 }
+  valuesTS:     { type: [Number], default: [] },
+  settledValue:  { type: Number, default: 0 },
+  lastCashValue:  { type: Number, default: 0 },
 }, { timestamps: true });
 
 module.exports = mongoose.model('DailyNetWorth', dailyNetWorthSchema);

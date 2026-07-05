@@ -16,6 +16,7 @@ import {
   ArrowLeft, Plus, Pencil, X, TrendingUp, Shield, CreditCard,
   Landmark, Wallet, Briefcase, Package, BarChart2
 } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
 
@@ -27,6 +28,7 @@ const iconMap = {
 export default function AccountDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const toast = useToast();
   const [account, setAccount]       = useState(null);
   const [txns, setTxns]             = useState([]);
   const [allAccounts, setAllAccounts] = useState([]);
@@ -49,7 +51,7 @@ export default function AccountDetail() {
       ]);
       setAccount(a.data);
       setTxns(t.data.transactions);
-    } catch (e) { console.error(e); }
+    } catch (e) { toast.error(e.response?.data?.message || 'Failed to load account'); }
     finally { setLoading(false); }
   };
 
@@ -57,7 +59,7 @@ export default function AccountDetail() {
     try {
       const res = await accountsAPI.getAll();
       setAllAccounts(res.data.filter(a => a._id !== id));
-    } catch (e) { console.error(e); }
+    } catch (e) { toast.error(e.response?.data?.message || 'Failed to load accounts'); }
     setModal(true);
   };
 
@@ -68,14 +70,14 @@ export default function AccountDetail() {
       try {
         const res = await accountsAPI.getAll();
         setAllAccounts(res.data.filter(a => a._id !== id));
-      } catch (e) { console.error(e); }
+      } catch (e) { toast.error(e.response?.data?.message || 'Failed to load accounts'); }
     }
     setEditTx(tx);
   };
 
   const delTx = async (txId) => {
     try { await transactionsAPI.delete(txId); load(); setChartKey(k => k + 1); }
-    catch (e) { console.error(e); }
+    catch (e) { toast.error(e.response?.data?.message || 'Failed to delete transaction'); }
   };
 
   const handleDeleteClick = (tx) => {

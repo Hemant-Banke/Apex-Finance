@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { dashboardAPI } from '../lib/api';
 import { formatCurrency, CHART_COLORS } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { useToast } from '../context/ToastContext';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import ChartTooltip from '../components/charts/ChartTooltip';
 import HoldingsDonut from '../components/charts/HoldingsDonut';
@@ -17,6 +18,7 @@ function Empty({ text }) {
 }
 
 export default function Analytics() {
+  const toast = useToast();
   const [ie,       setIe]       = useState([]);
   const [aa,       setAa]       = useState([]);
   const [ec,       setEc]       = useState([]);
@@ -45,7 +47,7 @@ export default function Analytics() {
         name: x._id ? x._id.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Other'
       })));
       setHoldings(h.data);
-    } catch (e) { console.error(e); }
+    } catch (e) { toast.error(e.response?.data?.message || 'Failed to load analytics'); }
     finally { setLoading(false); }
   };
 

@@ -2,10 +2,11 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
-const { protect } = require('../middleware/auth');
-const { getAccountCashBalance } = require('../utils/balance');
-const dv = require('../services/dailyValueService');
-const holdings = require('../services/holdingsService');
+
+const { protect }               = require('../middleware/auth');
+const { TRANSACTION_TYPES, ASSET_TRANSACTION_TYPES }     = require('../utils/constants');
+const { getAccountCashBalance } = require('../services/accountBalance');
+const txService                 = require('../services/transactionService');
 
 const router = express.Router();
 router.use(protect);
@@ -43,9 +44,9 @@ router.get('/', async (req, res) => {
 // POST /api/transactions
 router.post('/', [
   body('account').notEmpty().withMessage('Account is required'),
-  body('type').isIn(['income', 'expense', 'transfer', 'adjustment', 'buy', 'sell']).withMessage('Invalid transaction type'),
+  body('type').isIn(TRANSACTION_TYPES).withMessage('Invalid transaction type'),
   body('amount').custom((value, { req }) => {
-    if (['buy', 'sell'].includes(req.body.type)) return true;
+    if (ASSET_TRANSACTION_TYPES.includes(req.body.type)) return true;
     if (value === undefined || value === null || String(value).trim() === '')
       throw new Error('Amount is required');
     if (isNaN(Number(value)))
@@ -62,8 +63,7 @@ router.post('/', [
     if (!account) return res.status(404).json({ message: 'Account not found' });
 
     const { type } = req.body;
-
-    if (['buy', 'sell'].includes(type) && account.isDebt)
+    if (ASSET_TRANSACTION_TYPES.includes(type) && account.isDebt)
       return res.status(400).json({ message: 'Buy/Sell transactions are not available on debt accounts' });
 
     if (type === 'transfer') {
@@ -75,33 +75,29 @@ router.post('/', [
       if (!toAccount) return res.status(404).json({ message: 'Destination account not found' });
     }
 
+    // Asset Transaction Amount
     let transactionData = { ...req.body, user: req.user._id };
-    if (['buy', 'sell'].includes(type) && req.body.units && req.body.pricePerUnit)
+    if (ASSET_TRANSACTION_TYPES.includes(type) && req.body.units && req.body.pricePerUnit)
       transactionData.amount = parseFloat(req.body.units) * parseFloat(req.body.pricePerUnit);
 
+    // Transaction Amount Checks
     const amount = parseFloat(transactionData.amount);
-
-    if (type === 'buy') {
-      const cashBalance = await getAccountCashBalance(account._id);
+    if (type === 'buy' && transactionData.usesCashBalance) {
+      const cashBalance = await getAccountCashBalance(account, req.user);
       if (amount > cashBalance)
         return res.status(400).json({ message: `Insufficient cash balance. Available: ${cashBalance.toFixed(2)}` });
     }
 
     if (type === 'adjustment' && !account.isDebt) {
-      const cashBalance = await getAccountCashBalance(account._id);
+      const cashBalance = await getAccountCashBalance(account, req.user);
       if (cashBalance + amount < 0)
         return res.status(400).json({ message: `Adjustment would result in negative cash balance. Current: ${cashBalance.toFixed(2)}` });
     }
 
     const transaction = await Transaction.create(transactionData);
 
-    // Update daily net worth store (non-blocking — errors are logged, not surfaced)
-    dv.onTransactionCreate(req.user._id, transaction).catch(console.error);
-
-    // Update holdings for buy/sell (incremental if possible, full rebuild as fallback)
-    if (['buy', 'sell'].includes(type)) {
-      holdings.applyTransaction(account._id, req.user._id, transaction).catch(console.error);
-    }
+    // Update stores (non-blocking — errors are logged, not surfaced)
+    txService.onCreate(req.user._id, transaction).catch(console.error);
 
     const populated = await Transaction.findById(transaction._id)
       .populate('account',   'name type')
@@ -127,13 +123,8 @@ router.put('/:id', async (req, res) => {
       { new: true, runValidators: true }
     ).populate('account', 'name type');
 
-    // Update daily net worth store
-    dv.onTransactionUpdate(req.user._id, oldTx, req.body).catch(console.error);
-
-    // Rebuild holdings if the old or new type involves assets
-    if (['buy', 'sell'].includes(oldTx.type) || ['buy', 'sell'].includes(req.body.type)) {
-      holdings.rebuildForAccount(oldTx.account, req.user._id).catch(console.error);
-    }
+    // Update stores
+    txService.onUpdate(req.user._id, oldTx, req.body).catch(console.error);
 
     res.json(transaction);
   } catch (err) {
@@ -148,15 +139,43 @@ router.delete('/:id', async (req, res) => {
     const transaction = await Transaction.findOneAndDelete({ _id: req.params.id, user: req.user._id });
     if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
 
-    // Update daily net worth store
-    dv.onTransactionDelete(req.user._id, transaction).catch(console.error);
-
-    // Rebuild holdings if it was a buy/sell
-    if (['buy', 'sell'].includes(transaction.type)) {
-      holdings.rebuildForAccount(transaction.account, req.user._id).catch(console.error);
-    }
+    // Update stores
+    txService.onDelete(req.user._id, transaction).catch(console.error);
 
     res.json({ message: 'Transaction deleted' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// POST /api/transactions/bulk
+// Insert multiple transactions and rebuild affected stores in one batch pass.
+// Body: { transactions: [ { account, type, amount, date, ... }, ... ] }
+router.post('/bulk', async (req, res) => {
+  try {
+    const { transactions } = req.body;
+    if (!Array.isArray(transactions) || !transactions.length) {
+      return res.status(400).json({ message: 'Transactions array is required' });
+    }
+    const created = await txService.bulkCreate(req.user._id, transactions);
+    res.status(201).json({ count: created.length, transactions: created });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
+// DELETE /api/transactions/bulk
+// Body: { ids: [ "txId1", "txId2", ... ] }
+router.delete('/bulk', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || !ids.length) {
+      return res.status(400).json({ message: 'Transaction Ids array is required' });
+    }
+    await txService.bulkDelete(req.user._id, ids);
+    res.json({ message: `${ids.length} transaction(s) deleted` });
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: 'Server error' });

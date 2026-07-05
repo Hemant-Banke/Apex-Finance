@@ -7,12 +7,14 @@ import {
   Plus, Wallet, TrendingUp, Shield, CreditCard,
   Landmark, Briefcase, ChevronRight
 } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 
 const iconMap = { bank: Landmark, brokerage: TrendingUp, retirement: Shield, debt: CreditCard, wallet: Wallet, other: Briefcase };
 
 const EMPTY_FORM = { name: '', type: 'bank', description: '', initialBalance: '' };
 
 export default function Accounts() {
+  const toast = useToast();
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState(false);
@@ -23,7 +25,8 @@ export default function Accounts() {
 
   useEffect(() => { load(); }, []);
   const load = async () => {
-    try { setAccounts((await accountsAPI.getAll()).data); } catch(e) { console.error(e); }
+    try { setAccounts((await accountsAPI.getAll()).data); }
+    catch(e) { toast.error(e.response?.data?.message || 'Failed to load accounts'); }
     finally { setLoading(false); }
   };
 
@@ -56,7 +59,8 @@ export default function Accounts() {
 
   const del = async (id) => {
     if (!confirm('Delete this account and all its transactions?')) return;
-    try { await accountsAPI.delete(id); load(); } catch(e) { console.error(e); }
+    try { await accountsAPI.delete(id); load(); }
+    catch(e) { toast.error(e.response?.data?.message || 'Failed to delete account'); }
   };
 
   const isDebt = form.type === 'debt';

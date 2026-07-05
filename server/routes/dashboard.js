@@ -18,40 +18,32 @@ router.get('/summary', async (req, res) => {
 
     const [accounts, dailyBalances, holdingsDocs, nwDoc] = await Promise.all([
       Account.find({ user: userId }).lean(),
-      DailyAccountBalance.find({ user: userId }).select('account lastValue').lean(),
+      DailyAccountBalance.find({ user: userId }).select('account settledValue lastCashValue').lean(),
       AccountHoldings.find({ user: userId }).lean(),
-      DailyNetWorth.findOne({ user: userId }).select('lastValue').lean(),
+      DailyNetWorth.findOne({ user: userId }).select('settledValue lastCashValue').lean(),
     ]);
 
-    // Cash balance per account from pre-computed store
-    const cashByAccount = {};
-    dailyBalances.forEach(d => { cashByAccount[d.account.toString()] = d.lastValue || 0; });
-
-    // Book value of assets per account from holdings store
-    const investedByAccount = {};
-    holdingsDocs.forEach(doc => {
-      const holdings = doc.holdings || {};
-      const total = Object.values(holdings).reduce((sum, h) => sum + (h.totalInvested || 0), 0);
-      investedByAccount[doc.account.toString()] = total;
-    });
+    // Settled balance per account from pre-computed store (T-1 cash + T-1 assets)
+    const settledByAccount = {};
+    dailyBalances.forEach(d => { settledByAccount[d.account.toString()] = d.settledValue || 0; });
 
     let totalAssets      = 0;
     let totalLiabilities = 0;
     accounts.forEach(acc => {
-      const id   = acc._id.toString();
-      const cash = cashByAccount[id] || 0;
+      const id      = acc._id.toString();
+      const settled = settledByAccount[id] || 0;
       if (acc.isDebt) {
-        totalLiabilities += Math.abs(cash);
+        totalLiabilities += Math.abs(settled);
       } else {
-        totalAssets += cash + (investedByAccount[id] || 0);
+        totalAssets += settled;
       }
     });
 
     // Holdings count — unique symbols with qty > 0 across all accounts
     const symbolsSeen = new Set();
     holdingsDocs.forEach(doc => {
-      Object.entries(doc.holdings || {}).forEach(([sym, h]) => {
-        if ((h.qty || 0) > 0) symbolsSeen.add(sym);
+      (doc.holdings || {}).forEach(h => {
+        if ((h.units || 0) > 0) symbolsSeen.add(h.assetSymbol);
       });
     });
 
@@ -76,7 +68,7 @@ router.get('/summary', async (req, res) => {
     const monthlyExpense = monthlyFlow.find(f => f._id === 'expense')?.total || 0;
 
     res.json({
-      netWorth:         nwDoc?.lastValue ?? (totalAssets - totalLiabilities),
+      netWorth:         nwDoc?.settledValue ?? (totalAssets - totalLiabilities),
       totalAssets,
       totalLiabilities,
       monthlyIncome,
@@ -100,18 +92,18 @@ router.get('/holdings', async (req, res) => {
 
     const merged = {};
     holdingsDocs.forEach(doc => {
-      Object.entries(doc.holdings || {}).forEach(([sym, h]) => {
-        if (!merged[sym]) {
-          merged[sym] = { symbol: sym, name: h.name, type: h.type, qty: 0, totalInvested: 0, avgCostPerUnit: 0 };
+      (doc.holdings || {}).forEach(h => {
+        if (!merged[h.assetSymbol]) {
+          merged[h.assetSymbol] = h;
         }
-        merged[sym].qty           += h.qty           || 0;
-        merged[sym].totalInvested += h.totalInvested || 0;
+        merged[sym].units           += h.units           || 0;
+        merged[sym].totalInvested   += h.totalInvested || 0;
       });
     });
 
     // Recompute blended avgCostPerUnit after merge
     Object.values(merged).forEach(h => {
-      h.avgCostPerUnit = h.qty > 0 ? h.totalInvested / h.qty : 0;
+      h.avgCostPerUnit = h.units > 0 ? h.totalInvested / h.units : 0;
     });
 
     res.json(Object.values(merged).filter(h => h.totalInvested > 0));
@@ -129,12 +121,12 @@ router.get('/asset-allocation', async (req, res) => {
 
     const byType = {};
     holdingsDocs.forEach(doc => {
-      Object.entries(doc.holdings || {}).forEach(([sym, h]) => {
+      (doc.holdings || {}).forEach(h => {
         if ((h.totalInvested || 0) <= 0) return;
-        const t = h.type || 'other';
+        const t = h.assetType || 'other';
         if (!byType[t]) byType[t] = { _id: t, totalInvested: 0, assets: new Set() };
         byType[t].totalInvested += h.totalInvested;
-        byType[t].assets.add(sym);
+        byType[t].assets.add(h.assetSymbol);
       });
     });
 

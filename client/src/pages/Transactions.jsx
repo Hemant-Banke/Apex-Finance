@@ -8,11 +8,13 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
 import { Filter, ArrowLeftRight, X, Pencil, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { useToast } from '../context/ToastContext';
 import ImportModal from '../components/import/ImportModal';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
 
 export default function Transactions() {
+  const toast = useToast();
   const [txns, setTxns] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [total, setTotal] = useState(0);
@@ -36,12 +38,13 @@ export default function Transactions() {
       const r = await transactionsAPI.getAll(p);
       setTxns(r.data.transactions);
       setTotal(r.data.total);
-    } catch(e) { console.error(e); }
+    } catch(e) { toast.error(e.response?.data?.message || 'Failed to load transactions'); }
     finally { setLoading(false); }
   };
 
   const del = async (id) => {
-    try { await transactionsAPI.delete(id); loadTxns(); } catch(e) { console.error(e); }
+    try { await transactionsAPI.delete(id); loadTxns(); }
+    catch(e) { toast.error(e.response?.data?.message || 'Failed to delete transaction'); }
   };
 
   const pages = Math.ceil(total / limit);

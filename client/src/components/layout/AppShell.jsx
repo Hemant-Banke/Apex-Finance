@@ -7,6 +7,7 @@ import {
 import ApexLogo from '../ui/ApexLogo';
 import CubeGrid, { GRID_PERIOD } from '../ui/CubeGrid';
 import { networthAPI } from '../../lib/api';
+import { useToast } from '../../context/ToastContext';
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Overview' },
@@ -18,11 +19,13 @@ const nav = [
 export default function AppShell({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const toast = useToast();
   const [rebuilding, setRebuilding] = useState(false);
 
   const handleRebuild = async () => {
     setRebuilding(true);
-    try { await networthAPI.rebuild(); } catch (e) { console.error(e); }
+    try { await networthAPI.rebuild(); toast.success('Stores rebuilt'); }
+    catch (e) { toast.error(e.response?.data?.message || 'Rebuild failed'); }
     finally { setRebuilding(false); }
   };
 
