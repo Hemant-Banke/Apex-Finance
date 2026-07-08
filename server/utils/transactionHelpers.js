@@ -1,10 +1,17 @@
-const { ASSET_TRANSACTION_TYPES } = require("../utils/constants");
+const { ASSET_TRANSACTION_TYPES } = require('../utils/constants');
+const { midnight } = require('../utils/helpers');
+
+/** Normalize an account reference (ObjectId | populated doc | string) to a string id. */
+function accountIdOf(ref) {
+  if (!ref) return null;
+  return (ref._id ?? ref).toString();
+}
 
 /** Cash impact of a transaction on one specific account (source or destination). */
 function accountCashImpact(tx, accountId) {
   const aid = accountId?.toString();
-  const src = (tx.account?._id ?? tx.account)?.toString();
-  const dst = (tx.toAccount?._id ?? tx.toAccount)?.toString();
+  const src = accountIdOf(tx.account);
+  const dst = accountIdOf(tx.toAccount);
 
   if (src === aid) {
     switch (tx.type) {
@@ -22,7 +29,7 @@ function accountCashImpact(tx, accountId) {
   return 0;
 }
 
-/** Directional Asset impact of a transaction on one specific account (source or destination). */
+/** Directional asset-quantity impact of a transaction (+1 acquires units, -1 releases). */
 function directionalAssetImpact(txType) {
   switch (txType) {
     case 'sell':              return -1;
@@ -30,33 +37,32 @@ function directionalAssetImpact(txType) {
     case 'buy':               return 1;
     default:                  return 0;
   }
-  return 0;
 }
 
 /**
  * Produce the inverse of a transaction so its impact can be subtracted via delta.
- * buy-sell swap cancels the asset delta; adjustment/transfer amount negation cancels cash.
+ * buy↔sell swap cancels the asset delta; adjustment/transfer amount negation cancels cash.
  */
 function flipTx(tx) {
   if (tx.type === 'buy')     return { ...tx, type: 'sell' };
   if (tx.type === 'sell')    return { ...tx, type: 'buy' };
   if (tx.type === 'income')  return { ...tx, type: 'expense' };
   if (tx.type === 'expense') return { ...tx, type: 'income' };
-  return { ...tx, amount: -tx.amount }; // adjustment, transfer
+  return { ...tx, amount: -tx.amount }; // adjustment, transfer, calibration
 }
 
 /**
- * Build a Cash impactsByDay map for transactions.
+ * Build a cash impactsByDay map for the given account.
  *
- * @param {Object[]}  txns  Transactions array
- * @param {string} aid      Account ID
+ * @param {Object[]} txns  Transactions array (cash + asset txns for the account)
+ * @param {string}   aid   Account ID
  * @returns {{ [dayMs: number]: number }}
  */
 function buildCashImpactMap(txns, aid) {
   const cashImpacts = {};
   for (const tx of txns) {
     const delta = accountCashImpact(tx, aid);
-    if (delta != 0) {
+    if (delta !== 0) {
       const k = midnight(new Date(tx.date));
       cashImpacts[k] = (cashImpacts[k] || 0) + delta;
     }
@@ -65,52 +71,68 @@ function buildCashImpactMap(txns, aid) {
 }
 
 /**
- * Build an Account-Transactions map for transactions.
+ * Partition a flat, date-sorted transaction list into per-account cash/asset buckets,
+ * and collect the global set of traded symbols for a single batched price fetch.
  *
- * @param {Object[]}  txns  Transactions sorted by date asc.
- * @returns {{ [aid: string]: Object }}  Map of accountId → Transactions Objects (sorted by date asc) for that account.
+ * @param {Object[]} txns  Transactions sorted by date asc.
+ * @returns {{
+ *   byAccount: { [aid: string]: { cashTxns, assetTxns, cashStartMs, assetStartMs } },
+ *   assets: Array<{ assetSymbol: string, assetType: string }>,
+ *   assetStartMs: number
+ * }}
  */
 function buildAccountTxnsMap(txns) {
-  const accountTxns = {};
-  let assetsSeen = new Set();
+  const byAccount = {};
+  const assetsSeen = new Map(); // sym → { assetSymbol, assetType }
+  let assetStartMs = Infinity;
+
+  const bucketFor = (aid) => (byAccount[aid] ??= {
+    cashTxns: [], assetTxns: [], cashStartMs: Infinity, assetStartMs: Infinity,
+  });
+
   for (const tx of txns) {
-    const aid = tx.account._id;
-    accountTxns[aid] ??= {};
+    const aid   = accountIdOf(tx.account);
+    if (!aid) continue;
+    const dayMs = midnight(new Date(tx.date));
+    const acct  = bucketFor(aid);
 
-    // Seperate Cash and Asset Txns
     if (ASSET_TRANSACTION_TYPES.includes(tx.type)) {
-      (accountTxns[aid]['assetTxns'] ??= []).push(tx);
-      (accountTxns[aid]['assetStartMs'] ??= Infinity) = Math.min(accountTxns[aid]['assetStartMs'], midnight(new Date(tx.date)));
+      acct.assetTxns.push(tx);
+      acct.assetStartMs = Math.min(acct.assetStartMs, dayMs);
+      assetStartMs      = Math.min(assetStartMs, dayMs);
 
-      // Store Asset Symbol
       const sym = tx.assetSymbol?.toUpperCase();
       if (sym && !assetsSeen.has(sym)) {
-        assetsSeen.add(sym);
-        (accountTxns[aid]['assets'] ??= []).push({ 
-          assetSymbol: sym, 
-          assetType: tx.assetType || 'stock' 
-        });
+        assetsSeen.set(sym, { assetSymbol: sym, assetType: tx.assetType || 'stock' });
       }
     } else {
-      (accountTxns[aid]['cashTxns'] ??= []).push(tx);
-      (accountTxns[aid]['cashStartMs'] ??= Infinity) = Math.min(accountTxns[aid]['cashStartMs'], midnight(new Date(tx.date)));
+      acct.cashTxns.push(tx);
+      acct.cashStartMs = Math.min(acct.cashStartMs, dayMs);
     }
 
-    // Handle Transfers
-    if (tx.type === 'transfer' && tx.toAccountId) {
-      const toAid = tx.toAccountId;
-      (accountTxns[toAid]['cashTxns'] ??= []).push(tx);
-      (accountTxns[toAid]['cashStartMs'] ??= Infinity) = Math.min(accountTxns[toAid]['cashStartMs'], midnight(new Date(tx.date)));
+    // Transfers also credit the destination account's cash series.
+    if (tx.type === 'transfer') {
+      const dst = accountIdOf(tx.toAccount);
+      if (dst) {
+        const dstAcct = bucketFor(dst);
+        dstAcct.cashTxns.push(tx);
+        dstAcct.cashStartMs = Math.min(dstAcct.cashStartMs, dayMs);
+      }
     }
   }
 
-  return accountTxns;
+  return {
+    byAccount,
+    assets: Array.from(assetsSeen.values()),
+    assetStartMs: assetStartMs === Infinity ? null : assetStartMs,
+  };
 }
 
 module.exports = {
+  accountIdOf,
   accountCashImpact,
   directionalAssetImpact,
   flipTx,
   buildCashImpactMap,
-  buildAccountTxnsMap
+  buildAccountTxnsMap,
 };

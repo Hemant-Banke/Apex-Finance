@@ -2,6 +2,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import AppShell from './components/layout/AppShell';
+import AppLoader from './components/ui/AppLoader';
+import TopProgressBar from './components/ui/TopProgressBar';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
@@ -13,16 +15,7 @@ import Analytics from './pages/Analytics';
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--color-bg-primary)' }}>
-        <div className="text-center">
-          <div className="w-10 h-10 border-2 border-[var(--color-accent)] border-t-transparent rounded-full animate-spin mx-auto mb-3" />
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Loading...</p>
-        </div>
-      </div>
-    );
-  }
+  if (loading) return <AppLoader />;
 
   return user ? children : <Navigate to="/login" />;
 }
@@ -37,6 +30,7 @@ function App() {
   return (
     <AuthProvider>
       <ToastProvider>
+        <TopProgressBar />
         <Router>
         <Routes>
           {/* Public routes */}

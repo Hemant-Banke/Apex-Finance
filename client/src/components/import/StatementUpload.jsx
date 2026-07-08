@@ -1,12 +1,14 @@
 import { useState, useRef } from 'react';
 import { Upload, FileText, Image, Lock, AlertCircle } from 'lucide-react';
 import { importAPI } from '../../lib/api';
+import { accountOptions } from '../../lib/accountPickerOptions';
+import TypePicker from '../forms/TypePicker';
 
-const ACCEPT = '.pdf,.html,.htm,.png,.jpg,.jpeg,.webp';
+const ACCEPT = '.pdf,.csv,.tsv,.txt,.html,.htm,.png,.jpg,.jpeg,.webp';
 
-export default function StatementUpload({ accounts, onParsed }) {
+export default function StatementUpload({ accounts, defaultAccountId, onParsed }) {
   const [file, setFile]           = useState(null);
-  const [accountId, setAccountId] = useState(accounts[0]?._id || '');
+  const [accountId, setAccountId] = useState(defaultAccountId || accounts[0]?._id || '');
   const [password, setPassword]   = useState('');
   const [needsPw, setNeedsPw]     = useState(false);
   const [loading, setLoading]     = useState(false);
@@ -54,7 +56,7 @@ export default function StatementUpload({ accounts, onParsed }) {
       const resp = err.response?.data;
       if (resp?.needsPassword) {
         setNeedsPw(true);
-        setError('This PDF is password-protected. Enter the password below.');
+        setError(resp.message || 'This PDF is password-protected. Enter the password below.');
       } else {
         setError(resp?.message || 'Failed to parse file. Please try a different file.');
       }
@@ -69,16 +71,13 @@ export default function StatementUpload({ accounts, onParsed }) {
       {/* Account selector */}
       <div>
         <label className="label block" style={{ marginBottom: 8 }}>Import into account</label>
-        <select
+        <TypePicker
+          options={accountOptions(accounts.filter(a => !a.isDebt))}
           value={accountId}
-          onChange={e => setAccountId(e.target.value)}
-          className="input-field"
-        >
-          <option value="">Select account…</option>
-          {accounts.filter(a => !a.isDebt).map(a => (
-            <option key={a._id} value={a._id}>{a.name} ({a.type})</option>
-          ))}
-        </select>
+          onChange={setAccountId}
+          placeholder="Select account…"
+          searchable={accounts.filter(a => !a.isDebt).length > 6}
+        />
       </div>
 
       {/* Drop zone */}
@@ -132,7 +131,7 @@ export default function StatementUpload({ accounts, onParsed }) {
                 Drop your bank statement here
               </p>
               <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
-                PDF · HTML (UPI) · Screenshot (PNG/JPG) · up to 20 MB
+                PDF · CSV · HTML (UPI) · Screenshot (PNG/JPG) · up to 20 MB
               </p>
             </div>
             <button type="button" className="btn-ghost" style={{ marginTop: 4, fontSize: '0.8125rem' }}>
@@ -170,7 +169,7 @@ export default function StatementUpload({ accounts, onParsed }) {
         <div style={{ display: 'flex', gap: 8, padding: '10px 14px', borderRadius: 'var(--radius-sm)', background: 'var(--color-accent-muted)', border: '1px solid var(--color-accent-dim)' }}>
           <AlertCircle size={14} style={{ color: 'var(--color-accent)', flexShrink: 0, marginTop: 1 }} />
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>
-            Screenshots are parsed using AI. Requires <code style={{ fontFamily: 'monospace', color: 'var(--color-accent)' }}>ANTHROPIC_API_KEY</code> on the server.
+            Screenshots are read with AI — please double-check dates and amounts before importing.
           </p>
         </div>
       )}

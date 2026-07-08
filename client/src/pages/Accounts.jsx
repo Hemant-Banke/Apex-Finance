@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { accountsAPI } from '../lib/api';
-import { formatCurrency, ACCOUNT_TYPES } from '../lib/utils';
+import { formatCurrency } from '../lib/utils';
+import { ACCOUNT_TYPE_OPTIONS } from '../lib/accountPickerOptions';
 import Modal from '../components/ui/Modal';
+import TypePicker from '../components/forms/TypePicker';
 import {
   Plus, Wallet, TrendingUp, Shield, CreditCard,
   Landmark, Briefcase, ChevronRight
@@ -143,9 +145,12 @@ export default function Accounts() {
           </div>
           <div>
             <label className="label block" style={{ marginBottom: 8 }}>Type</label>
-            <select value={form.type} onChange={e => setForm({...form, type: e.target.value})} className="input-field">
-              {ACCOUNT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            <TypePicker
+              options={ACCOUNT_TYPE_OPTIONS}
+              value={form.type}
+              onChange={v => setForm({ ...form, type: v })}
+              placeholder="Select account type"
+            />
           </div>
           <div>
             <label className="label block" style={{ marginBottom: 8 }}>Description</label>

@@ -33,14 +33,15 @@ const ASSET_TRANSACTION_TYPES = [
 ];
 
 const ASSET_TYPES = [
-  'stock', 
-  'bond', 
-  'mutual_fund', 
-  'etf', 
-  'crypto', 
-  'commodity', 
-  'epf_nps', 
-  'fd', 
+  'stock',
+  'bond',
+  'mutual_fund',
+  'etf',
+  'crypto',
+  'gold',
+  'commodity',
+  'epf_nps',
+  'fd',
   'other'
 ];
 

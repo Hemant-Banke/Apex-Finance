@@ -1,17 +1,28 @@
-const { ASSET_TRANSACTION_TYPES } = require("../utils/constants");
-const { t1Ms } = require("../utils/helpers");
-const { tsAdder } = require("../utils/tsHelpers");
-const { buildCashImpactMap, directionalAssetImpact } = require("../utils/transactionHelpers");
+/**
+ * tsService — pure time-series builders.
+ *
+ * No DB access. Given transactions (already partitioned per account) and a
+ * price map, produces the cashTS / assetTS / net-worth arrays.
+ *
+ * Semantics:
+ *   cashTS  — startMs → T (today).      length N
+ *   assetTS — startMs → T-1 (yesterday). length N-1
+ */
+
+const { DAY_MS } = require('../utils/constants');
+const { midnight, todayMs, t1Ms } = require('../utils/helpers');
+const { tsAdder } = require('../utils/tsHelpers');
+const { buildCashImpactMap, directionalAssetImpact } = require('../utils/transactionHelpers');
 
 // ─── Pure TS builders ─────────────────────────────────────────────────────────
 
 /**
- * Build a cashTS array in a single forward pass from impactsByDay.
+ * Build a cashTS array in a single cumulative forward pass from impactsByDay.
  *
  * @param {{ [dayMs: number]: number }} impactsByDay  Cash delta per day.
  * @param {number} startMs  UTC-midnight ms of first entry.
  * @param {number} endMs    UTC-midnight ms of last entry (inclusive, = T).
- * @param {number} [initial=0]  Starting accumulator (for incremental extend).
+ * @param {number} [initialCashBalance=0]  Starting accumulator (for incremental extend).
  * @returns {number[]}
  */
 function buildCashTS(impactsByDay, startMs, endMs = todayMs(), initialCashBalance = 0) {
@@ -28,23 +39,24 @@ function buildCashTS(impactsByDay, startMs, endMs = todayMs(), initialCashBalanc
 /**
  * Build an assetTS array in a single rolling-delta forward pass.
  *
- * Uses a rolling `holdings` map that updates at each transaction date, and a
- * `lastPrice` map for carry-forward on non-trading days.
- * One request per symbol is expected to have already been fetched upfront.
+ * Uses a rolling `holdings` map that updates at each transaction date, plus a
+ * `lastPrice` map for carry-forward on non-trading days. Prices are expected to
+ * have been fetched upfront (one request per symbol).
  *
- * @param {Object[]}  assetTxns   Buy/sell transactions sorted by date asc.
+ * @param {Object[]} assetTxns  Buy/sell transactions sorted by date asc.
  * @param {{ [sym: string]: { [dayMs: number]: number } }} pricesBySymbol
- * @param {number}    startMs   UTC-midnight ms of first entry.
- * @param {number}    endMs      UTC-midnight ms of last entry (T-1 = yesterday).
- * @returns {{ ts: number[], holdings: Object }}  length = (t1Ms - startMs) / DAY_MS + 1
+ * @param {number} startMs  UTC-midnight ms of first entry.
+ * @param {number} endMs    UTC-midnight ms of last entry (T-1 = yesterday).
+ * @returns {number[]}  length = (endMs - startMs) / DAY_MS + 1
  */
 function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
   if (endMs < startMs) return [];
   const numDays   = Math.round((endMs - startMs) / DAY_MS) + 1;
   const holdings  = {}; // { SYM: qty } — accumulated forward
-  const lastPrice = {}; // carry-forward price per symbol
+  const lastPrice = {}; // carry-forward last known MARKET price per symbol
+  const bookPrice = {}; // last transaction pricePerUnit — fallback before any market price
 
-  // Index transactions by their settlement day for O(1) per-day lookup
+  // Index transactions by their settlement day for O(1) per-day lookup.
   const txsByDay = {};
   for (const tx of assetTxns) {
     const k = midnight(new Date(tx.date));
@@ -53,23 +65,28 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
 
   const assetTS = [];
   for (let i = 0; i < numDays; i++) {
-    const dayMs  = startMs + i * DAY_MS;
+    const dayMs = startMs + i * DAY_MS;
 
-    // Apply only today's transactions to holdings
+    // Apply today's transactions to the rolling holdings map, and remember the
+    // transacted price as the cost-basis fallback for valuation.
     for (const tx of (txsByDay[dayMs] || [])) {
       const sym = tx.assetSymbol?.toUpperCase();
       if (sym && tx.units) {
         holdings[sym] = (holdings[sym] || 0) + directionalAssetImpact(tx.type) * tx.units;
+        if (tx.pricePerUnit != null) bookPrice[sym] = Number(tx.pricePerUnit);
       }
     }
 
-    // Compute total asset value from accumulated holdings at today's price
+    // Value the accumulated holdings. Prefer the carried-forward market price;
+    // before any market price is available for a symbol, fall back to its
+    // invested (book) price so the series is never spuriously 0/null.
     let value = 0;
     for (const [sym, qty] of Object.entries(holdings)) {
       if (qty === 0) continue;
-      const p = pricesBySymbol[sym]?.[dayMs] || null;
-      if (p != null) lastPrice[sym] = p;
-      value += qty * (lastPrice[sym] || 0);
+      const p = pricesBySymbol[sym]?.[dayMs];
+      if (p != null) lastPrice[sym] = Number(p);
+      const effective = lastPrice[sym] ?? bookPrice[sym] ?? 0;
+      value += qty * effective;
     }
     assetTS.push(value);
   }
@@ -78,77 +95,87 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
 }
 
 /**
- * Aggregate per-account cashTS and assetTS into a single valuesTS for net worth.
+ * Aggregate per-account { cashTS, assetTS } stores into a single valuesTS for
+ * net worth. The valuesTS ends at T-1 (settled); lastCashValue captures T cash.
  *
- * @param {Object<{ cashTS, assetTS, startMs, endMs }>} acctStores  Expects a completed AccountStore array (extended to today)
- * @returns {{ valuesTS: number[], startMs, endMs, lastCashValue: number, settledValue: number }}
+ * @param {Object[]|Object} acctStores  Array or map of { cashTS, assetTS, startMs, endMs }.
+ * @returns {{ valuesTS: number[], globalStartMs: number, globalEndMs: number, lastCashValue: number, settledValue: number }}
  */
 function buildNetWorthTS(acctStores) {
-  const t1    = t1Ms();
-  let   valuesTS   = [];
-  let   globalStartMs = t1;
-  let   globalEndMs   = t1;
-  let   lastCashValue = 0; // sum of all account cashTS[T] values
-  let   settledValue = 0; // sum of all account settled values
+  const t1 = t1Ms();
+  let valuesTS      = [];
+  let globalStartMs = t1;
+  let globalEndMs   = t1;
+  let lastCashValue = 0; // Σ account cashTS[T]
+  let settledValue  = 0; // Σ account settled (T-1) balances
 
-  for (const [aid, accountStore] of Object.entries(acctStores)) {
-    const { cashTS, assetTS, startMs, endMs } = accountStore;
+  for (const store of Object.values(acctStores)) {
+    const { cashTS = [], assetTS = [], startMs } = store;
+    if (!cashTS.length && !assetTS.length) continue;
+
     lastCashValue += cashTS[cashTS.length - 1] ?? 0;
 
-    // Add Cash TS (T-1) and Asset TS (T-1) to get Account Balance TS (T-1)
-    const { accountBalance, accountStartMs, accountEndMs } = tsAdder(cashTS, assetTS, startMs, startMs, t1, t1);
-    settledValue += accountBalance[accountBalance.length - 1] ?? 0;
+    // Account balance TS at T-1 = cashTS (clipped to T-1) + assetTS.
+    const { result: balanceTS, startMs: balStart, endMs: balEnd } =
+      tsAdder(cashTS, assetTS, startMs, startMs, t1, t1);
+    settledValue += balanceTS[balanceTS.length - 1] ?? 0;
 
-    // Add Account Balance TS (T-1) to current Net Worth TS (T-1)
-    const { result: nwTS, startMs: nwStartMs, endMs: nwEndMs } = tsAdder(valuesTS, accountBalance, globalStartMs, accountStartMs, globalEndMs, accountEndMs);
-    valuesTS = nwTS;
-    globalStartMs = Math.min(globalStartMs, nwStartMs);
-    globalEndMs   = Math.max(globalEndMs, nwEndMs);
+    // Fold this account's balance TS into the running net-worth TS.
+    const { result: nwTS, startMs: nwStart, endMs: nwEnd } =
+      tsAdder(valuesTS, balanceTS, globalStartMs, balStart, globalEndMs, balEnd);
+    valuesTS      = nwTS;
+    globalStartMs = nwStart;
+    globalEndMs   = nwEnd;
   }
 
   return { valuesTS, globalStartMs, globalEndMs, lastCashValue, settledValue };
 }
 
-// ─── Core: Transaction TS Change ─────────────────────────────────────────────────────
-
 /**
- * Produces the cashTS and assetTS changes for all affected accounts from a set of transactions.
- * 
- * @param {string}   userId
- * @param {{ [aid: string]: Object }} accountTxnsMap    Map of accountId → Transactions Objects (sorted by date asc) for that account.
- * @param {{ [sym: string]: { [dayMs: number]: number } }} pricesBySymbol
+ * Build cashTS + assetTS stores for every account referenced in `byAccount`.
+ * Pure: relies on a caller-supplied `accountsById` map for the `isDebt` flag.
+ *
+ * @param {Object} byAccount     From buildAccountTxnsMap().byAccount
+ * @param {Object} pricesBySymbol
+ * @param {{ [aid: string]: { isDebt: boolean } }} accountsById
+ * @param {number} [initialCashByAccount]  Optional { [aid]: startingCash } for extends.
+ * @returns {{ [aid: string]: { cashTS, assetTS, startMs, endMs } }}
  */
-function buildTransactionsTS(userId, accountTxnsMap, pricesBySymbol, useLastCashBalance = false) {
+function buildTransactionsTS(byAccount, pricesBySymbol, accountsById = {}, initialCashByAccount = {}) {
   const today = todayMs();
   const t1    = t1Ms();
   const accountStores = {};
-  
-  for (const [aid, aidTxnsMap] of Object.entries(accountTxnsMap)) {
-    const account = await Account.findOne({ _id: aid, user: userId }).lean();
-    if (!account) continue;
 
-    const cashTxns = aidTxnsMap['cashTxns'] || [];
-    const assetTxns = aidTxnsMap['assetTxns'] || [];
-    const cashStartMs = aidTxnsMap['cashStartMs'] ?? today;
-    const assetStartMs = aidTxnsMap['assetStartMs'] ?? today;
-    const startMs = Math.min(assetStartMs, cashStartMs);
+  for (const [aid, bucket] of Object.entries(byAccount)) {
+    const account = accountsById[aid];
+    const isDebt  = account?.isDebt || false;
 
-    // Build Cash Transactions TS
-    let cashImpactMap = buildCashImpactMap(cashTxns.concat(assetTxns), aid);
-    let cashTS = cashTxns.length
-      ? buildCashTS(cashImpactMap, startMs, today, useLastCashBalance ? account.lastCashValue : 0)
-      : Array(Math.round((today - startMs) / DAY_MS) + 1).fill(0);
+    const { cashTxns = [], assetTxns = [] } = bucket;
 
-    // Build Asset Transactions TS
-    let assetTS = !account.isDebt && assetTxns.length
+    // Earliest actual txn day. Infinity means that series is absent — never fall
+    // back to `today`, or a calibration dated in the future would drag startMs
+    // backwards and fabricate a spurious present-day entry.
+    const startMs = Math.min(bucket.cashStartMs ?? Infinity, bucket.assetStartMs ?? Infinity);
+    if (!Number.isFinite(startMs) || startMs > today) {
+      // Nothing to build within [startMs, today] — emit an empty (no-op) store.
+      accountStores[aid] = { cashTS: [], assetTS: [], startMs: today, endMs: today };
+      continue;
+    }
+
+    // Cash TS — driven by every txn that moves cash (incl. asset txns w/ usesCashBalance).
+    const cashImpactMap = buildCashImpactMap(cashTxns.concat(assetTxns), aid);
+    const cashTS = buildCashTS(cashImpactMap, startMs, today, initialCashByAccount[aid] || 0);
+
+    // Asset TS — rolling market value; skipped for debt accounts. Empty when the
+    // window ends before it starts (startMs already at/after today → no settled day).
+    const assetTS = (!isDebt && assetTxns.length)
       ? buildAssetTS(assetTxns, pricesBySymbol, startMs, t1)
-      : Array(Math.round((t1 - startMs) / DAY_MS) + 1).fill(0);
+      : new Array(Math.max(0, Math.round((t1 - startMs) / DAY_MS) + 1)).fill(0);
 
     accountStores[aid] = { cashTS, assetTS, startMs, endMs: today };
   }
 
-  let networthStore = buildNetWorthTS(accountStores);
-  return { accountStores, networthStore };
+  return accountStores;
 }
 
 module.exports = {

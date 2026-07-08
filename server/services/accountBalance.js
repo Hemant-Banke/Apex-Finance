@@ -1,26 +1,27 @@
 /**
  * accountBalance service — O(1) reads from pre-computed stores.
  *
- * "Balance" = settled balance by default:
- *   settledValue  = cashTS[T-1] + assetTS[T-1]  (yesterday's close)
+ * Default (settled): balance = settledValue = lastCashValue (T) + assetTS[T-1].
+ * Live (fetchLatestBal=true): balance = lastCashValue (T) + live asset prices.
  *
- * With fetchLatestBal=true (live):
- *   balance = lastCashValue + live asset prices via marketDataService
- *
- * Always includes an `asof` date in responses.
+ * All balance reads operate on RAW stored holdings ({ assetSymbol, units }).
+ * Every response includes an `asof` date.
  */
 
-const Account = require('../models/Account');
+const Account             = require('../models/Account');
 const DailyAccountBalance = require('../models/DailyAccountBalance');
 const AccountHoldings     = require('../models/AccountHoldings');
-const holdingsService     = require('./holdingsService');
 const { fetchLatestPrices } = require('./marketDataService');
-const { todayStr, t1Str }         = require('../utils/helpers');
-const { DAY_MS }         = require('../utils/constants');
+const { todayStr, t1Str }   = require('../utils/helpers');
+
+/** Load an account's raw holdings array (or []). */
+async function loadHoldings(accountId, userId) {
+  const doc = await AccountHoldings.findOne({ account: accountId, user: userId }).select('holdings').lean();
+  return doc?.holdings || [];
+}
 
 /**
- * Returns the settled cash balance at T-1 (from cashTS[T-2], the T-1 entry).
- * Use lastCashValue for the T (today) cash value instead.
+ * Current cash balance (T) for an account — used for buy/adjustment validation.
  */
 async function getAccountCashBalance(account, user, acctDoc = null) {
   if (!acctDoc) acctDoc = await DailyAccountBalance.findOne({ account: account._id, user: user._id }).lean();
@@ -28,95 +29,97 @@ async function getAccountCashBalance(account, user, acctDoc = null) {
 }
 
 /**
- * Returns the settled asset value.
- *   fetchLatestBal=false: assetTS[last] = T-1 settled (from pre-computed store)
- *   fetchLatestBal=true:  live prices × current qty via marketDataService
+ * Settled or live asset value for a single account.
+ *   fetchLatestBal=false → assetTS[last] (T-1 settled)
+ *   fetchLatestBal=true  → live prices × current qty
  *
  * @returns {Promise<{ value: number, asof: string }>}
  */
 async function getAccountAssetBalance(account, user, fetchLatestBal = false, acctDoc = null, holdings = null) {
   if (!acctDoc) acctDoc = await DailyAccountBalance.findOne({ account: account._id, user: user._id }).lean();
+  const assetTS      = acctDoc?.assetTS || [];
+  const settledAsset = assetTS.length ? assetTS[assetTS.length - 1] : 0;
 
   if (!fetchLatestBal) {
-    const assetTS = acctDoc?.assetTS || [];
-    const value   = assetTS.length > 0 ? assetTS[assetTS.length - 1] : 0;
-    return { value, asof: t1Str() };
+    return { value: settledAsset, asof: t1Str() };
   }
 
-  // Live fetch
-  if (!holdings) holdings = await AccountHoldings.findOne({ account: account._id, user: user._id }).lean()?.holdings || [];
-  const activeHoldings   = holdings.filter(h => h.units > 0);
-  if (!activeHoldings.length) return { value: 0, asof: todayStr() };
+  if (!holdings) holdings = await loadHoldings(account._id, user._id);
+  const active = holdings.filter(h => (h.units || 0) > 0);
+  if (!active.length) return { value: 0, asof: todayStr() };
 
-  const prices = await fetchLatestPrices(activeHoldings);
-  const value  = activeHoldings.reduce((sum, h) => sum + h.units * (prices[h.assetSymbol] ?? 0), 0);
+  const prices = await fetchLatestPrices(active);
+  // If any holding is missing a live price, fall back to the last known settled
+  // (T-1) asset balance rather than under-counting that holding as 0.
+  if (active.some(h => prices[h.assetSymbol] == null)) {
+    return { value: settledAsset, asof: t1Str() };
+  }
+  const value = active.reduce((sum, h) => sum + h.units * prices[h.assetSymbol], 0);
   return { value, asof: todayStr() };
 }
 
 /**
- * Returns the latest Asset Values off all holdings
+ * Combined asset value across all of a user's accounts (single batched price call).
  *
  * @returns {Promise<{ value: number, asof: string }>}
  */
 async function getAllAccountsAssetBalance(user, fetchLatestBal = false) {
   const accounts = await Account.find({ user: user._id }).lean();
 
-  let value = 0;
-  let allHoldings = [];
-  for (const account in accounts) {
-    if (!fetchLatestBal) value += getAccountAssetBalance(account, user, false)?.value || 0;
-    else {
-      // Concatenate all Holdings
-      const acctDoc = await DailyAccountBalance.findOne({ account: account._id, user: user._id }).lean();
-      const holdings = await AccountHoldings.findOne({ account: account._id, user: user._id }).lean()?.holdings.filter(h => h.units > 0) || [];
-      if (!holdings.length) continue;
-      allHoldings = allHoldings.concat(holdings);
+  if (!fetchLatestBal) {
+    let value = 0;
+    for (const account of accounts) {
+      if (account.isDebt) continue;
+      const { value: v } = await getAccountAssetBalance(account, user, false);
+      value += v;
     }
+    return { value, asof: t1Str() };
   }
 
-  // Find Latest prices of all holdings in one call
-  if (fetchLatestBal) {
-    const prices = await fetchLatestPrices(allHoldings);
-    value  = allHoldings.reduce((sum, h) => sum + h.units * (prices[h.assetSymbol] ?? 0), 0);
+  // Live: gather every active holding, then price them all in one request.
+  let allHoldings = [];
+  for (const account of accounts) {
+    if (account.isDebt) continue;
+    const holdings = (await loadHoldings(account._id, user._id)).filter(h => (h.units || 0) > 0);
+    allHoldings = allHoldings.concat(holdings);
   }
+  if (!allHoldings.length) return { value: 0, asof: todayStr() };
 
-  return { value, asof: fetchLatestBal ? todayStr() : t1Str() };
+  const prices = await fetchLatestPrices(allHoldings);
+  // If any holding is missing a live price, fall back to the settled (T-1) total.
+  if (allHoldings.some(h => prices[h.assetSymbol] == null)) {
+    return getAllAccountsAssetBalance(user, false);
+  }
+  const value = allHoldings.reduce((sum, h) => sum + h.units * prices[h.assetSymbol], 0);
+  return { value, asof: todayStr() };
 }
 
 /**
- * Returns the total account balance (cash + assets).
- * Debt accounts return only cash (no asset component).
+ * Total account balance (cash + assets). Debt accounts have no asset component.
  *
  * @returns {Promise<{ balance: number, cashBalance: number, assetBalance: number, asof: string }>}
  */
 async function getAccountBalance(account, user, fetchLatestBal = false, acctDoc = null, holdings = null) {
-  if (!acctDoc) acctDoc = await DailyAccountBalance.findOne({ account: account._id, user: user._id}).lean();
+  if (!acctDoc) acctDoc = await DailyAccountBalance.findOne({ account: account._id, user: user._id }).lean();
 
   if (!fetchLatestBal) {
-    // Default: settled balance from pre-computed settledValue (T cash + T-1 assets)
     const balance      = acctDoc?.settledValue ?? 0;
     const cashBalance  = acctDoc?.lastCashValue ?? 0;
     const assetBalance = account.isDebt ? 0 : (balance - cashBalance);
     return { balance, cashBalance, assetBalance, asof: t1Str() };
   }
 
-  // Live: lastCashValue (T) + live asset value
-  const cashBalance  = acctDoc?.lastCashValue ?? 0;
+  const cashBalance = acctDoc?.lastCashValue ?? 0;
   const { value: assetBalance, asof } = account.isDebt
     ? { value: 0, asof: todayStr() }
     : await getAccountAssetBalance(account, user, true, acctDoc, holdings);
 
-  return {
-    balance:      cashBalance + assetBalance,
-    cashBalance,
-    assetBalance,
-    asof,
-  };
+  return { balance: cashBalance + assetBalance, cashBalance, assetBalance, asof };
 }
 
-module.exports = { 
-  getAccountCashBalance, 
-  getAccountAssetBalance, 
+module.exports = {
+  getAccountCashBalance,
+  getAccountAssetBalance,
   getAllAccountsAssetBalance,
-  getAccountBalance 
+  getAccountBalance,
 };

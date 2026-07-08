@@ -1,73 +1,61 @@
 /**
- * transactionService — all transaction-aware store orchestration.
+ * transactionService — single-transaction & bulk lifecycle orchestration.
+ *
+ * Routes call these entry points only; all store math lives in dailyValueService.
  */
 
-const Transaction         = require('../models/Transaction');
-const Account             = require('../models/Account');
-const AccountHoldings     = require('../models/AccountHoldings');
-const DailyAccountBalance = require('../models/DailyAccountBalance');
-const DailyNetWorth       = require('../models/DailyNetWorth');
+const Transaction = require('../models/Transaction');
+const Account     = require('../models/Account');
 
-const holdingsService         = require('./holdingsService');
-const dvService               = require('./dailyValueService');
-const { fetchHistoricPrices } = require('./marketDataService');
-const { DAY_MS }              = require('../utils/constants');
-const { midnight, todayMs, t1Ms } = require('../utils/helpers');
-const { rawHoldings, symItems, flipTx } = require('../utils/transactionHelpers');
-
+const dvService     = require('./dailyValueService');
+const { flipTx }    = require('../utils/transactionHelpers');
 
 /**
- * Find Transactions for a user between start and end dates (inclusive).
- * 
- * @param {string} userId
- * @param {string} startDate          start of the processing window.
- * @param {string} endDate            end of the processing window.
+ * Find a user's transactions within a date window (inclusive), sorted ascending.
  */
 async function findTransactions(userId, startDate = '2000-01-01', endDate = '2100-01-01') {
-  return await Transaction.find({
+  return Transaction.find({
     user: userId,
-    date: { $gte: startDate, $lte: endDate }
+    date: { $gte: new Date(startDate), $lte: new Date(endDate) },
   }).sort({ date: 1 }).lean();
 }
 
-// ─── Public API ───────────────────────────────────────────────────────────────
+// ─── Single-transaction lifecycle ──────────────────────────────────────────────
 
-/** Called after a transaction is created in DB. */
+/** Called after a transaction is created in the DB. */
 async function onCreate(userId, tx) {
-  const accountId = (tx.account?._id ?? tx.account)?.toString();
-  const account   = await Account.findById(accountId).lean();
+  const account = await Account.findById(tx.account).lean();
   if (!account) return;
-
   await dvService.updateForTxns(userId, [tx]);
 }
 
-/** Called after a transaction is deleted from DB. */
+/** Called after a transaction is deleted from the DB. */
 async function onDelete(userId, tx) {
-  const accountId = (tx.account?._id ?? tx.account)?.toString();
-  const account   = await Account.findById(accountId).lean();
+  const account = await Account.findById(tx.account).lean();
   if (!account) return;
-
   await dvService.updateForTxns(userId, [flipTx(tx)]);
 }
 
-/** Called after a transaction is updated in DB. */
+/** Called after a transaction is updated in the DB (old state + applied patch). */
 async function onUpdate(userId, oldTx, patch) {
-  const accountId = (oldTx.account?._id ?? oldTx.account)?.toString();
-  const account   = await Account.findById(accountId).lean();
+  const account = await Account.findById(oldTx.account).lean();
   if (!account) return;
-
-  const newTx   = { ...oldTx, ...patch };
+  const newTx = { ...oldTx, ...patch };
   await dvService.updateForTxns(userId, [flipTx(oldTx), newTx]);
 }
 
+// ─── Bulk lifecycle ────────────────────────────────────────────────────────────
+
 /**
  * Insert multiple transactions and update all stores in one pass.
- * More efficient than N×onCreate because all deltas are summed in one scan.
+ * More efficient than N×onCreate because all deltas are summed in a single scan.
+ * @returns {Object[]} the created transaction docs
  */
 async function bulkCreate(userId, txnData) {
   if (!txnData.length) return [];
-  const createdTxns = await Transaction.insertMany(txnData.map(t => ({ ...t, user: userId })));
-  await dvService.updateForTxns(userId, createdTxns);
+  const created = await Transaction.insertMany(txnData.map(t => ({ ...t, user: userId })));
+  await dvService.updateForTxns(userId, created.map(d => d.toObject()));
+  return created;
 }
 
 /** Delete multiple transactions and update all stores in one pass. */

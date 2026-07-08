@@ -1,206 +1,255 @@
 /**
- * dailyValueService — persistence.
+ * dailyValueService — transaction-driven store orchestration + persistence.
  *
- * Provides:
- *   - DB persistence: upsertAccountBalance, upsertNetWorth
+ * Coordinates the pure builders in tsService with the DB. Owns:
+ *   - rebuildAll:     full recompute of all stores from transaction history
+ *   - ensureUpToToday: incremental carry-forward extend of existing stores
+ *   - updateForTxns:  apply a delta set of transactions to existing stores
+ *   - rebuildNW:      re-aggregate net worth from persisted account stores
+ *   - upsert*:        DB persistence
  *
- * No transaction lifecycle logic — that lives in transactionService.
+ * This module must NOT require transactionService (that direction would create a
+ * cycle). It reads the Transaction model directly for full rebuilds.
  *
  * Semantics reminder:
  *   cashTS  (account) length N   — startDate → T (today)
  *   assetTS (account) length N-1 — startDate → T-1 (yesterday settled)
- *   valuesTS (NW)     length N-1 — startDate → T-1 (complete NW, cash+assets)
- *
- *   settledValue  (account) = cashTS[N-2] + assetTS[N-2]  = T-1 total
- *   lastCashValue (account) = cashTS[N-1]                  = T cash
- *   settledValue  (NW)      = valuesTS[last]               = T-1 NW
- *   lastCashValue (NW)      = Σ account.lastCashValue      = T cash
+ *   valuesTS (NW)     length N-1 — startDate → T-1
+ *   settledValue  (account) = lastCashValue + assetTS[last]  (T cash + T-1 assets)
+ *   lastCashValue (account) = cashTS[last]                    (T cash)
  */
 
+const Transaction         = require('../models/Transaction');
+const Account             = require('../models/Account');
+const AccountHoldings     = require('../models/AccountHoldings');
 const DailyAccountBalance = require('../models/DailyAccountBalance');
 const DailyNetWorth       = require('../models/DailyNetWorth');
-const tsService = require('../services/tsService');
-const { rebuildAllHoldingsFromMap, updateHoldingsFromMap } = require('../services/holdingsService');
-const { findTransactions } = require('../services/transactionService');
-const { fetchHistoricPrices } = require('../services/marketDataService');
-const { DAY_MS }          = require('../utils/constants');
+
+const tsService               = require('./tsService');
+const holdingsService         = require('./holdingsService');
+const { fetchHistoricPrices } = require('./marketDataService');
+const { DAY_MS }              = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
-const { tsConcat, tsAdder } = require('../utils/tsHelpers');
+const { tsAdder }             = require('../utils/tsHelpers');
 const { buildAccountTxnsMap } = require('../utils/transactionHelpers');
 
 
-// ─── Rebuild Services ───────────────────────────────────────────────────────────────
+// ─── Shared loaders ─────────────────────────────────────────────────────────
+
+/** All of a user's transactions, sorted ascending by date. */
+async function fetchTxns(userId) {
+  return Transaction.find({ user: userId }).sort({ date: 1 }).lean();
+}
+
+/** Map of accountId → account doc, for isDebt lookups in the pure builders. */
+async function loadAccountsById(userId) {
+  const accounts = await Account.find({ user: userId }).lean();
+  return Object.fromEntries(accounts.map(a => [a._id.toString(), a]));
+}
+
+/** Fetch all symbol price series in one batched call. */
+function fetchPrices(assets, assetStartMs) {
+  const today = todayMs();
+  return fetchHistoricPrices(assets || [], assetStartMs || today, today);
+}
+
+
+// ─── Rebuild services ─────────────────────────────────────────────────────────
 
 /**
- * Rebuild Networth valuesTS from all account stores for a user. 
- * Builds on the period of existing accounts.
- *
- * @param {string} userId
- * @returns {null} If no account stores exist, deletes any existing DailyNetWorth doc.
+ * Re-aggregate DailyNetWorth from every persisted DailyAccountBalance.
+ * Always safe to call after account stores change.
  */
 async function rebuildNW(userId) {
-  const acctDocs = await DailyAccountBalance.find({ user: userId }).select('account startDate cashTS assetTS').lean();
+  const acctDocs = await DailyAccountBalance
+    .find({ user: userId })
+    .select('startDate cashTS assetTS')
+    .lean();
 
-  const stores = acctDocs.map(d => ({
-    cashTS:  d.cashTS  || [],
-    assetTS: d.assetTS || [],
-    startMs: midnight(d.startDate),
-    endMs:  midnight(d.endDate)
-  })).filter(s => s.cashTS.length || s.assetTS.length);
+  const stores = acctDocs
+    .map(d => ({
+      cashTS:  d.cashTS  || [],
+      assetTS: d.assetTS || [],
+      startMs: midnight(d.startDate),
+    }))
+    .filter(s => s.cashTS.length || s.assetTS.length);
 
-  const { valuesTS, globalStartMs, globalEndMs, lastCashValue, settledValue } = tsService.buildNetWorthTS(stores);
-  await upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, globalStartMs, globalEndMs);
+  const { valuesTS, globalStartMs, lastCashValue, settledValue } =
+    tsService.buildNetWorthTS(stores);
+
+  // valuesTS content ends at T-1, but endDate marks how far the store is current:
+  // it is stamped to T (today) so `ensureUpToToday` treats a same-day store as up
+  // to date. (Account cashTS likewise runs to T.)
+  await upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, globalStartMs, todayMs());
 }
 
-/** Full rebuild of all stores from transaction history. */
+/** Full rebuild of all account stores, net worth, and holdings from history. */
 async function rebuildAll(userId) {
   const today = todayMs();
-  const allTxns = await findTransactions(userId);
-  if (!allTxns.length) return;
+  const allTxns = await fetchTxns(userId);
 
-  const accountTxnsMap = buildAccountTxnsMap(allTxns);
-  // Fetch Prices of assets
-  const pricesBySymbol = await fetchHistoricPrices(accountTxnsMap['assets'] || [], accountTxnsMap['assetStartMs'] || today, today);
+  const { byAccount, assets, assetStartMs } = buildAccountTxnsMap(allTxns);
+  const accountsById   = await loadAccountsById(userId);
+  const pricesBySymbol = await fetchPrices(assets, assetStartMs);
 
-  // Build Transactions TS for all accounts and Networth
-  const [accountStores, networthStore] = tsService.buildTransactionsTS(userId, accountTxnsMap, pricesBySymbol);
+  const accountStores = tsService.buildTransactionsTS(byAccount, pricesBySymbol, accountsById);
 
-  // Update Account Balances
-  await Promise.all(Object.entries(accountStores).map(
-    ([aid, store]) => upsertAccountBalance(aid, userId, store.cashTS, store.assetTS, store.startMs, store.endMs)
-  ));
+  // Persist stores for every account — empty stores reset accounts with no txns.
+  await Promise.all(Object.keys(accountsById).map(aid => {
+    const store = accountStores[aid];
+    return store
+      ? upsertAccountBalance(aid, userId, store.cashTS, store.assetTS, store.startMs, store.endMs)
+      : upsertAccountBalance(aid, userId, [], [], today, today);
+  }));
 
-  // Update Networth
-  await upsertNetWorth(
-    userId, 
-    networthStore.valuesTS, 
-    networthStore.lastCashValue, 
-    networthStore.settledValue, 
-    networthStore.globalStartMs, 
-    networthStore.globalEndMs
-  );
-
-  // Update Holdings
-  await rebuildAllHoldingsFromMap(userId, accountTxnsMap);
+  await rebuildNW(userId);
+  await holdingsService.rebuildAllHoldingsFromMap(userId, byAccount);
 }
 
-// ─── Extending Services ───────────────────────────────────────────────────────────────
+
+// ─── Extend service ─────────────────────────────────────────────────────────
 
 /**
- * Prepare calibrated transactions for the user. These are abstract transactions used to extend TS
- */
-async function calibratedTransactions(userId) {
-  const today = todayMs();
-  const accountDocs = await DailyAccountBalance.find({ user: userId }).select('account endDate lastCashValue').lean();
-  if (!accountDocs.length) return [];
-
-  let txns = [];
-  for (const { account, endDate, lastCashValue } of accountDocs) {
-    const endMs = midnight(endDate);
-
-    // Add Cash calibration transaction
-    txns.push({
-      user: userId,
-      account,
-      date: new Date(endMs + DAY_MS),
-      type: '_cashcalibration',
-      amount: lastCashValue || 0
-    });
-
-    // Add Asset calibration transaction
-    if (!account.isDebt) {
-      const holdingsDoc = await AccountHoldings.findOne({ account, user: userId }).select('holdings').lean();
-      if (holdingsDoc?.holdings) {
-        for (const { assetSymbol, assetName, assetType, units, avgPricePerUnit, totalInvested } of holdingsDoc.holdings) {
-          txns.push({
-            user: userId,
-            account,
-            date: new Date(endMs + DAY_MS),
-            type: '_assetcalibration',
-            assetSymbol,
-            assetName,
-            assetType,
-            units,
-            pricePerUnit: avgPricePerUnit,
-            usesCashBalance: false,
-            amount: totalInvested
-          });
-        }
-      }
-    }
-  }
-
-  return txns;
-}
-
-/**
- * Extend all stores to today with real asset prices.
+ * Extend every store forward to today without replaying transaction history,
+ * using the current cash balance and holdings as calibration.
+ *
+ * The two series end on different days (cashTS → T, assetTS → T-1), so they are
+ * calibrated on different days:
+ *
+ *   cashTS   ends at prevT      → carry lastCashValue forward for prevT+1 … today.
+ *   assetTS  ends at prevT-1    → resume at **prevT**, injecting current holdings
+ *                                 as an `_assetcalibration` there and pricing
+ *                                 prevT … newT-1 with real market data.
+ *
+ * (A single combined build can't do this — cash would need to start a day after
+ * asset, which the shared start-day builder can't express — so the two series
+ * are extended independently here.)
  */
 async function ensureUpToToday(userId) {
   const today = todayMs();
-  const nwDoc = await DailyNetWorth.findOne({ user: userId }).select('startDate endDate valuesTS').lean();
-  if (nwDoc && nwDoc.endDate >= today) return; // already up to date
+  const t1    = t1Ms();
+  const nwDoc = await DailyNetWorth.findOne({ user: userId }).select('endDate').lean();
+  if (nwDoc && midnight(nwDoc.endDate) >= today) return; // already current
 
-  const calibratedTxns = await calibratedTransactions(userId);
-  const accountTxnsMap = buildAccountTxnsMap(calibratedTxns);
+  const acctDocs = await DailyAccountBalance
+    .find({ user: userId })
+    .select('account startDate cashTS assetTS lastCashValue')
+    .lean();
+  if (!acctDocs.length) return;
 
-  // Fetch Prices of assets
-  const pricesBySymbol = await fetchHistoricPrices(accountTxnsMap['assets'] || [], accountTxnsMap['assetStartMs'] || today, today);
+  const accountsById = await loadAccountsById(userId);
 
-  // Build Transactions TS for all accounts and Networth
-  const [accountStores, networthStore] = tsService.buildTransactionsTS(userId, accountTxnsMap, pricesBySymbol, true);
+  // Load holdings once per non-debt account and collect symbols for a single
+  // batched price fetch. Each account's asset series resumes at its own prevT.
+  const holdingsByAcct = {};
+  const assetsSeen     = new Map(); // sym → { assetSymbol, assetType }
+  let   minAssetStart  = Infinity;
 
-  // Update Account Balances
-  await Promise.all(Object.entries(accountStores).map(
-    ([aid, store]) => {
-      const accountBalDoc = await DailyAccountBalance.findOne({ account: aid, user: userId }).select('startDate endDate cashTS assetsTS').lean();
-      const { result: newcashTS, startMs, endMs } = tsConcat(accountBalDoc?.cashTS, store.cashTS, accountBalDoc?.startDate, store.startMs, accountBalDoc?.endDate, store.endMs);
-      const { result: newassetTS, startMs, endMs } = tsConcat(accountBalDoc?.assetTS, store.assetTS, accountBalDoc?.startDate, store.startMs, accountBalDoc?.endDate, store.endMs);
-      return upsertAccountBalance(aid, userId, newcashTS, newassetTS, startMs, endMs);
+  for (const d of acctDocs) {
+    const aid = d.account.toString();
+    if (accountsById[aid]?.isDebt || !d.cashTS?.length) continue;
+
+    const hDoc     = await AccountHoldings.findOne({ account: d.account, user: userId }).select('holdings').lean();
+    const holdings = (hDoc?.holdings || []).filter(h => h.units);
+    if (!holdings.length) continue;
+
+    holdingsByAcct[aid] = holdings;
+    // prevT = day after assetTS's last entry (assetTS runs to prevT-1).
+    const assetStart = midnight(d.startDate) + (d.assetTS?.length || 0) * DAY_MS;
+    minAssetStart = Math.min(minAssetStart, assetStart);
+    for (const h of holdings) {
+      const sym = h.assetSymbol?.toUpperCase();
+      if (sym && !assetsSeen.has(sym)) assetsSeen.set(sym, { assetSymbol: sym, assetType: h.assetType || 'stock' });
     }
-  ));
+  }
 
-  // Update Networth
-  const { result: newvaluesTS, startMs, endMs } = tsConcat(nwDoc?.valuesTS, networthStore.valuesTS, nwDoc?.startDate, networthStore.globalStartMs, nwDoc?.endDate, networthStore.globalEndMs);
-  await upsertNetWorth(userId, newvaluesTS, networthStore.lastCashValue, networthStore.settledValue, startMs, endMs);
+  const pricesBySymbol = await fetchPrices(
+    [...assetsSeen.values()],
+    Number.isFinite(minAssetStart) ? minAssetStart : today,
+  );
+
+  await Promise.all(acctDocs.map(async (d) => {
+    const aid      = d.account.toString();
+    const isDebt   = accountsById[aid]?.isDebt || false;
+    const docStart = midnight(d.startDate);
+    const cashTS   = d.cashTS  || [];
+    const assetTS  = d.assetTS || [];
+    if (!cashTS.length) return; // never-transacted account — nothing to extend
+
+    const prevT    = docStart + (cashTS.length - 1) * DAY_MS; // last cash day (T)
+    const lastCash = d.lastCashValue ?? cashTS[cashTS.length - 1] ?? 0;
+
+    // Cash: carry lastCashValue forward for prevT+1 … today.
+    const cashDays  = Math.round((today - prevT) / DAY_MS);
+    const newCashTS = cashDays > 0 ? cashTS.concat(Array(cashDays).fill(lastCash)) : cashTS.slice();
+
+    // Asset: resume at prevT (= docStart + assetTS.length days) … newT-1.
+    let newAssetTS = assetTS.slice();
+    if (!isDebt) {
+      const assetStart = docStart + assetTS.length * DAY_MS; // prevT
+      if (assetStart <= t1) {
+        const holdings = holdingsByAcct[aid];
+        if (holdings) {
+          const calibTxns = holdings.map(h => ({
+            type:         '_assetcalibration',
+            assetSymbol:  h.assetSymbol,
+            assetType:    h.assetType,
+            units:        h.units,
+            pricePerUnit: h.avgPricePerUnit,
+            date:         new Date(assetStart),
+          }));
+          newAssetTS = assetTS.concat(tsService.buildAssetTS(calibTxns, pricesBySymbol, assetStart, t1));
+        } else {
+          // Non-debt account with no holdings — settled asset value stays 0.
+          const zeros = Math.round((t1 - assetStart) / DAY_MS) + 1;
+          newAssetTS = assetTS.concat(Array(Math.max(0, zeros)).fill(0));
+        }
+      }
+    }
+
+    return upsertAccountBalance(aid, userId, newCashTS, newAssetTS, docStart, today);
+  }));
+
+  await rebuildNW(userId);
 }
 
-// ─── Transaction Updates Services ───────────────────────────────────────────────────────────────
 
-/**
- * Update the stores with provided transaction array
- */
+// ─── Delta update service ─────────────────────────────────────────────────────
+
+/** Apply a delta set of transactions to existing stores (create/update/delete). */
 async function updateForTxns(userId, txns) {
-  const today = todayMs();
-  const accountTxnsMap = buildAccountTxnsMap(txns);
+  const { byAccount, assets, assetStartMs } = buildAccountTxnsMap(txns);
+  const accountsById   = await loadAccountsById(userId);
+  const pricesBySymbol = await fetchPrices(assets, assetStartMs);
 
-  // Fetch Prices of assets
-  const pricesBySymbol = await fetchHistoricPrices(accountTxnsMap['assets'] || [], accountTxnsMap['assetStartMs'] || today, today);
+  const deltaStores = tsService.buildTransactionsTS(byAccount, pricesBySymbol, accountsById);
 
-  // Build Transactions TS for all accounts and Networth
-  const [accountStores, networthStore] = tsService.buildTransactionsTS(userId, accountTxnsMap, pricesBySymbol);
+  await Promise.all(Object.entries(deltaStores).map(async ([aid, store]) => {
+    const doc = await DailyAccountBalance
+      .findOne({ account: aid, user: userId })
+      .select('startDate endDate cashTS assetTS')
+      .lean();
 
-  // Update Account Balances
-  await Promise.all(Object.entries(accountStores).map(
-    ([aid, store]) => {
-      const accountBalDoc = await DailyAccountBalance.findOne({ account: aid, user: userId }).select('startDate endDate cashTS assetsTS').lean();
-      const { result: newcashTS, startMs, endMs } = tsAdder(accountBalDoc?.cashTS, store.cashTS, accountBalDoc?.startDate, store.startMs, accountBalDoc?.endDate, store.endMs);
-      const { result: newassetTS, startMs, endMs } = tsAdder(accountBalDoc?.assetTS, store.assetTS, accountBalDoc?.startDate, store.startMs, accountBalDoc?.endDate, store.endMs);
-      return upsertAccountBalance(aid, userId, newcashTS, newassetTS, startMs, endMs);
+    if (!doc || !(doc.cashTS?.length || doc.assetTS?.length)) {
+      return upsertAccountBalance(aid, userId, store.cashTS, store.assetTS, store.startMs, store.endMs);
     }
-  ));
 
-  // Update Networth
-  const nwDoc = await DailyNetWorth.findOne({ user: userId }).select('startDate endDate valuesTS').lean();
+    const docStartMs = midnight(doc.startDate);
+    const cashEndMs  = midnight(doc.endDate);
+    const assetEndMs = docStartMs + Math.max(0, (doc.assetTS?.length || 0) - 1) * DAY_MS;
 
-  const { result: newvaluesTS, startMs, endMs } = tsAdder(nwDoc?.valuesTS, networthStore.valuesTS, nwDoc?.startDate, networthStore.globalStartMs, nwDoc?.endDate, networthStore.globalEndMs);
-  await upsertNetWorth(userId, newvaluesTS, networthStore.lastCashValue, networthStore.settledValue, startMs, endMs);
+    const cash  = tsAdder(doc.cashTS,  store.cashTS,  docStartMs, store.startMs, cashEndMs,  store.endMs);
+    const asset = tsAdder(doc.assetTS, store.assetTS, docStartMs, store.startMs, assetEndMs, t1Ms());
 
-  // Update Holdings
-  await updateHoldingsFromMap(userId, accountTxnsMap);
+    return upsertAccountBalance(aid, userId, cash.result, asset.result, cash.startMs, cash.endMs);
+  }));
+
+  await rebuildNW(userId);
+  await holdingsService.updateHoldingsFromMap(userId, byAccount);
 }
 
-// ─── Upsert Services ───────────────────────────────────────────────────────────────
+
+// ─── Persistence ─────────────────────────────────────────────────────────────
 
 async function upsertAccountBalance(accountId, userId, cashTS, assetTS, startMs, endMs = todayMs()) {
   const lastCashValue = cashTS[cashTS.length - 1] ?? 0;
@@ -210,9 +259,9 @@ async function upsertAccountBalance(accountId, userId, cashTS, assetTS, startMs,
     { account: accountId, user: userId },
     {
       account: accountId, user: userId,
-      startDate: new Date(startMs), 
-      endDate: new Date(endMs),
-      cashTS, 
+      startDate: new Date(startMs),
+      endDate:   new Date(endMs),
+      cashTS,
       assetTS,
       lastCashValue,
       settledValue: lastCashValue + assetAtT1,
@@ -225,8 +274,9 @@ async function upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, sta
   await DailyNetWorth.findOneAndUpdate(
     { user: userId },
     {
-      startDate:     new Date(startMs),
-      endDate:       new Date(endMs),
+      user: userId,
+      startDate: new Date(startMs),
+      endDate:   new Date(endMs),
       valuesTS,
       settledValue,
       lastCashValue,
@@ -238,7 +288,6 @@ async function upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, sta
 module.exports = {
   rebuildNW,
   rebuildAll,
-  calibratedTransactions,
   ensureUpToToday,
   updateForTxns,
   upsertAccountBalance,

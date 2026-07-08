@@ -3,7 +3,7 @@ import Modal from '../ui/Modal';
 import StatementUpload from './StatementUpload';
 import TransactionReview from './TransactionReview';
 
-export default function ImportModal({ open, onClose, accounts, onSuccess }) {
+export default function ImportModal({ open, onClose, accounts, defaultAccountId, onSuccess }) {
   const [step, setStep]         = useState('upload');   // 'upload' | 'review'
   const [parsed, setParsed]     = useState(null);
   const [accountId, setAccountId] = useState('');
@@ -35,6 +35,7 @@ export default function ImportModal({ open, onClose, accounts, onSuccess }) {
       {step === 'upload' && (
         <StatementUpload
           accounts={accounts}
+          defaultAccountId={defaultAccountId}
           onParsed={handleParsed}
         />
       )}

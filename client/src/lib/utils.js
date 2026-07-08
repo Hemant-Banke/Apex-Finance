@@ -1,6 +1,13 @@
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+// Domain type vocabularies live in one place; re-exported here for convenience
+// so existing `import { ACCOUNT_TYPES } from '../lib/utils'` call sites keep working.
+export {
+  ACCOUNT_TYPES, TRANSACTION_TYPES, ASSET_TYPES,
+  labelOf, accountTypeLabel, transactionTypeLabel, assetTypeLabel,
+} from './constants';
+
 export function cn(...inputs) {
   return twMerge(clsx(inputs));
 }
@@ -79,37 +86,6 @@ export function getAccountIcon(type) {
   };
   return icons[type] || 'Briefcase';
 }
-
-export const ACCOUNT_TYPES = [
-  { value: 'bank', label: 'Bank Account' },
-  { value: 'brokerage', label: 'Brokerage' },
-  { value: 'retirement', label: 'Retirement' },
-  { value: 'debt', label: 'Debt / Loan' },
-  { value: 'wallet', label: 'Wallet' },
-  { value: 'other', label: 'Other' }
-];
-
-export const TRANSACTION_TYPES = [
-  { value: 'income', label: 'Income' },
-  { value: 'expense', label: 'Expense' },
-  { value: 'transfer', label: 'Transfer' },
-  { value: 'adjustment', label: 'Adjustment' },
-  { value: 'buy', label: 'Buy Asset' },
-  { value: 'sell', label: 'Sell Asset' },
-];
-
-export const ASSET_TYPES = [
-  { value: 'stock', label: 'Stock' },
-  { value: 'bond', label: 'Bond' },
-  { value: 'mutual_fund', label: 'Mutual Fund' },
-  { value: 'etf', label: 'ETF' },
-  { value: 'crypto', label: 'Crypto' },
-  { value: 'gold', label: 'Gold' },
-  { value: 'commodity', label: 'Commodity' },
-  { value: 'epf_nps', label: 'EPF / NPS' },
-  { value: 'fd', label: 'Fixed Deposit (FD)' },
-  { value: 'other', label: 'Other' },
-];
 
 export const CHART_COLORS = [
   '#2dd4bf', '#f97316', '#60a5fa', '#a78bfa', '#22c55e',

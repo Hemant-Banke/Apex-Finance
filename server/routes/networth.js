@@ -40,8 +40,8 @@ router.get('/daily', async (req, res) => {
 
     // Append today's value if fetchLatestBal
     if (req.query.fetchLatestBal === 'true') {
-      const liveAssetValue = await getAllAccountsAssetBalance(req.user, true)?.value || 0;
-  
+      const { value: liveAssetValue } = await getAllAccountsAssetBalance(req.user, true);
+
       result.push({
         date:  todayStr(),
         value: (doc.lastCashValue || 0) + liveAssetValue,

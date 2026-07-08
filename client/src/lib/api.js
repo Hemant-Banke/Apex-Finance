@@ -9,22 +9,38 @@ const api = axios.create({
   }
 });
 
-// Request interceptor — attach JWT token
+// ── Global in-flight request tracking (drives the top progress bar) ──────────
+let _inFlight = 0;
+const _loadingSubs = new Set();
+function _emitLoading() { _loadingSubs.forEach(fn => fn(_inFlight)); }
+function _startRequest() { _inFlight += 1; _emitLoading(); }
+function _endRequest()   { _inFlight = Math.max(0, _inFlight - 1); _emitLoading(); }
+
+/** Subscribe to in-flight request count. Returns an unsubscribe fn. */
+export function subscribeLoading(fn) {
+  _loadingSubs.add(fn);
+  fn(_inFlight);
+  return () => _loadingSubs.delete(fn);
+}
+
+// Request interceptor — attach JWT token + track loading
 api.interceptors.request.use(
   (config) => {
+    _startRequest();
     const token = localStorage.getItem('apex_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
   },
-  (error) => Promise.reject(error)
+  (error) => { _endRequest(); return Promise.reject(error); }
 );
 
 // Response interceptor — handle 401
 api.interceptors.response.use(
-  (response) => response,
+  (response) => { _endRequest(); return response; },
   (error) => {
+    _endRequest();
     // Don't redirect for login/register — wrong credentials should show an in-page error.
     // All other 401s (including /auth/me on session restore) redirect to login.
     const url = error.config?.url || '';

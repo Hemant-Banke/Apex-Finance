@@ -21,10 +21,17 @@ export default function AppShell({ children }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [rebuilding, setRebuilding] = useState(false);
+  // Bumping this remounts the routed page below, re-running its mount-time
+  // fetch so the UI reflects freshly rebuilt stores without a full reload.
+  const [refreshKey, setRefreshKey] = useState(0);
 
   const handleRebuild = async () => {
     setRebuilding(true);
-    try { await networthAPI.rebuild(); toast.success('Stores rebuilt'); }
+    try {
+      await networthAPI.rebuild();
+      toast.success('Stores rebuilt');
+      setRefreshKey(k => k + 1);
+    }
     catch (e) { toast.error(e.response?.data?.message || 'Rebuild failed'); }
     finally { setRebuilding(false); }
   };
@@ -196,7 +203,7 @@ export default function AppShell({ children }) {
         position: 'relative',
         zIndex: 1,
       }}>
-        <div style={{
+        <div key={refreshKey} style={{
           maxWidth: 1060,
           margin: '0 auto',
           padding: '40px 48px 60px',

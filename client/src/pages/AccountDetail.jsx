@@ -12,9 +12,10 @@ import AssetTransactionForm from '../components/market/AssetTransactionForm';
 import HoldingsDonut from '../components/charts/HoldingsDonut';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import AssetPricePanel from '../components/charts/AssetPricePanel';
+import ImportModal from '../components/import/ImportModal';
 import {
   ArrowLeft, Plus, Pencil, X, TrendingUp, Shield, CreditCard,
-  Landmark, Wallet, Briefcase, Package, BarChart2
+  Landmark, Wallet, Briefcase, Package, BarChart2, Upload
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -40,6 +41,7 @@ export default function AccountDetail() {
   // Asset buy/sell modal (MarketSearch → AssetTransactionForm)
   const [assetModal, setAssetModal]         = useState(false);
   const [selectedSecurity, setSelectedSecurity] = useState(null);
+  const [importOpen, setImportOpen]         = useState(false);
 
   useEffect(() => { load(); }, [id]);
 
@@ -90,15 +92,30 @@ export default function AccountDetail() {
 
   const closeAssetModal = () => { setAssetModal(false); setSelectedSecurity(null); };
 
-  // Fetch function for PriceGrapher — stable ref, uses account id from closure
+  const openImport = async () => {
+    if (allAccounts.length === 0) {
+      try {
+        const res = await accountsAPI.getAll();
+        setAllAccounts(res.data.filter(a => a._id !== id));
+      } catch (e) { toast.error(e.response?.data?.message || 'Failed to load accounts'); }
+    }
+    setImportOpen(true);
+  };
+
+  // Fetch function for PriceGrapher — stable ref, uses account id from closure.
+  // The /daily route returns { date, cashValue, assetValue, totalValue }; the
+  // chart plots `value`, so map to the total account balance over time.
   const fetchDailyBalance = useCallback(
-    (days) => accountsAPI.getDaily(id, days).then(res => res.data),
+    (days) => accountsAPI.getDaily(id, days).then(res =>
+      res.data.map(d => ({ date: d.date, value: d.totalValue }))
+    ),
     [id]
   );
 
   // Balance breakdown (non-debt accounts)
+  const cashBalance   = account?.cashBalance ?? account?.balance ?? 0;
   const totalInvested = account?.holdings?.filter(h => h.qty > 0).reduce((s, h) => s + h.totalInvested, 0) || 0;
-  const totalValue    = (account?.balance || 0) + totalInvested;
+  const totalValue    = cashBalance + totalInvested;
 
   if (loading) return (
     <div className="flex items-center justify-center" style={{ height: '60vh' }}>
@@ -139,6 +156,9 @@ export default function AccountDetail() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={openImport} className="btn-ghost">
+            <Upload size={15} /> Import
+          </button>
           {!account.isDebt && (
             <button onClick={() => { setSelectedSecurity(null); setAssetModal(true); }} className="btn-ghost">
               <BarChart2 size={15} /> Add Asset
@@ -163,7 +183,7 @@ export default function AccountDetail() {
           <div style={{ paddingRight: 24, borderRight: '1px solid var(--color-border-subtle)' }}>
             <p className="label" style={{ marginBottom: 8 }}>Cash</p>
             <p className="text-xl font-semibold tabular-nums" style={{ color: 'var(--color-text-primary)' }}>
-              {formatCurrency(account.balance)}
+              {formatCurrency(cashBalance)}
             </p>
           </div>
           <div style={{ padding: '0 24px', borderRight: '1px solid var(--color-border-subtle)' }}>
@@ -184,7 +204,7 @@ export default function AccountDetail() {
       {/* Account Balance History */}
       <PriceGrapher
         fetchData={fetchDailyBalance}
-        title="Cash Balance"
+        title="Account Balance"
         valueLabel="Balance"
         refreshKey={chartKey}
         height={240}
@@ -316,6 +336,15 @@ export default function AccountDetail() {
         title="Delete transaction"
         message={`Delete this ${deleteTx?.type} transaction of ${deleteTx ? formatCurrency(deleteTx.amount) : ''}? This action cannot be undone.`}
         skipKey={SKIP_DELETE_KEY}
+      />
+
+      {/* Import statement modal — pre-targets this account */}
+      <ImportModal
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        accounts={[account, ...allAccounts]}
+        defaultAccountId={id}
+        onSuccess={() => { setImportOpen(false); load(); setChartKey(k => k + 1); }}
       />
 
       {/* Add Asset Modal — MarketSearch → AssetTransactionForm */}

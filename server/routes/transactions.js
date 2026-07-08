@@ -32,7 +32,8 @@ router.get('/', async (req, res) => {
       .populate('toAccount', 'name type')
       .sort({ date: -1 })
       .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean();
 
     res.json({ transactions, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
   } catch (err) {
@@ -81,23 +82,24 @@ router.post('/', [
       transactionData.amount = parseFloat(req.body.units) * parseFloat(req.body.pricePerUnit);
 
     // Transaction Amount Checks
-    const amount = parseFloat(transactionData.amount);
-    if (type === 'buy' && transactionData.usesCashBalance) {
-      const cashBalance = await getAccountCashBalance(account, req.user);
-      if (amount > cashBalance)
-        return res.status(400).json({ message: `Insufficient cash balance. Available: ${cashBalance.toFixed(2)}` });
-    }
+    // const amount = parseFloat(transactionData.amount);
+    // if (type === 'buy' && transactionData.usesCashBalance) {
+    //   const cashBalance = await getAccountCashBalance(account, req.user);
+    //   if (amount > cashBalance)
+    //     return res.status(400).json({ message: `Insufficient cash balance. Available: ${cashBalance.toFixed(2)}` });
+    // }
 
-    if (type === 'adjustment' && !account.isDebt) {
-      const cashBalance = await getAccountCashBalance(account, req.user);
-      if (cashBalance + amount < 0)
-        return res.status(400).json({ message: `Adjustment would result in negative cash balance. Current: ${cashBalance.toFixed(2)}` });
-    }
+    // if (type === 'adjustment' && !account.isDebt) {
+    //   const cashBalance = await getAccountCashBalance(account, req.user);
+    //   if (cashBalance + amount < 0)
+    //     return res.status(400).json({ message: `Adjustment would result in negative cash balance. Current: ${cashBalance.toFixed(2)}` });
+    // }
 
-    const transaction = await Transaction.create(transactionData);
+    const transaction = (await Transaction.create(transactionData));
 
-    // Update stores (non-blocking — errors are logged, not surfaced)
-    txService.onCreate(req.user._id, transaction).catch(console.error);
+    // Update stores before responding so the client's refetch sees fresh data.
+    // A store failure is logged but does not undo the committed transaction.
+    try { await txService.onCreate(req.user._id, transaction); } catch (e) { console.error(e); }
 
     const populated = await Transaction.findById(transaction._id)
       .populate('account',   'name type')
@@ -117,14 +119,18 @@ router.put('/:id', async (req, res) => {
     const oldTx = await Transaction.findOne({ _id: req.params.id, user: req.user._id }).lean();
     if (!oldTx) return res.status(404).json({ message: 'Transaction not found' });
 
+    // Recompute Transaction Amount for Asset Txn
+    if (ASSET_TRANSACTION_TYPES.includes(req.body.type) && req.body.units && req.body.pricePerUnit)
+      req.body.amount = parseFloat(req.body.units) * parseFloat(req.body.pricePerUnit);
+
     const transaction = await Transaction.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id },
       req.body,
       { new: true, runValidators: true }
-    ).populate('account', 'name type');
+    ).populate('account', 'name type').lean();
 
-    // Update stores
-    txService.onUpdate(req.user._id, oldTx, req.body).catch(console.error);
+    // Update stores before responding so the client's refetch sees fresh data.
+    try { await txService.onUpdate(req.user._id, oldTx, req.body); } catch (e) { console.error(e); }
 
     res.json(transaction);
   } catch (err) {
@@ -136,11 +142,11 @@ router.put('/:id', async (req, res) => {
 // DELETE /api/transactions/:id
 router.delete('/:id', async (req, res) => {
   try {
-    const transaction = await Transaction.findOneAndDelete({ _id: req.params.id, user: req.user._id });
+    const transaction = await Transaction.findOneAndDelete({ _id: req.params.id, user: req.user._id }).lean();
     if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
 
-    // Update stores
-    txService.onDelete(req.user._id, transaction).catch(console.error);
+    // Update stores before responding so the client's refetch sees fresh data.
+    try { await txService.onDelete(req.user._id, transaction); } catch (e) { console.error(e); }
 
     res.json({ message: 'Transaction deleted' });
   } catch (err) {

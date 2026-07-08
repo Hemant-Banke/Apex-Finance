@@ -79,7 +79,7 @@ router.get('/price', async (req, res) => {
     let actualDate = null;
     for (let i = timestamps.length - 1; i >= 0; i--) {
       if (timestamps[i] < endTs && closes[i] != null) {
-        price = closes[i];
+        price = Math.round(closes[i] * 100)/100;
         actualDate = toDateStr_from_ms(timestamps[i] * 1000);
         break;
       }

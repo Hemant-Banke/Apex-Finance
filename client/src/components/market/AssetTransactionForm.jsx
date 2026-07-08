@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { marketAPI, transactionsAPI } from '../../lib/api';
 import { formatCurrency, ASSET_TYPES } from '../../lib/utils';
-import { ArrowLeft, ArrowRight, RotateCcw } from 'lucide-react';
+import DatePicker from '../forms/DatePicker';
+import { ArrowLeft, ArrowRight, RotateCcw, Check } from 'lucide-react';
 
 function todayStr() {
   return new Date().toISOString().split('T')[0];
@@ -54,6 +55,11 @@ export default function AssetTransactionForm({
     : '';
 
   const [txType,       setTxType]       = useState(isEdit ? transaction.type : 'buy');
+  // Whether the trade settles against the account's cash balance.
+  // Default: buy → false (asset tracked independently), sell → true (proceeds land in cash).
+  const [usesCashBalance, setUsesCashBalance] = useState(
+    isEdit ? !!transaction.usesCashBalance : false
+  );
   const [date,         setDate]         = useState(isEdit ? transaction.date?.split?.('T')[0] ?? todayStr() : todayStr());
   const [units,        setUnits]        = useState(isEdit ? String(transaction.units ?? '') : '');
   const [price,        setPrice]        = useState(isEdit ? String(transaction.pricePerUnit ?? '') : '');
@@ -109,14 +115,15 @@ export default function AssetTransactionForm({
     setSaving(true);
     try {
       const data = {
-        type:         txType,
-        units:        parseFloat(units),
-        pricePerUnit: parseFloat(price),
-        assetSymbol:  sym,
-        assetName:    name,
-        assetType:    isEdit ? security.type : (isManual ? assetType : security.type),
+        type:            txType,
+        units:           parseFloat(units),
+        pricePerUnit:    parseFloat(price),
+        assetSymbol:     sym,
+        assetName:       name,
+        assetType:       isEdit ? security.type : (isManual ? assetType : security.type),
+        usesCashBalance,
         date,
-        notes:        notes || undefined
+        notes:           notes || undefined
       };
 
       if (isEdit) {
@@ -182,7 +189,8 @@ export default function AssetTransactionForm({
         <label className="label block" style={{ marginBottom: 8 }}>Transaction</label>
         <div className="pill-group">
           {['buy', 'sell'].map(t => (
-            <button key={t} type="button" onClick={() => setTxType(t)}
+            <button key={t} type="button"
+              onClick={() => { setTxType(t); if (!isEdit) setUsesCashBalance(t === 'sell'); }}
               className={`pill-item ${txType === t ? 'active' : ''}`}>
               {t === 'buy' ? 'Buy' : 'Sell'}
             </button>
@@ -206,8 +214,7 @@ export default function AssetTransactionForm({
       {/* Date */}
       <div>
         <label className="label block" style={{ marginBottom: 6 }}>Date</label>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)}
-          className="input-field" max={todayStr()} />
+        <DatePicker value={date} onChange={setDate} max={todayStr()} />
       </div>
 
       {/* Units */}
@@ -269,6 +276,32 @@ export default function AssetTransactionForm({
           </span>
         </div>
       )}
+
+      {/* Settle against cash balance */}
+      <button
+        type="button"
+        onClick={() => setUsesCashBalance(v => !v)}
+        style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'inherit' }}
+      >
+        <span style={{
+          width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 1,
+          border: `2px solid ${usesCashBalance ? 'var(--color-accent)' : 'var(--color-border-hover)'}`,
+          background: usesCashBalance ? 'var(--color-accent)' : 'transparent',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          {usesCashBalance && <Check size={11} style={{ color: 'var(--color-bg-primary)', strokeWidth: 3 }} />}
+        </span>
+        <span>
+          <span style={{ display: 'block', fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 500 }}>
+            Settle against account cash
+          </span>
+          <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
+            {txType === 'buy'
+              ? 'Deduct the cost from this account’s cash balance.'
+              : 'Add the proceeds to this account’s cash balance.'}
+          </span>
+        </span>
+      </button>
 
       {/* Notes */}
       <div>

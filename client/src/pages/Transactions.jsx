@@ -30,7 +30,8 @@ export default function Transactions() {
   useEffect(() => { loadTxns(); }, [filters]);
 
   const loadTxns = async () => {
-    setLoading(true);
+    // Only the first load blanks to a spinner; later refetches keep the list
+    // visible and let the global top progress bar indicate activity.
     try {
       const p = { limit, page: filters.page };
       if (filters.account) p.account = filters.account;

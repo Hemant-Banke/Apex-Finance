@@ -1,4 +1,5 @@
 const { autoCategory } = require('./categoryRules');
+const llmService = require('./llmService');
 
 // ─── Shared helpers ────────────────────────────────────────────────────────
 
@@ -55,45 +56,121 @@ function cleanNarration(raw) {
   return s;
 }
 
-function buildTx({ date, narration, amount, type, source }) {
-  const suggestedCategory = autoCategory(narration, type);
-  return {
+function buildTx({ date, narration, amount, type, source, assetSymbol, assetName, assetType, units, pricePerUnit }) {
+  const isAsset = type === 'buy' || type === 'sell';
+  const u = units       != null ? Number(units)       : undefined;
+  const p = pricePerUnit != null ? Number(pricePerUnit) : undefined;
+
+  const tx = {
     id: uid(),
     date,
     narration,
     description: cleanNarration(narration),
-    amount,
+    // Asset amount is derived from units × price (0 when price is unknown yet).
+    amount: isAsset ? ((u && p) ? u * p : 0) : amount,
     type,
-    suggestedCategory,
+    suggestedCategory: isAsset ? null : autoCategory(narration, type),
     notes: '',
     source,
+  };
+
+  if (isAsset) {
+    tx.assetSymbol  = (assetSymbol || assetName || '').toUpperCase();
+    tx.assetName    = assetName || assetSymbol || '';
+    tx.assetType    = assetType || 'stock';
+    tx.units        = u;
+    tx.pricePerUnit = p;
+  }
+  return tx;
+}
+
+const isAssetTx = tx => tx.type === 'buy' || tx.type === 'sell';
+
+/** Keep valid rows: asset rows need units; cash rows need a positive amount. */
+function keepTx(tx) {
+  if (!tx.date) return false;
+  return isAssetTx(tx) ? (tx.units > 0) : (tx.amount > 0.01);
+}
+
+/** Turn an LLM extraction result into the standard import payload (aiParsed=true). */
+function finalizeAiResult(parsed, source) {
+  const transactions = (parsed.transactions || [])
+    .map(tx => buildTx({
+      date:         tx.date,
+      narration:    tx.narration || '',
+      amount:       parseFloat(tx.amount) || 0,
+      type:         tx.type || 'expense',
+      source,
+      assetSymbol:  tx.assetSymbol,
+      assetName:    tx.assetName,
+      assetType:    tx.assetType,
+      units:        tx.units,
+      pricePerUnit: tx.pricePerUnit,
+    }))
+    .filter(keepTx);
+
+  return {
+    transactions,
+    bankName:    parsed.bankName,
+    accountName: parsed.accountName,
+    period:      parsed.period,
+    source,
+    aiParsed:    true,
   };
 }
 
 // ─── PDF Parser ────────────────────────────────────────────────────────────
 
 async function parsePDF(buffer, password) {
-  const { PDFParse } = require('pdf-parse');
-  let result;
+  // pdf-parse v2: the constructor takes a single LoadParameters object with the
+  // PDF bytes in `data` and (optionally) the decryption `password`. Passing the
+  // Uint8Array positionally silently drops both the data and the password.
+  const { PDFParse, PasswordException } = require('pdf-parse');
+  let parser, result;
   try {
     const uint8 = new Uint8Array(buffer);
-    const opts  = password ? { password } : {};
-    const parser = new PDFParse(uint8, opts);
+    parser = new PDFParse({ data: uint8, password: password || undefined });
     result = await parser.getText();
   } catch (err) {
-    const msg = err.message || '';
-    if (msg.includes('password') || msg.includes('encrypted') || msg.includes('PasswordException')) {
-      const e = new Error('PDF_PASSWORD_REQUIRED');
+    // pdfjs PasswordException.code: 1 = NEED_PASSWORD, 2 = INCORRECT_PASSWORD.
+    const isPwd = err instanceof PasswordException
+      || err?.name === 'PasswordException'
+      || /password|encrypted/i.test(err?.message || '');
+    if (isPwd) {
+      const wrong = err?.code === 2 || /incorrect/i.test(err?.message || '');
+      const e = new Error(wrong ? 'PDF_INCORRECT_PASSWORD' : 'PDF_PASSWORD_REQUIRED');
       e.needsPassword = true;
+      e.wrongPassword = wrong;
       throw e;
     }
     throw err;
+  } finally {
+    if (parser) { try { await parser.destroy(); } catch { /* ignore */ } }
   }
 
   const text = (result.pages || []).map(p => p.text).join('\n');
+  return buildResultFromText(text, 'pdf');
+}
+
+/**
+ * Turn arbitrary statement text into a parsed result.
+ * Prefers the LLM parser (any format/structure) when an API key is configured,
+ * and falls back to the deterministic regex parser (HDFC-style layouts).
+ */
+async function buildResultFromText(text, source) {
+  if (llmService.isLLMAvailable()) {
+    try {
+      const result = finalizeAiResult(await llmService.extractTransactionsFromText(text), source);
+      if (result.transactions.length) return result;
+      // LLM found nothing usable — fall through to the regex parser.
+    } catch (err) {
+      console.error('LLM statement parse failed, falling back to regex:', err.message);
+    }
+  }
+
   const transactions = parseBankText(text);
   const meta = extractBankMeta(text);
-  return { transactions, ...meta, source: 'pdf' };
+  return { transactions, ...meta, source };
 }
 
 function parseBankText(text) {
@@ -305,61 +382,14 @@ function parseUPIHtml(html) {
 }
 
 // ─── Image Parser (Claude Vision) ─────────────────────────────────────────
+// Thin wrapper — the actual model call lives in llmService.
 
 async function parseImage(buffer, mimeType) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error('Image parsing requires ANTHROPIC_API_KEY to be set on the server');
-
-  const Anthropic = require('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey });
-
-  const response = await client.messages.create({
-    model: 'claude-opus-4-7',
-    max_tokens: 4096,
-    messages: [{
-      role: 'user',
-      content: [
-        {
-          type: 'image',
-          source: { type: 'base64', media_type: mimeType, data: buffer.toString('base64') }
-        },
-        {
-          type: 'text',
-          text: `Extract all transactions from this bank or UPI screenshot. Return ONLY a JSON object:
-{
-  "bankName": "bank or app name",
-  "accountName": "account holder name or empty string",
-  "period": { "from": "YYYY-MM-DD or null", "to": "YYYY-MM-DD or null" },
-  "transactions": [
-    { "date": "YYYY-MM-DD", "narration": "full description", "amount": 1234.56, "type": "expense|income|transfer" }
-  ]
-}
-Rules: Debit/DR/Withdrawal → expense. Credit/CR/Deposit → income. Same person → transfer. Amounts as plain numbers. No markdown.`
-        }
-      ]
-    }]
-  });
-
-  const jsonText = response.content[0].text.trim();
-  let parsed;
-  try {
-    const match = jsonText.match(/\{[\s\S]+\}/);
-    parsed = JSON.parse(match ? match[0] : jsonText);
-  } catch {
-    throw new Error('AI returned unparseable response — please try again or use a clearer screenshot');
+  if (!llmService.isLLMAvailable()) {
+    throw new Error('Reading screenshots requires AI parsing to be enabled on the server.');
   }
-
-  const transactions = (parsed.transactions || []).map(tx =>
-    buildTx({ date: tx.date, narration: tx.narration || '', amount: parseFloat(tx.amount) || 0, type: tx.type || 'expense', source: 'image' })
-  );
-
-  return {
-    transactions,
-    bankName:    parsed.bankName    || 'Unknown',
-    accountName: parsed.accountName || '',
-    period:      parsed.period      || { from: null, to: null },
-    source: 'image',
-  };
+  const parsed = await llmService.extractTransactionsFromImage(buffer, mimeType);
+  return finalizeAiResult(parsed, 'image');
 }
 
 // ─── Entry point ──────────────────────────────────────────────────────────
@@ -373,10 +403,13 @@ async function parseStatement({ buffer, mimetype, originalname, password }) {
   if (mimetype === 'text/html' || ['html', 'htm'].includes(ext)) {
     return parseUPIHtml(buffer.toString('utf-8'));
   }
+  if (mimetype === 'text/csv' || mimetype === 'text/plain' || ['csv', 'tsv', 'txt'].includes(ext)) {
+    return buildResultFromText(buffer.toString('utf-8'), 'csv');
+  }
   if (['image/png','image/jpeg','image/webp'].includes(mimetype) || ['png','jpg','jpeg','webp'].includes(ext)) {
     return parseImage(buffer, mimetype || `image/${ext}`);
   }
-  throw new Error(`Unsupported file type: ${mimetype || ext}. Upload a PDF, HTML, or image file.`);
+  throw new Error(`Unsupported file type: ${mimetype || ext}. Upload a PDF, CSV, HTML, or image file.`);
 }
 
 module.exports = { parseStatement };

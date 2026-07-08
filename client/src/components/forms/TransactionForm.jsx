@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { transactionsAPI } from '../../lib/api';
 import { formatCurrency, TRANSACTION_TYPES } from '../../lib/utils';
+import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
+import TypePicker from './TypePicker';
+import DatePicker from './DatePicker';
 import { ArrowRight } from 'lucide-react';
 
 const FORM_TYPES = TRANSACTION_TYPES.filter(t => !['buy', 'sell'].includes(t.value));
@@ -48,8 +51,8 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
   const isAdjustment = form.type === 'adjustment';
   const hasCategoryPicker = form.type === 'expense' || form.type === 'income';
 
-  // Adjustment preview (only meaningful when we have the live account balance)
-  const currentCash     = account?.balance ?? null;
+  // Adjustment preview (only meaningful when we have the live account cash balance)
+  const currentCash     = account?.cashBalance ?? account?.balance ?? null;
   const adjustedAmount  = parseFloat(form.amount) || 0;
   const afterAdjustment = currentCash !== null ? currentCash + adjustedAmount : null;
 
@@ -109,13 +112,13 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
         <>
           <div>
             <label className="label block" style={{ marginBottom: 8 }}>To account</label>
-            <select value={form.toAccount} onChange={e => set({ toAccount: e.target.value })}
-              className="input-field" required>
-              <option value="">Select destination account</option>
-              {allAccounts.map(a => (
-                <option key={a._id} value={a._id}>{a.name} ({a.type})</option>
-              ))}
-            </select>
+            <TypePicker
+              options={accountOptions(allAccounts)}
+              value={form.toAccount}
+              onChange={v => set({ toAccount: v })}
+              placeholder="Select destination account"
+              searchable={allAccounts.length > 6}
+            />
           </div>
           <div>
             <label className="label block" style={{ marginBottom: 8 }}>Amount</label>
@@ -185,8 +188,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
       {/* Date */}
       <div>
         <label className="label block" style={{ marginBottom: 8 }}>Date</label>
-        <input type="date" value={form.date} onChange={e => set({ date: e.target.value })}
-          className="input-field" />
+        <DatePicker value={form.date} onChange={v => set({ date: v })} />
       </div>
 
       {/* Notes */}

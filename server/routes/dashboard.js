@@ -5,6 +5,7 @@ const DailyNetWorth = require('../models/DailyNetWorth');
 const DailyAccountBalance = require('../models/DailyAccountBalance');
 const AccountHoldings = require('../models/AccountHoldings');
 const { protect } = require('../middleware/auth');
+const { holdingsToArray } = require('../services/holdingsService');
 
 const router = express.Router();
 router.use(protect);
@@ -42,7 +43,7 @@ router.get('/summary', async (req, res) => {
     // Holdings count — unique symbols with qty > 0 across all accounts
     const symbolsSeen = new Set();
     holdingsDocs.forEach(doc => {
-      (doc.holdings || {}).forEach(h => {
+      (doc.holdings || []).forEach(h => {
         if ((h.units || 0) > 0) symbolsSeen.add(h.assetSymbol);
       });
     });
@@ -90,23 +91,27 @@ router.get('/holdings', async (req, res) => {
   try {
     const holdingsDocs = await AccountHoldings.find({ user: req.user._id }).lean();
 
+    // Merge holdings of the same symbol across accounts (raw stored shape).
     const merged = {};
     holdingsDocs.forEach(doc => {
-      (doc.holdings || {}).forEach(h => {
-        if (!merged[h.assetSymbol]) {
-          merged[h.assetSymbol] = h;
+      (doc.holdings || []).forEach(h => {
+        const sym = h.assetSymbol;
+        if (!sym) return;
+        if (!merged[sym]) {
+          merged[sym] = { assetSymbol: sym, assetName: h.assetName, assetType: h.assetType, units: 0, totalInvested: 0 };
         }
-        merged[sym].units           += h.units           || 0;
-        merged[sym].totalInvested   += h.totalInvested || 0;
+        merged[sym].units         += h.units         || 0;
+        merged[sym].totalInvested += h.totalInvested || 0;
       });
     });
 
-    // Recompute blended avgCostPerUnit after merge
+    // Blended AVCO after merge, then map to client shape.
     Object.values(merged).forEach(h => {
-      h.avgCostPerUnit = h.units > 0 ? h.totalInvested / h.units : 0;
+      h.avgPricePerUnit = h.units > 0 ? h.totalInvested / h.units : 0;
     });
 
-    res.json(Object.values(merged).filter(h => h.totalInvested > 0));
+    const result = holdingsToArray(Object.values(merged)).filter(h => h.totalInvested > 0);
+    res.json(result);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Server error' });
@@ -121,7 +126,7 @@ router.get('/asset-allocation', async (req, res) => {
 
     const byType = {};
     holdingsDocs.forEach(doc => {
-      (doc.holdings || {}).forEach(h => {
+      (doc.holdings || []).forEach(h => {
         if ((h.totalInvested || 0) <= 0) return;
         const t = h.assetType || 'other';
         if (!byType[t]) byType[t] = { _id: t, totalInvested: 0, assets: new Set() };
