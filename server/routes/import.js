@@ -4,7 +4,12 @@ const router  = express.Router();
 const { protect }        = require('../middleware/auth');
 const { parseStatement } = require('../lib/statementParsers');
 const llmService         = require('../lib/llmService');
+const categoryProfile    = require('../services/categoryProfileService');
 const { getUserCategoryTaxonomy } = require('../services/categoryService');
+const { MISC_CATEGORY }  = require('../lib/categoryRules');
+
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const dayName = d => { const x = new Date(d); return isNaN(x) ? '' : DOW[x.getUTCDay()]; };
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -30,28 +35,56 @@ const upload = multer({
 });
 
 /**
- * Predict categories for parsed transactions using the user's taxonomy (LLM).
- * Best-effort: on any failure the existing keyword-based `suggestedCategory`
- * from the parser is left untouched.
+ * Fill each income/expense transaction's `suggestedCategory` in layers, cheapest
+ * first, so the LLM is only called for what earlier layers couldn't classify:
+ *   1. regex keyword rules  (already applied in buildTx)
+ *   2. the user's learned category profile (decisive, no model call)
+ *   3. the LLM (only for whatever remains, with the profile as context)
+ *   4. Other → Miscellaneous fallback for anything still unclassified
+ * Every step is best-effort; a failure just leaves earlier suggestions in place.
  */
 async function applySmartCategories(userId, result) {
-  if (!llmService.isLLMAvailable() || !result.transactions?.length) return;
+  const cashRows = (result.transactions || []).filter(t => t.type === 'income' || t.type === 'expense');
+  if (!cashRows.length) return;
 
-  // Only income/expense rows carry a category — skip transfers and asset trades.
-  const items = result.transactions
-    .filter(t => t.type === 'income' || t.type === 'expense')
-    .map(t => ({ id: t.id, type: t.type, narration: t.narration, amount: t.amount, date: t.date }));
-  if (!items.length) return;
+  const taxonomy   = await getUserCategoryTaxonomy(userId);
+  const validByType = {
+    expense: new Set(taxonomy.expense.map(o => o.code)),
+    income:  new Set(taxonomy.income.map(o => o.code)),
+  };
 
-  try {
-    const taxonomy = await getUserCategoryTaxonomy(userId);
-    const suggestions = await llmService.categorizeTransactions(items, taxonomy);
-    result.transactions = result.transactions.map(t => ({
-      ...t,
-      suggestedCategory: suggestions[t.id] ?? t.suggestedCategory ?? null,
-    }));
-  } catch (err) {
-    console.error('LLM categorization failed, keeping keyword suggestions:', err.message);
+  // Layer 1 (regex) already ran in buildTx → suggestedCategory. Collect the rest.
+  let pending = cashRows.filter(t => !t.suggestedCategory);
+
+  // Layer 2 — learned profile (decisive merchant→category).
+  if (pending.length) {
+    try {
+      const preds = await categoryProfile.predictFromProfile(
+        userId,
+        pending.map(t => ({ id: t.id, type: t.type, narration: t.narration, amount: t.amount, date: t.date })),
+        validByType,
+      );
+      for (const t of pending) if (preds[t.id]) t.suggestedCategory = preds[t.id];
+      pending = pending.filter(t => !t.suggestedCategory);
+    } catch (err) { console.error('Profile categorization failed:', err.message); }
+  }
+
+  // Layer 3 — LLM for whatever remains, primed with the user's profile.
+  if (pending.length && llmService.isLLMAvailable()) {
+    try {
+      const summary = await categoryProfile.getProfileSummary(userId, taxonomy);
+      const items = pending.map(t => ({ id: t.id, type: t.type, narration: t.narration, amount: t.amount, day: dayName(t.date) }));
+      const preds = await llmService.categorizeTransactions(items, taxonomy, summary);
+      for (const t of pending) {
+        const code = preds[t.id];
+        if (code && validByType[t.type].has(code)) t.suggestedCategory = code;
+      }
+    } catch (err) { console.error('LLM categorization failed:', err.message); }
+  }
+
+  // Layer 4 — Other → Miscellaneous fallback (works with or without an API key).
+  for (const t of cashRows) {
+    if (!t.suggestedCategory) t.suggestedCategory = MISC_CATEGORY[t.type];
   }
 }
 

@@ -13,6 +13,9 @@ import HoldingsDonut from '../components/charts/HoldingsDonut';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import AssetPricePanel from '../components/charts/AssetPricePanel';
 import ImportModal from '../components/import/ImportModal';
+import Button from '../components/ui/Button';
+import AssetIcon from '../components/market/AssetIcon';
+import { assetTypeLabel } from '../lib/constants';
 import {
   ArrowLeft, Plus, Pencil, X, TrendingUp, Shield, CreditCard,
   Landmark, Wallet, Briefcase, Package, BarChart2, Upload
@@ -20,6 +23,27 @@ import {
 import { useToast } from '../context/ToastContext';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
+
+// Small pill showing an asset's type in a modal header.
+function AssetTypePill({ type }) {
+  if (!type) return null;
+  return (
+    <span style={{
+      flexShrink: 0, padding: '3px 9px', borderRadius: 999,
+      fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
+      color: 'var(--color-accent)', background: 'var(--color-accent-dim)',
+      border: '1px solid var(--color-accent-dim)', whiteSpace: 'nowrap',
+    }}>
+      {assetTypeLabel(type)}
+    </span>
+  );
+}
+
+// Highlighted asset name for a modal subtitle (item 4).
+function AssetName({ name }) {
+  if (!name) return null;
+  return <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>{name}</span>;
+}
 
 const iconMap = {
   bank: Landmark, brokerage: TrendingUp, retirement: Shield,
@@ -130,6 +154,8 @@ export default function AccountDetail() {
   );
 
   const Icon = iconMap[account.type] || Briefcase;
+  // Asset-holding accounts (brokerage/retirement) lead with the Add-asset CTA.
+  const isAssetAccount = ['brokerage', 'retirement'].includes(account.type);
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
@@ -156,17 +182,16 @@ export default function AccountDetail() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={openImport} className="btn-ghost">
-            <Upload size={15} /> Import
-          </button>
-          {!account.isDebt && (
-            <button onClick={() => { setSelectedSecurity(null); setAssetModal(true); }} className="btn-ghost">
-              <BarChart2 size={15} /> Add Asset
-            </button>
-          )}
-          <button onClick={openModal} className="btn-primary">
-            <Plus size={15} /> Add transaction
-          </button>
+          <Button variant="icon" icon={Upload} onClick={openImport} title="Import transactions" aria-label="Import transactions" />
+          {(() => {
+            const addTxn   = <Button key="txn" variant={isAssetAccount ? 'secondary' : 'gold'} icon={Plus} onClick={openModal}>Add transaction</Button>;
+            const addAsset = <Button key="asset" variant={isAssetAccount ? 'gold' : 'secondary'} icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>;
+            // Left → right: import (icon), then secondary, then the gold primary.
+            // Asset accounts make Add asset primary; cash accounts make Add transaction primary.
+            // Debt accounts hold no assets, so only Add transaction.
+            if (account.isDebt) return addTxn;
+            return isAssetAccount ? [addTxn, addAsset] : [addAsset, addTxn];
+          })()}
         </div>
       </div>
 
@@ -174,7 +199,7 @@ export default function AccountDetail() {
       {account.isDebt ? (
         <div className="card">
           <p className="heading-sm mb-3">Outstanding Balance</p>
-          <p className="display-number text-[var(--color-danger)]">
+          <p className="figure display-number text-[var(--color-danger)]">
             −{formatCurrency(Math.abs(account.balance))}
           </p>
         </div>
@@ -182,19 +207,19 @@ export default function AccountDetail() {
         <div className="card" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0 }}>
           <div style={{ paddingRight: 24, borderRight: '1px solid var(--color-border-subtle)' }}>
             <p className="label" style={{ marginBottom: 8 }}>Cash</p>
-            <p className="text-xl font-semibold tabular-nums" style={{ color: 'var(--color-text-primary)' }}>
+            <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
               {formatCurrency(cashBalance)}
             </p>
           </div>
           <div style={{ padding: '0 24px', borderRight: '1px solid var(--color-border-subtle)' }}>
             <p className="label" style={{ marginBottom: 8 }}>Assets (book value)</p>
-            <p className="text-xl font-semibold tabular-nums" style={{ color: 'var(--color-text-primary)' }}>
+            <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
               {formatCurrency(totalInvested)}
             </p>
           </div>
           <div style={{ paddingLeft: 24 }}>
             <p className="label" style={{ marginBottom: 8 }}>Total Value</p>
-            <p className="text-xl font-semibold tabular-nums" style={{ color: 'var(--color-accent)' }}>
+            <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-accent)' }}>
               {formatCurrency(totalValue)}
             </p>
           </div>
@@ -242,11 +267,11 @@ export default function AccountDetail() {
                   <div>
                     <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{h.symbol}</p>
                     <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      {h.name} · {h.qty} units · avg {formatCurrency(h.avgCostPerUnit)} · {h.type?.replace('_', ' ')}
+                      {h.name} · <span className="figure">{h.qty}</span> units · avg <span className="figure">{formatCurrency(h.avgCostPerUnit)}</span> · {h.type?.replace('_', ' ')}
                     </p>
                   </div>
                 </div>
-                <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--color-text-primary)' }}>
+                <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
                   {formatCurrency(h.totalInvested)}
                 </span>
               </div>
@@ -272,8 +297,8 @@ export default function AccountDetail() {
                     {tx.toAccount && ` → ${tx.toAccount.name}`}
                   </p>
                 </div>
-                <span className={`text-sm font-semibold tabular-nums ${getTransactionColor(tx.type)}`}
-                  style={{ marginLeft: 16 }}>
+                <span className={`figure text-sm ${getTransactionColor(tx.type)}`}
+                  style={{ marginLeft: 16, fontWeight: 600 }}>
                   {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
                 </span>
                 <button onClick={() => openEdit(tx)}
@@ -297,7 +322,7 @@ export default function AccountDetail() {
       </div>
 
       {/* Add Transaction Modal */}
-      <Modal open={modal} onClose={closeModal} title="New transaction">
+      <Modal open={modal} onClose={closeModal} eyebrow={account.name} title="New transaction" icon={Plus}>
         <TransactionForm
           accountId={id}
           account={account}
@@ -308,7 +333,13 @@ export default function AccountDetail() {
 
       {/* Edit Transaction Modal — AssetTransactionForm for buy/sell */}
       <Modal open={!!editTx} onClose={() => setEditTx(null)}
-        title={['buy','sell'].includes(editTx?.type) ? `Edit ${editTx?.type} — ${editTx?.assetSymbol}` : 'Edit transaction'}
+        eyebrow="Edit"
+        title={['buy','sell'].includes(editTx?.type) ? `${editTx?.type === 'buy' ? 'Buy' : 'Sell'} · ${editTx?.assetSymbol}` : 'Edit transaction'}
+        subtitle={['buy','sell'].includes(editTx?.type) ? <AssetName name={editTx?.assetName} /> : undefined}
+        titleSuffix={['buy','sell'].includes(editTx?.type) ? <AssetTypePill type={editTx?.assetType} /> : undefined}
+        titlePrefix={['buy','sell'].includes(editTx?.type)
+          ? <AssetIcon symbol={editTx.assetSymbol} name={editTx.assetName} type={editTx.assetType} size={40} />
+          : undefined}
         wide={['buy','sell'].includes(editTx?.type)}>
         {editTx && (['buy','sell'].includes(editTx.type) ? (
           <AssetTransactionForm
@@ -349,16 +380,21 @@ export default function AccountDetail() {
 
       {/* Add Asset Modal — MarketSearch → AssetTransactionForm */}
       <Modal open={assetModal} onClose={closeAssetModal}
-        title={selectedSecurity ? (selectedSecurity.isManual ? selectedSecurity.name : selectedSecurity.symbol) : 'Add Asset'}
+        align="top"
+        onBack={selectedSecurity ? () => setSelectedSecurity(null) : undefined}
+        eyebrow={selectedSecurity ? 'Record trade' : 'Add asset'}
+        title={selectedSecurity ? (selectedSecurity.isManual ? selectedSecurity.name : selectedSecurity.symbol) : 'Find an asset'}
+        subtitle={selectedSecurity ? (selectedSecurity.isManual ? undefined : <AssetName name={selectedSecurity.name} />) : 'Search stocks, ETFs, crypto, funds — or add a manual holding.'}
+        titleSuffix={selectedSecurity ? <AssetTypePill type={selectedSecurity.type} /> : undefined}
+        titlePrefix={selectedSecurity ? <AssetIcon symbol={selectedSecurity.symbol} name={selectedSecurity.name} type={selectedSecurity.type} size={40} /> : undefined}
         wide>
         {!selectedSecurity ? (
-          <MarketSearch inline onSelect={sec => setSelectedSecurity(sec)} />
+          <MarketSearch onSelect={sec => setSelectedSecurity(sec)} />
         ) : (
           <AssetTransactionForm
             security={selectedSecurity}
             accounts={[account, ...allAccounts]}
             defaultAccountId={id}
-            onBack={() => setSelectedSecurity(null)}
             onSuccess={() => { closeAssetModal(); load(); setChartKey(k => k + 1); }}
           />
         )}

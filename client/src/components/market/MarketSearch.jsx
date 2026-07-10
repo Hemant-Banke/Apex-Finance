@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { marketAPI } from '../../lib/api';
 import { Search, Loader2 } from 'lucide-react';
+import AssetIcon from './AssetIcon';
+import Popover from '../ui/Popover';
 
 // ── Popular securities shown before user types ──────────────────────────────
 const POPULAR = {
@@ -79,6 +81,33 @@ function TypeBadge({ type }) {
   );
 }
 
+// Compact clickable chip: icon + short ticker + company name.
+function SecurityChip({ s, onPick, dashed = false }) {
+  const short = s.symbol.replace('.NS', '').replace('-USD', '').replace('=F', '');
+  return (
+    <button
+      onMouseDown={() => onPick(s)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 9, minWidth: 0,
+        padding: '7px 9px', borderRadius: 'var(--radius-sm)',
+        border: `1px ${dashed ? 'dashed' : 'solid'} var(--color-border)`,
+        background: dashed ? 'transparent' : 'var(--color-bg-elevated)',
+        cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+        boxShadow: dashed ? 'none' : 'var(--elev-ring)',
+        transition: 'border-color 0.15s, background 0.15s',
+      }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-hover)'; e.currentTarget.style.background = 'var(--color-bg-card-hover)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = dashed ? 'transparent' : 'var(--color-bg-elevated)'; }}
+    >
+      <AssetIcon symbol={s.symbol} name={s.name} type={s.type} size={26} />
+      <div style={{ minWidth: 0 }}>
+        <div className="figure" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-primary)', lineHeight: 1.2 }}>{short}</div>
+        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{s.name}</div>
+      </div>
+    </button>
+  );
+}
+
 function useDebounce(val, ms) {
   const [dv, setDv] = useState(val);
   useEffect(() => {
@@ -105,7 +134,7 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
   const [error, setError]       = useState('');
   const debouncedQ              = useDebounce(query, 300);
   const inputRef                = useRef(null);
-  const containerRef            = useRef(null);
+  const searchBoxRef            = useRef(null);
 
   // Search when debounced query changes
   useEffect(() => {
@@ -120,17 +149,6 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
     return () => { cancelled = true; };
   }, [debouncedQ]);
 
-  // Close on outside click (floating mode only)
-  useEffect(() => {
-    if (inline) return;
-    const handler = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) setFocused(false);
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [inline]);
-
-  const showPanel   = inline || focused || query.length > 0;
   const showResults = query.trim().length > 0;
 
   const select = (security) => {
@@ -139,8 +157,9 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
     onSelect(security);
   };
 
-  // Shared panel content (results or popular grid)
-  const PanelContent = () => showResults ? (
+  // Shared panel content (results or popular grid) — a render helper, not a
+  // nested component, so it doesn't remount on every keystroke.
+  const renderPanel = () => showResults ? (
     error ? (
       <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>{error}</div>
     ) : results.length === 0 && !loading ? (
@@ -149,16 +168,17 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
       results.map(r => (
         <button key={r.symbol} onMouseDown={() => select(r)}
           style={{
-            width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '11px 16px', background: 'none', border: 'none', cursor: 'pointer',
+            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+            padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer',
             textAlign: 'left', transition: 'background 0.12s',
             borderBottom: '1px solid var(--color-border-subtle)'
           }}
           onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-elevated)'}
           onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-          <div style={{ minWidth: 0 }}>
+          <AssetIcon symbol={r.symbol} name={r.name} type={r.type} size={34} />
+          <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-              <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.symbol}</span>
+              <span className="figure" style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.symbol}</span>
               <TypeBadge type={r.type} />
             </div>
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -169,70 +189,42 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
       ))
     )
   ) : (
-    /* Popular securities grid */
-    <div style={{ padding: '16px' }}>
+    /* Popular securities — compact icon chips (icon + ticker + name) */
+    <div style={{ padding: '14px 16px' }}>
       {Object.entries(POPULAR).map(([category, items]) => (
-        <div key={category} style={{ marginBottom: 20 }}>
-          <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
-            {category}
-          </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {items.map(s => (
-              <button key={s.symbol} onMouseDown={() => select(s)}
-                style={{
-                  padding: '5px 10px', borderRadius: 'var(--radius-pill)',
-                  border: '1px solid var(--color-border)', background: 'var(--color-bg-elevated)',
-                  color: 'var(--color-text-secondary)', fontSize: '0.75rem', fontWeight: 500,
-                  cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s'
-                }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-hover)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}>
-                {s.symbol.replace('.NS', '').replace('-USD', '').replace('=F', '')}
-              </button>
-            ))}
+        <div key={category} style={{ marginBottom: 16 }}>
+          <p className="eyebrow" style={{ marginBottom: 8 }}>{category}</p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            {items.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} />)}
           </div>
         </div>
       ))}
 
       {/* Manual / Unlisted */}
       <div>
-        <p style={{ fontSize: '0.6875rem', fontWeight: 600, color: 'var(--color-text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase', marginBottom: 8 }}>
-          Manual / Unlisted
-        </p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          {MANUAL.map(s => (
-            <button key={s.symbol} onMouseDown={() => select(s)}
-              style={{
-                padding: '5px 10px', borderRadius: 'var(--radius-pill)',
-                border: '1px dashed var(--color-border)', background: 'transparent',
-                color: 'var(--color-text-muted)', fontSize: '0.75rem', fontWeight: 500,
-                cursor: 'pointer', fontFamily: 'inherit', transition: 'all 0.15s'
-              }}
-              onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-hover)'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}
-              onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.color = 'var(--color-text-muted)'; }}>
-              {s.name}
-            </button>
-          ))}
+        <p className="eyebrow" style={{ marginBottom: 8 }}>Manual / Unlisted</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+          {MANUAL.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} dashed />)}
         </div>
       </div>
     </div>
   );
 
   return (
-    <div ref={containerRef} style={{ position: inline ? 'static' : 'relative' }}>
-      {/* Search input */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
+    <div style={{ position: inline ? 'static' : 'relative' }}>
+      {/* Search input — prominent, command-palette style */}
+      <div ref={searchBoxRef} style={{
+        display: 'flex', alignItems: 'center', gap: 12,
         background: 'var(--color-bg-input)',
         border: `1px solid ${focused ? 'var(--color-accent)' : 'var(--color-border)'}`,
-        borderRadius: 'var(--radius-sm)',
-        padding: '10px 14px',
-        boxShadow: focused ? '0 0 0 3px var(--color-accent-dim)' : 'none',
+        borderRadius: 'var(--radius)',
+        padding: '14px 16px',
+        boxShadow: focused ? 'inset 0 1px 2px rgba(0,0,0,0.25), 0 0 0 3px var(--color-accent-dim)' : 'inset 0 1px 2px rgba(0,0,0,0.25)',
         transition: 'border-color 0.2s, box-shadow 0.2s'
       }}>
         {loading
-          ? <Loader2 size={16} style={{ color: 'var(--color-text-muted)', flexShrink: 0, animation: 'spin 0.6s linear infinite' }} />
-          : <Search size={16} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+          ? <Loader2 size={18} style={{ color: 'var(--color-accent)', flexShrink: 0, animation: 'spin 0.6s linear infinite' }} />
+          : <Search size={18} style={{ color: focused ? 'var(--color-accent)' : 'var(--color-text-muted)', flexShrink: 0, transition: 'color 0.2s' }} />
         }
         <input
           ref={inputRef}
@@ -243,7 +235,7 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
           placeholder={placeholder}
           style={{
             flex: 1, background: 'none', border: 'none', outline: 'none',
-            color: 'var(--color-text-primary)', fontSize: '0.9rem', fontFamily: 'inherit'
+            color: 'var(--color-text-primary)', fontSize: '1rem', fontFamily: 'inherit'
           }}
         />
         {query && (
@@ -254,30 +246,33 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
         )}
       </div>
 
-      {/* Inline panel — renders in normal flow, no clipping */}
+      {/* Inline panel — caps its own height and scrolls internally so the
+          surrounding modal stays fixed instead of growing. */}
       {inline && (
         <div style={{
           marginTop: 12,
           background: 'var(--color-bg-elevated)',
           border: '1px solid var(--color-border)',
           borderRadius: 'var(--radius)',
+          maxHeight: 'min(52vh, 420px)',
+          overflowY: 'auto',
         }}>
-          <PanelContent />
+          {renderPanel()}
         </div>
       )}
 
-      {/* Floating dropdown — for standalone use outside modals */}
-      {!inline && showPanel && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 6px)', left: 0, right: 0, zIndex: 100,
-          background: 'var(--color-bg-modal)',
-          border: '1px solid var(--color-border-hover)',
-          borderRadius: 'var(--radius)',
-          boxShadow: '0 16px 48px rgba(0,0,0,0.4)',
-          maxHeight: 420, overflowY: 'auto'
-        }}>
-          <PanelContent />
-        </div>
+      {/* Floating dropdown — portaled, always on top of the modal */}
+      {!inline && (
+        <Popover anchorRef={searchBoxRef} open={focused} onClose={() => setFocused(false)} maxHeight={440}>
+          <div style={{
+            background: 'var(--color-bg-popover)',
+            border: '1px solid var(--color-border-hover)',
+            borderRadius: 'var(--radius)',
+            boxShadow: 'var(--shadow-popover)',
+          }}>
+            {renderPanel()}
+          </div>
+        </Popover>
       )}
     </div>
   );

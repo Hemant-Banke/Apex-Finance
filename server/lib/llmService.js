@@ -52,9 +52,10 @@ DIRECTION RULES (cash):
 - For bank statements where the debit vs credit column is ambiguous in the raw text, infer direction from the running Closing Balance: if the balance went DOWN it is an "expense", if it went UP it is "income".
 
 TRANSFER RULE — be strict:
-- Use "transfer" ONLY when money moves between the SAME account holder's OWN accounts (a self-transfer). Signals: the counterparty name in the narration matches the account holder name ("accountName"), or the narration explicitly indicates an own-account / self / wallet top-up / "to my ..." movement.
-- A payment to ANY other person, merchant, biller, or business is NOT a transfer — it is an "expense" (money out) or "income" (money in).
-- When you are unsure whether the counterparty is the holder's own account, DEFAULT to expense/income based on direction. Never guess "transfer".
+- ONLY a DEBIT (money leaving this account) can be a "transfer". A CREDIT (money coming in) is NEVER a transfer — classify every credit as "income".
+- Among debits, use "transfer" ONLY when the money moves to the SAME holder's OWN account (a self-transfer). Signals: the counterparty name matches the account holder ("accountName"); or the narration indicates an own-account / self / wallet top-up / investment-funding movement (e.g. "towards US stocks", "to my ... account", "add money to wallet").
+- A DEBIT paid to ANY other person, merchant, biller, or business is NOT a transfer — it is an "expense".
+- When unsure whether a debit goes to the holder's own account, DEFAULT to "expense". Never guess "transfer".
 
 ASSET / BROKER RULES:
 - On broker or demat statements, each instrument (stock/ETF/fund/bond) movement is a "buy" or "sell".
@@ -118,36 +119,43 @@ async function extractTransactionsFromImage(buffer, mimeType) {
 }
 
 /**
- * Predict a category code for each transaction using the user's own taxonomy.
- * Uses the receiver/merchant in the narration, the amount (size), the direction,
- * and the date to infer the best fit.
+ * Predict a category code for each transaction using the user's own taxonomy and
+ * their learned categorization profile.
  *
- * @param {Array<{id, type, narration, amount, date}>} items
+ * @param {Array<{id, type, narration, amount, day}>} items
  * @param {{ expense: Array<{code,label}>, income: Array<{code,label}> }} taxonomy
+ * @param {string} [profileSummary]  learned per-user patterns (from categoryProfileService)
  * @returns {Promise<Object.<string, string|null>>}  { [id]: code|null }
  */
-async function categorizeTransactions(items, taxonomy) {
+async function categorizeTransactions(items, taxonomy, profileSummary = '') {
   if (!items.length) return {};
   const client = getClient();
   const fmt = list => (list || []).map(o => `${o.code}\t${o.label}`).join('\n');
 
-  const prompt = `You are categorizing a user's bank/UPI transactions into their personal category taxonomy.
+  const profileBlock = profileSummary
+    ? `\nLEARNED PROFILE FOR THIS USER (their own past categorizations — trust these strongly):\n${profileSummary}\n`
+    : '';
 
-For EACH transaction, choose the single best category CODE from the allowed list that matches the transaction's "type" ("expense" uses the expense list, "income" uses the income list). Return null when nothing fits, and ALWAYS null for type "transfer", "buy", or "sell".
+  const prompt = `You assign each of a user's bank/UPI transactions to exactly one category from THEIR taxonomy. Accuracy matters — a wrong category is worse than a slightly more generic correct one.
 
-Use every available signal to decide:
-- The narration text — the merchant / biller / receiver name and payment channel are the strongest signal (e.g. "SWIGGY" -> food delivery, "IRCTC" -> transit, "LIC" -> insurance, a person's name -> likely a personal transfer/gift, not a merchant category).
-- The amount (size) — small amounts skew to food/transport/daily spends; large recurring amounts skew to rent/EMI/salary/investment.
-- The date — helps distinguish e.g. monthly salary/rent from one-off spends.
-- The direction (type) — only pick income categories for income, expense categories for expense.
+Decide with this priority:
+1. LEARNED PROFILE (below, if present) — if a transaction matches a known merchant or a clear amount/day pattern this user has established, use that category. This is how you get recurring items (rent, salary, EMI, subscriptions) and personal habits right.
+2. MERCHANT / RECEIVER in the narration — the business or biller name is the strongest generic signal (e.g. SWIGGY/ZOMATO → food delivery, UBER/OLA → rideshare, IRCTC → transit, NETFLIX → streaming, LIC/insurer → insurance, a landlord/rent keyword → rent, an employer/"SALARY"/"PAYROLL" → salary, "DIVIDEND"/"INTEREST" → investment income).
+3. AMOUNT (size) — small everyday amounts skew to food/transport/daily spends; large regular amounts skew to rent/EMI/salary/investment.
+4. DAY OF WEEK — weekday commute vs weekend leisure, month-boundary salary/rent, etc.
 
+Hard rules:
+- "expense" transactions may ONLY use expense codes; "income" transactions may ONLY use income codes.
+- A payment to another person or a business is NOT a transfer; categorize it normally.
+- If, after all signals, no category is a good fit, return null (a fallback is applied later) — do NOT force a wrong specific category.
+${profileBlock}
 ALLOWED EXPENSE CATEGORIES (code<TAB>label):
 ${fmt(taxonomy.expense)}
 
 ALLOWED INCOME CATEGORIES (code<TAB>label):
 ${fmt(taxonomy.income)}
 
-TRANSACTIONS (JSON array of {id, type, narration, amount, date}):
+TRANSACTIONS (JSON array of {id, type, narration, amount, day}):
 ${JSON.stringify(items)}
 
 Return ONLY a JSON object mapping each transaction id to a category code from the matching type's allowed list, or null:

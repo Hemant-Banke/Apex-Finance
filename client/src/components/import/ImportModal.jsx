@@ -29,8 +29,13 @@ export default function ImportModal({ open, onClose, accounts, defaultAccountId,
     <Modal
       open={open}
       onClose={handleClose}
-      title={step === 'upload' ? 'Import statement' : 'Review transactions'}
-      maxWidth={step === 'review' ? 860 : 480}
+      eyebrow="Import"
+      title={step === 'upload' ? 'Import a statement' : 'Review & confirm'}
+      subtitle={step === 'upload'
+        ? 'Upload a bank, UPI, or broker statement to extract transactions.'
+        : 'Adjust anything, then import the selected rows.'}
+      align="top"
+      maxWidth={step === 'review' ? 880 : 500}
     >
       {step === 'upload' && (
         <StatementUpload

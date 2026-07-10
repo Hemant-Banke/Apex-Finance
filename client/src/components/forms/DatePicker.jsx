@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import Popover from '../ui/Popover';
 
 /**
  * DatePicker — value is a "YYYY-MM-DD" string.
@@ -9,6 +10,12 @@ import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
  * styled calendar popover.
  *
  * Props: { value, onChange, min, max, placeholder, disabled }  (min/max: "YYYY-MM-DD")
+ *
+ * DateRangePicker — a range variant. value is { from, to } (either may be null);
+ * onChange receives the same shape. It opens a popover holding two ordinary
+ * DatePickers (From / To) — clearer than a single dual-cursor calendar. Accepts
+ * an optional `trigger` render-prop ({ open, toggle }) => node so callers can
+ * supply their own anchor (e.g. an inline "from – to" summary with an edit icon).
  */
 
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -59,6 +66,79 @@ export default function DatePicker({ value, onChange, min, max, placeholder = 'S
   return <DesktopCalendar {...{ value, onChange, min, max, placeholder, disabled }} />;
 }
 
+export function DateRangePicker({ value, onChange, min, max, disabled = false, trigger }) {
+  const isTouch = useIsTouch();
+  const val = value || {};
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const toggle = () => { if (!disabled) setOpen(o => !o); };
+
+  // ── Native inputs on touch devices ──────────────────────────────────────────
+  if (isTouch) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input type="date" className="input-field" value={val.from || ''} min={min} max={val.to || max}
+          disabled={disabled} onChange={e => onChange({ from: e.target.value, to: val.to })} />
+        <span style={{ color: 'var(--color-text-muted)' }}>–</span>
+        <input type="date" className="input-field" value={val.to || ''} min={val.from || min} max={max}
+          disabled={disabled} onChange={e => onChange({ from: val.from, to: e.target.value })} />
+      </div>
+    );
+  }
+
+  const rangeLabel = val.from || val.to
+    ? `${val.from ? fmtDisplay(val.from) : '…'} – ${val.to ? fmtDisplay(val.to) : '…'}`
+    : 'Select range';
+
+  return (
+    <div style={{ position: 'relative' }}>
+      {trigger ? (
+        <span ref={ref} style={{ display: 'inline-flex', minWidth: 0 }}>
+          {trigger({ open, toggle })}
+        </span>
+      ) : (
+        <button
+          ref={ref}
+          type="button"
+          onClick={toggle}
+          disabled={disabled}
+          className="input-field"
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left', gap: 8,
+            ...(open ? { borderColor: 'var(--color-accent)', background: 'var(--color-bg-secondary)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.28), var(--shadow-md), 0 0 0 3px var(--color-accent-dim)' } : null),
+          }}
+        >
+          <span style={{ flex: 1, color: (val.from || val.to) ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontSize: '0.875rem' }}>{rangeLabel}</span>
+          <Calendar size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+        </button>
+      )}
+
+      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} width={288} maxHeight={440}>
+        <div style={{ background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-popover)', padding: 14, width: 288, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="field">
+            <label className="label">From</label>
+            <DatePicker value={val.from || ''} onChange={v => onChange({ from: v, to: val.to })} min={min} max={val.to || max} placeholder="Start date" />
+          </div>
+          <div className="field">
+            <label className="label">To</label>
+            <DatePicker value={val.to || ''} onChange={v => onChange({ from: val.from, to: v })} min={val.from || min} max={max} placeholder="End date" />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: 4, borderTop: '1px solid var(--color-border-subtle)', marginTop: 2 }}>
+            <button type="button" onClick={() => onChange({ from: null, to: null })}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.75rem', fontFamily: 'inherit', fontWeight: 500, paddingTop: 8 }}>
+              Clear
+            </button>
+            <button type="button" onClick={() => setOpen(false)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.75rem', fontFamily: 'inherit', fontWeight: 600, paddingTop: 8 }}>
+              Done
+            </button>
+          </div>
+        </div>
+      </Popover>
+    </div>
+  );
+}
+
 function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState('days'); // 'days' | 'months' | 'years'
@@ -73,13 +153,6 @@ function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
     setMode('days');
     setOpen(true);
   };
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [open]);
 
   const minP = parseISO(min);
   const maxP = parseISO(max);
@@ -129,13 +202,17 @@ function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
   const headerClick = () => setMode(mode === 'days' ? 'months' : mode === 'months' ? 'years' : 'years');
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       <button
+        ref={ref}
         type="button"
         onClick={() => open ? setOpen(false) : openCal()}
         disabled={disabled}
         className="input-field"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left', gap: 8 }}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left', gap: 8,
+          ...(open ? { borderColor: 'var(--color-accent)', background: 'var(--color-bg-secondary)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.28), var(--shadow-md), 0 0 0 3px var(--color-accent-dim)' } : null),
+        }}
       >
         <span style={{ flex: 1, color: value ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontSize: '0.875rem' }}>
           {value ? fmtDisplay(value) : placeholder}
@@ -143,8 +220,8 @@ function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
         <Calendar size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
       </button>
 
-      {open && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 200, background: 'var(--color-bg-card)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', boxShadow: '0 12px 32px rgba(0,0,0,0.5)', padding: 12, width: 260 }}>
+      <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} width={264} maxHeight={360}>
+        <div style={{ background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-popover)', padding: 12, width: 264 }}>
 
           {/* Header — ‹ [clickable label] › ; label drills days → months → years */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
@@ -185,7 +262,7 @@ function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
                       style={{
                         width: 28, height: 28, borderRadius: 7, border: isToday && !isSel ? '1px solid var(--color-border-hover)' : '1px solid transparent',
                         background: isSel ? 'var(--color-accent)' : 'transparent',
-                        color: disabledDay ? 'var(--color-text-muted)' : isSel ? '#0d0d0d' : 'var(--color-text-primary)',
+                        color: disabledDay ? 'var(--color-text-muted)' : isSel ? '#0B0D10' : 'var(--color-text-primary)',
                         fontSize: '0.8125rem', cursor: disabledDay ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
                         opacity: disabledDay ? 0.35 : 1, transition: 'background 0.1s',
                       }}
@@ -253,7 +330,7 @@ function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
             </button>
           </div>
         </div>
-      )}
+      </Popover>
     </div>
   );
 }
@@ -270,7 +347,7 @@ function gridCellStyle(isSel, isCur, dis) {
     height: 36, borderRadius: 8,
     border: isCur && !isSel ? '1px solid var(--color-border-hover)' : '1px solid transparent',
     background: isSel ? 'var(--color-accent)' : 'transparent',
-    color: dis ? 'var(--color-text-muted)' : isSel ? '#0d0d0d' : 'var(--color-text-primary)',
+    color: dis ? 'var(--color-text-muted)' : isSel ? '#0B0D10' : 'var(--color-text-primary)',
     fontSize: '0.8125rem', fontFamily: 'inherit', fontWeight: 500,
     cursor: dis ? 'not-allowed' : 'pointer', opacity: dis ? 0.35 : 1, transition: 'background 0.1s',
   };

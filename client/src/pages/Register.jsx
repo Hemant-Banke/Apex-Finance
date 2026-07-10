@@ -35,7 +35,7 @@ export default function Register() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: '#0d0d0d', overflow: 'hidden' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', background: '#0B0D10', overflow: 'hidden' }}>
 
       {/* ══════════ LEFT — HERO ══════════ */}
       <div className="landing-grid" style={{
@@ -46,7 +46,7 @@ export default function Register() {
         justifyContent: 'center',
         padding: '80px 72px',
         overflow: 'hidden',
-        background: '#0d0d0d',
+        background: '#0B0D10',
       }}>
 
         {/* Cube grid with sweeping sheen */}

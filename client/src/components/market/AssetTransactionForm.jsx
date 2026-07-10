@@ -1,18 +1,14 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { marketAPI, transactionsAPI } from '../../lib/api';
 import { formatCurrency, ASSET_TYPES } from '../../lib/utils';
 import DatePicker from '../forms/DatePicker';
-import { ArrowLeft, ArrowRight, RotateCcw, Check } from 'lucide-react';
+import TypePicker from '../forms/TypePicker';
+import { accountOptions } from '../../lib/accountPickerOptions';
+import { ArrowRight, RotateCcw, Check, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 
 function todayStr() {
   return new Date().toISOString().split('T')[0];
 }
-
-const TYPE_LABEL = {
-  stock: 'Stock', etf: 'ETF', crypto: 'Crypto', mutual_fund: 'Mutual Fund',
-  bond: 'Bond', commodity: 'Commodity', gold: 'Gold', fd: 'Fixed Deposit',
-  epf_nps: 'EPF / NPS', other: 'Other'
-};
 
 // Symbols that use manual entry (no price API lookup)
 const MANUAL_PREFIXES = ['REAL-', 'FIXED-', 'EPF-', 'PHYS-', 'PRIVATE-', 'UNLISTED-', 'OTHER-'];
@@ -31,7 +27,6 @@ export default function AssetTransactionForm({
   transaction,          // present in edit mode
   accounts = [],
   defaultAccountId,
-  onBack,
   onSuccess
 }) {
   const isEdit = !!transaction;
@@ -66,6 +61,8 @@ export default function AssetTransactionForm({
   const [priceSource,  setPriceSource]  = useState(isEdit ? 'manual' : '');
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceError,   setPriceError]   = useState('');
+  const [refetchNonce, setRefetchNonce] = useState(0); // bump to re-run auto-fetch
+  const didInitRef = useRef(false); // skip the mount fetch in edit mode
   const [accountId,    setAccountId]    = useState(txAccountId || defaultAccountId || nonDebtAccounts[0]?._id || '');
   const [notes,        setNotes]        = useState(isEdit ? (transaction.notes || '') : '');
   const [saving,       setSaving]       = useState(false);
@@ -76,11 +73,17 @@ export default function AssetTransactionForm({
   const [assetType,  setAssetType]  = useState(security?.type || 'other');
 
   const totalAmount = units && price ? parseFloat(units) * parseFloat(price) : null;
+  const submitTone  = txType === 'buy' ? 'var(--color-success)' : 'var(--color-danger)';
 
-  // Auto-fetch price when date changes (listed assets, create mode only)
+  // Auto-fetch the market price when the date changes (listed assets). In edit
+  // mode we preserve the stored price on the initial mount, then fetch on any
+  // later date change like create mode does.
   useEffect(() => {
-    // In edit mode, don't auto-fetch — preserve existing pricePerUnit
-    if (isEdit || isManual || !date || !security?.symbol) return;
+    if (isManual || !date || !security?.symbol) return;
+    if (!didInitRef.current) {
+      didInitRef.current = true;
+      if (isEdit) return; // keep the transaction's stored price on open
+    }
     let cancelled = false;
     setPriceLoading(true);
     setPriceError('');
@@ -96,7 +99,7 @@ export default function AssetTransactionForm({
       .finally(() => { if (!cancelled) setPriceLoading(false); });
 
     return () => { cancelled = true; };
-  }, [date, security?.symbol, isManual, isEdit]);
+  }, [date, security?.symbol, isManual, isEdit, refetchNonce]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -142,30 +145,7 @@ export default function AssetTransactionForm({
   if (!security) return null;
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-
-      {/* Security header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        {onBack && !isEdit && (
-          <button type="button" onClick={onBack}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', padding: 4, display: 'flex', alignItems: 'center' }}>
-            <ArrowLeft size={16} />
-          </button>
-        )}
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-              {isManual && !isEdit ? (customName || security.name) : security.symbol}
-            </span>
-            <span style={{ fontSize: '0.6875rem', fontWeight: 500, color: 'var(--color-text-muted)', background: 'var(--color-bg-elevated)', padding: '2px 6px', borderRadius: 4 }}>
-              {TYPE_LABEL[isEdit ? security.type : (isManual ? assetType : security.type)] || 'Asset'}
-            </span>
-          </div>
-          {!isManual && (
-            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>{security.name}</span>
-          )}
-        </div>
-      </div>
+    <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
       {/* Manual asset: custom name + type (create mode only) */}
       {isManual && !isEdit && (
@@ -184,52 +164,71 @@ export default function AssetTransactionForm({
         </div>
       )}
 
-      {/* Buy / Sell toggle */}
-      <div>
-        <label className="label block" style={{ marginBottom: 8 }}>Transaction</label>
-        <div className="pill-group">
-          {['buy', 'sell'].map(t => (
-            <button key={t} type="button"
-              onClick={() => { setTxType(t); if (!isEdit) setUsesCashBalance(t === 'sell'); }}
-              className={`pill-item ${txType === t ? 'active' : ''}`}>
-              {t === 'buy' ? 'Buy' : 'Sell'}
-            </button>
-          ))}
+      {/* Buy / Sell — a segmented control with clear buy (gold) vs sell (green) states */}
+      <div className="field">
+        <label className="label">Transaction</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          {[
+            { t: 'buy',  label: 'Buy',  Icon: ArrowDownLeft, active: 'var(--color-success)', tint: 'var(--color-success-muted)' },
+            { t: 'sell', label: 'Sell', Icon: ArrowUpRight,  active: 'var(--color-danger)',  tint: 'var(--color-danger-muted)' },
+          ].map(({ t, label, Icon, active, tint }) => {
+            const on = txType === t;
+            return (
+              <button key={t} type="button"
+                onClick={() => { setTxType(t); if (!isEdit) setUsesCashBalance(t === 'sell'); }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                  padding: '11px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+                  fontFamily: 'inherit', fontSize: '0.875rem', fontWeight: 600,
+                  border: `1px solid ${on ? active : 'var(--color-border)'}`,
+                  background: on ? tint : 'var(--color-bg-elevated)',
+                  color: on ? active : 'var(--color-text-muted)',
+                  boxShadow: on ? `inset 0 0 0 1px ${active}` : 'var(--elev-ring)',
+                  transition: 'all 0.15s ease',
+                }}>
+                <Icon size={16} strokeWidth={2.4} /> {label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Account (create mode only; in edit mode account is fixed) */}
-      {!isEdit && (
-        <div>
-          <label className="label block" style={{ marginBottom: 6 }}>Account</label>
-          <select value={accountId} onChange={e => setAccountId(e.target.value)} className="input-field" required>
-            <option value="">Select account</option>
-            {nonDebtAccounts.map(a => (
-              <option key={a._id} value={a._id}>{a.name} ({a.type})</option>
-            ))}
-          </select>
+      {/* Account + Date — one row when both are shown */}
+      <div style={{ display: 'grid', gridTemplateColumns: isEdit ? '1fr' : '1fr 1fr', gap: 12 }}>
+        {!isEdit && (
+          <div className="field">
+            <label className="label">Account</label>
+            <TypePicker
+              options={accountOptions(nonDebtAccounts)}
+              value={accountId}
+              onChange={setAccountId}
+              placeholder="Select account"
+              searchable={nonDebtAccounts.length > 6}
+            />
+          </div>
+        )}
+        <div className="field">
+          <label className="label">Date</label>
+          <DatePicker value={date} onChange={setDate} max={todayStr()} />
         </div>
-      )}
-
-      {/* Date */}
-      <div>
-        <label className="label block" style={{ marginBottom: 6 }}>Date</label>
-        <DatePicker value={date} onChange={setDate} max={todayStr()} />
       </div>
 
+      {/* Units + Price — side by side to keep the form compact */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
       {/* Units */}
       <div>
         <label className="label block" style={{ marginBottom: 6 }}>Units / Quantity</label>
         <input type="number" step="any" min="0.000001" value={units}
           onChange={e => setUnits(e.target.value)}
-          className="input-field" placeholder="0.00" required />
+          className="input-field" placeholder="0.00" required style={{ fontFamily: 'var(--font-mono)' }} />
       </div>
 
       {/* Price per unit */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, minHeight: 18 }}>
           <label className="label">Price per unit</label>
-          {priceSource === 'auto' && !isManual && !isEdit && (
+          {priceSource === 'auto' && !isManual && (
             <span style={{ fontSize: '0.6875rem', color: 'var(--color-accent)', display: 'flex', alignItems: 'center', gap: 4 }}>
               Auto-filled ·{' '}
               <button type="button" onClick={() => setPriceSource('manual')}
@@ -238,9 +237,9 @@ export default function AssetTransactionForm({
               </button>
             </span>
           )}
-          {priceSource === 'manual' && !isManual && !isEdit && (
+          {priceSource === 'manual' && !isManual && (
             <button type="button"
-              onClick={() => { setPriceSource(''); setDate(d => d); }}
+              onClick={() => setRefetchNonce(n => n + 1)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.6875rem', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 3 }}>
               <RotateCcw size={10} /> Refetch
             </button>
@@ -254,9 +253,9 @@ export default function AssetTransactionForm({
         ) : (
           <>
             <input type="number" step="any" min="0" value={price}
-              onChange={e => { setPrice(e.target.value); if (!isEdit) setPriceSource('manual'); }}
+              onChange={e => { setPrice(e.target.value); setPriceSource('manual'); }}
               className="input-field" placeholder="0.00" required
-              style={priceSource === 'auto' ? { color: 'var(--color-accent)' } : undefined}
+              style={{ fontFamily: 'var(--font-mono)', ...(priceSource === 'auto' ? { color: 'var(--color-accent)' } : null) }}
             />
             {priceError && (
               <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{priceError}</p>
@@ -264,48 +263,30 @@ export default function AssetTransactionForm({
           </>
         )}
       </div>
+      </div>
 
-      {/* Total amount */}
-      {totalAmount !== null && (
-        <div style={{ padding: '12px 16px', background: 'var(--color-bg-elevated)', borderRadius: 'var(--radius-sm)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
-            {txType === 'buy' ? 'Total cost' : 'Total proceeds'}
-          </span>
-          <span style={{ fontSize: '0.9375rem', fontWeight: 600, color: txType === 'buy' ? 'var(--color-accent)' : 'var(--color-success)' }}>
-            {formatCurrency(totalAmount)}
-          </span>
-        </div>
-      )}
-
-      {/* Settle against cash balance */}
+      {/* Settle against cash — compact single row */}
       <button
         type="button"
         onClick={() => setUsesCashBalance(v => !v)}
-        style={{ display: 'flex', alignItems: 'flex-start', gap: 10, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'inherit' }}
+        title={txType === 'buy' ? 'Deduct the cost from this account’s cash balance' : 'Add the proceeds to this account’s cash balance'}
+        style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'inherit' }}
       >
         <span style={{
-          width: 18, height: 18, borderRadius: 4, flexShrink: 0, marginTop: 1,
+          width: 18, height: 18, borderRadius: 4, flexShrink: 0,
           border: `2px solid ${usesCashBalance ? 'var(--color-accent)' : 'var(--color-border-hover)'}`,
           background: usesCashBalance ? 'var(--color-accent)' : 'transparent',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }}>
           {usesCashBalance && <Check size={11} style={{ color: 'var(--color-bg-primary)', strokeWidth: 3 }} />}
         </span>
-        <span>
-          <span style={{ display: 'block', fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 500 }}>
-            Settle against account cash
-          </span>
-          <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--color-text-muted)', marginTop: 2 }}>
-            {txType === 'buy'
-              ? 'Deduct the cost from this account’s cash balance.'
-              : 'Add the proceeds to this account’s cash balance.'}
-          </span>
-        </span>
+        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 500 }}>Settle against account cash</span>
+        <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>({txType === 'buy' ? 'deduct cost' : 'add proceeds'})</span>
       </button>
 
       {/* Notes */}
-      <div>
-        <label className="label block" style={{ marginBottom: 6 }}>Notes</label>
+      <div className="field">
+        <label className="label">Note</label>
         <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
           className="input-field" placeholder="Optional" />
       </div>
@@ -313,11 +294,28 @@ export default function AssetTransactionForm({
       {error && <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>{error}</p>}
 
       <button type="submit" disabled={saving} className="btn-primary"
-        style={{ width: '100%', padding: '11px 18px', marginTop: 4 }}>
-        {saving
-          ? <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-          : <><span>{isEdit ? 'Save changes' : (txType === 'buy' ? 'Record Purchase' : 'Record Sale')}</span><ArrowRight size={15} /></>
-        }
+        style={{
+          width: '100%', padding: '13px 18px', marginTop: 2, justifyContent: 'space-between',
+          background: `color-mix(in srgb, ${submitTone} 68%, #0B0D10)`,
+          color: 'var(--color-text-primary)',
+          border: `1px solid color-mix(in srgb, ${submitTone} 45%, transparent)`,
+          boxShadow: `0 6px 16px -10px ${submitTone}, var(--elev-ring)`,
+        }}>
+        {saving ? (
+          <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2, margin: '0 auto' }} />
+        ) : (
+          <>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+              {isEdit ? 'Save changes' : (txType === 'buy' ? 'Record purchase' : 'Record sale')}
+              <ArrowRight size={15} />
+            </span>
+            {totalAmount !== null && (
+              <span className="figure" style={{ fontWeight: 700 }}>
+                {formatCurrency(totalAmount)}
+              </span>
+            )}
+          </>
+        )}
       </button>
     </form>
   );

@@ -39,9 +39,9 @@ export function formatDateShort(date) {
 export function getTransactionColor(type) {
   const colors = {
     income: 'text-[var(--color-success)]',
-    sell: 'text-[var(--color-success)]',
+    buy: 'text-[var(--color-success)]',
     expense: 'text-[var(--color-danger)]',
-    buy: 'text-[var(--color-accent)]',
+    sell: 'text-[var(--color-danger)]',
     transfer: 'text-[var(--color-chart-warm)]',
     adjustment: 'text-[var(--color-text-secondary)]',
   };
@@ -49,10 +49,10 @@ export function getTransactionColor(type) {
 }
 
 export function getTransactionSign(type) {
-  const positive = ['income', 'sell'];
-  const negative = ['expense', 'buy'];
-  if (positive.includes(type)) return '+';
-  if (negative.includes(type)) return '-';
+  // Only cash flows carry a direction sign. Buy/sell move value between cash and
+  // assets (net-neutral), so they show no +/−.
+  if (type === 'income') return '+';
+  if (type === 'expense') return '−';
   return '';
 }
 
@@ -88,6 +88,6 @@ export function getAccountIcon(type) {
 }
 
 export const CHART_COLORS = [
-  '#2dd4bf', '#f97316', '#60a5fa', '#a78bfa', '#22c55e',
-  '#f472b6', '#fbbf24', '#38bdf8', '#ef4444', '#fb923c'
+  '#C9A96A', '#60a5fa', '#3fbf9a', '#a78bfa', '#22c55e',
+  '#f0a04b', '#f472b6', '#38bdf8', '#e0607a', '#8ea0b8'
 ];

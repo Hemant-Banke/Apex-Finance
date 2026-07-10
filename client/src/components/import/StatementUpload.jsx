@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Upload, FileText, Image, Lock, AlertCircle } from 'lucide-react';
+import { Upload, FileText, Image, Lock, AlertCircle, X } from 'lucide-react';
 import { importAPI } from '../../lib/api';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import TypePicker from '../forms/TypePicker';
@@ -81,65 +81,83 @@ export default function StatementUpload({ accounts, defaultAccountId, onParsed }
       </div>
 
       {/* Drop zone */}
-      <div
-        onClick={() => !file && inputRef.current?.click()}
-        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-        onDragLeave={() => setDragOver(false)}
-        onDrop={onDrop}
-        style={{
-          border: `2px dashed ${dragOver ? 'var(--color-accent)' : file ? 'var(--color-border-hover)' : 'var(--color-border)'}`,
-          borderRadius: 'var(--radius)',
-          padding: '32px 24px',
-          textAlign: 'center',
-          cursor: file ? 'default' : 'pointer',
-          background: dragOver ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
-          transition: 'all 0.2s',
-        }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT}
-          style={{ display: 'none' }}
-          onChange={e => handleFile(e.target.files[0])}
-        />
+      <input
+        ref={inputRef}
+        type="file"
+        accept={ACCEPT}
+        style={{ display: 'none' }}
+        onChange={e => handleFile(e.target.files[0])}
+      />
 
-        {file ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            {isImage ? <Image size={28} style={{ color: 'var(--color-accent)' }} />
-             : <FileText size={28} style={{ color: 'var(--color-accent)' }} />}
-            <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{file.name}</p>
-            <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-              {(file.size / 1024).toFixed(0)} KB
-              {isImage && ' · Screenshot / photo'}
-              {isPdf   && ' · PDF bank statement'}
-              {isHtml  && ' · UPI HTML export'}
+      {file ? (
+        /* Selected-file card */
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 14,
+          padding: '14px 16px', borderRadius: 'var(--radius)',
+          background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
+          boxShadow: 'var(--shadow-sm), var(--elev-ring)',
+        }}>
+          <div style={{
+            width: 42, height: 42, flexShrink: 0, borderRadius: 10,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--color-accent-muted)', color: 'var(--color-accent)',
+            border: '1px solid var(--color-accent-dim)',
+          }}>
+            {isImage ? <Image size={20} /> : <FileText size={20} />}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</p>
+            <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+              <span className="figure">{(file.size / 1024).toFixed(0)} KB</span>
+              {isImage && ' · Screenshot'}{isPdf && ' · PDF statement'}{isHtml && ' · UPI export'}
             </p>
-            <button
-              type="button"
-              onClick={e => { e.stopPropagation(); setFile(null); setNeedsPw(false); setPassword(''); setError(''); }}
-              style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-            >
-              Choose a different file
-            </button>
           </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
-            <Upload size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.5 }} />
-            <div>
-              <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                Drop your bank statement here
-              </p>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
-                PDF · CSV · HTML (UPI) · Screenshot (PNG/JPG) · up to 20 MB
-              </p>
-            </div>
-            <button type="button" className="btn-ghost" style={{ marginTop: 4, fontSize: '0.8125rem' }}>
-              Browse file
-            </button>
+          <button
+            type="button"
+            onClick={() => { setFile(null); setNeedsPw(false); setPassword(''); setError(''); }}
+            className="btn-icon" title="Remove file" aria-label="Remove file"
+            style={{ width: 32, height: 32 }}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      ) : (
+        /* Empty drop zone */
+        <div
+          onClick={() => inputRef.current?.click()}
+          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+          style={{
+            border: `1.5px dashed ${dragOver ? 'var(--color-accent)' : 'var(--color-border-hover)'}`,
+            borderRadius: 'var(--radius-lg)',
+            padding: '36px 24px',
+            textAlign: 'center', cursor: 'pointer',
+            background: dragOver ? 'var(--color-accent-muted)' : 'var(--color-bg-input)',
+            boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.2)',
+            transition: 'all 0.2s',
+          }}
+        >
+          <div style={{
+            width: 52, height: 52, margin: '0 auto 14px', borderRadius: 14,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)',
+            color: dragOver ? 'var(--color-accent)' : 'var(--color-text-secondary)',
+            boxShadow: 'var(--elev-ring)', transition: 'color 0.2s',
+          }}>
+            <Upload size={22} />
           </div>
-        )}
-      </div>
+          <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
+            {dragOver ? 'Drop to upload' : 'Drop a statement, or click to browse'}
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 12 }}>
+            {['PDF', 'CSV', 'UPI HTML', 'Screenshot'].map(f => (
+              <span key={f} className="badge badge-default">{f}</span>
+            ))}
+          </div>
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 10 }}>up to 20 MB</p>
+        </div>
+      )}
 
       {/* Password input for locked PDFs */}
       {(needsPw || isPdf) && (

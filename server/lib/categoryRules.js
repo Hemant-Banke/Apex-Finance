@@ -59,7 +59,7 @@ const RULES = [
 ];
 
 function autoCategory(narration, type) {
-  const upper = narration.toUpperCase();
+  const upper = (narration || '').toUpperCase();
   for (const rule of RULES) {
     const matches = rule.kw.some(k => upper.includes(k));
     if (!matches) continue;
@@ -69,4 +69,31 @@ function autoCategory(narration, type) {
   return null;
 }
 
-module.exports = { autoCategory };
+// Fallback categories when nothing else classifies an import.
+const MISC_CATEGORY = { expense: 'tp_other_exp/ts_misc_exp', income: 'tp_other_inc/ts_misc_inc' };
+const isMiscCategory = code => code === MISC_CATEGORY.expense || code === MISC_CATEGORY.income;
+
+// Payment-rail / boilerplate tokens that carry no merchant signal.
+const TOKEN_STOPWORDS = new Set([
+  'upi','upiint','imps','neft','rtgs','nwd','ft','nach','ecs','autopay','mandate','ach','inb','mmt','cms',
+  'ref','txn','trf','pyt','pmt','rcv','bil','pay','via','payment','payout','payin','transfer','transaction',
+  'the','and','for','from','with','no','remarks','recurringmandate','ent','ltd','limited','pvt','private',
+  'nse','bse','cdsl','nsdl','india','bank','account','acc',
+]);
+
+/**
+ * Extract distinctive merchant/receiver word tokens from a narration — the
+ * signal a per-user category profile learns from. Drops payment-rail noise,
+ * pure numbers, and short/stop words.
+ */
+function extractMerchantTokens(text) {
+  return [...new Set(
+    (text || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, ' ')
+      .split(/\s+/)
+      .filter(w => w.length >= 3 && !/^\d+$/.test(w) && !TOKEN_STOPWORDS.has(w))
+  )];
+}
+
+module.exports = { autoCategory, extractMerchantTokens, MISC_CATEGORY, isMiscCategory };

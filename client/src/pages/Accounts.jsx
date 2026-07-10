@@ -5,6 +5,9 @@ import { formatCurrency } from '../lib/utils';
 import { ACCOUNT_TYPE_OPTIONS } from '../lib/accountPickerOptions';
 import Modal from '../components/ui/Modal';
 import TypePicker from '../components/forms/TypePicker';
+import Card from '../components/ui/Card';
+import Button from '../components/ui/Button';
+import Badge from '../components/ui/Badge';
 import {
   Plus, Wallet, TrendingUp, Shield, CreditCard,
   Landmark, Briefcase, ChevronRight
@@ -72,21 +75,23 @@ export default function Accounts() {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
-      {/* Header */}
-      <div className="flex items-end justify-between">
+      {/* Header — total net position in the ledger numeral */}
+      <div className="flex items-center justify-between" style={{ gap: 16 }}>
         <div>
-          <p className="heading-sm mb-2">Accounts</p>
-          <h1 className="display-number">{formatCurrency(total)}</h1>
+          <p className="eyebrow" style={{ marginBottom: 12 }}>Accounts · Net position</p>
+          <h1 className="display-number" style={{ color: total < 0 ? 'var(--color-danger)' : 'var(--color-text-primary)' }}>
+            {formatCurrency(total)}
+          </h1>
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>
             {accounts.length} account{accounts.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <button onClick={openNew} className="btn-primary"><Plus size={15} /> New account</button>
+        <Button variant="gold" icon={Plus} onClick={openNew}>New account</Button>
       </div>
 
       {/* Account list */}
       {accounts.length > 0 ? (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <Card flush>
           {accounts.map((acc, i) => {
             const Icon = iconMap[acc.type] || Briefcase;
             return (
@@ -95,14 +100,18 @@ export default function Accounts() {
                   style={{ textDecoration: 'none', borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none' }}>
                   <div className="flex items-center gap-4" style={{ flex: 1, minWidth: 0 }}>
                     <div className="flex-shrink-0" style={{
-                      width: 36, height: 36, borderRadius: 10,
+                      width: 38, height: 38, borderRadius: 10,
                       background: 'var(--color-bg-elevated)',
+                      border: '1px solid var(--color-border-subtle)',
                       display: 'flex', alignItems: 'center', justifyContent: 'center'
                     }}>
                       <Icon size={16} style={{ color: 'var(--color-text-secondary)' }} strokeWidth={1.5} />
                     </div>
                     <div style={{ minWidth: 0 }}>
-                      <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{acc.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{acc.name}</p>
+                        {acc.isDebt && <Badge variant="danger">Debt</Badge>}
+                      </div>
                       <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
                         {acc.type.charAt(0).toUpperCase() + acc.type.slice(1)}
                         {acc.description && ` · ${acc.description}`}
@@ -110,8 +119,8 @@ export default function Accounts() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <span className={`text-sm font-semibold tabular-nums ${acc.isDebt ? 'text-[var(--color-danger)]' : ''}`}
-                      style={!acc.isDebt ? { color: 'var(--color-text-primary)' } : {}}>
+                    <span className={`figure text-sm ${acc.isDebt ? 'text-[var(--color-danger)]' : ''}`}
+                      style={{ fontWeight: 500, ...(acc.isDebt ? {} : { color: 'var(--color-text-primary)' }) }}>
                       {acc.isDebt ? '−' : ''}{formatCurrency(Math.abs(acc.balance))}
                     </span>
                     <button onClick={(e) => openEdit(acc, e)}
@@ -126,17 +135,21 @@ export default function Accounts() {
               </div>
             );
           })}
-        </div>
+        </Card>
       ) : (
-        <div className="card flex flex-col items-center justify-center" style={{ padding: '64px 24px' }}>
+        <Card className="flex flex-col items-center justify-center" style={{ padding: '64px 24px' }}>
           <Wallet size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.3, marginBottom: 12 }} />
           <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginBottom: 16 }}>No accounts yet</p>
-          <button onClick={openNew} className="btn-primary text-xs">Create your first account</button>
-        </div>
+          <Button variant="gold" onClick={openNew}>Create your first account</Button>
+        </Card>
       )}
 
       {/* Modal */}
-      <Modal open={modal} onClose={() => setModal(false)} title={editing ? 'Edit account' : 'New account'}>
+      <Modal open={modal} onClose={() => setModal(false)}
+        eyebrow={editing ? 'Edit' : 'New'}
+        title={editing ? 'Edit account' : 'Create account'}
+        subtitle={editing ? undefined : 'A container for cash and assets — bank, brokerage, wallet, or debt.'}
+        icon={Plus}>
         <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
           <div>
             <label className="label block" style={{ marginBottom: 8 }}>Name</label>
@@ -179,12 +192,13 @@ export default function Accounts() {
           {error && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
           <div style={{ display: 'flex', gap: 10, marginTop: 4 }}>
-            <button type="submit" disabled={saving} className="btn-primary" style={{ flex: 1 }}>
+            <Button type="submit" disabled={saving} style={{ flex: 1 }}>
               {saving ? 'Saving...' : (editing ? 'Save changes' : 'Create account')}
-            </button>
+            </Button>
             {editing && (
-              <button type="button" onClick={() => { del(editing._id); setModal(false); }}
-                className="btn-ghost" style={{ color: 'var(--color-danger)' }}>Delete</button>
+              <Button type="button" variant="danger" onClick={() => { del(editing._id); setModal(false); }}>
+                Delete
+              </Button>
             )}
           </div>
         </form>

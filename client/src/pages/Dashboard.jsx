@@ -9,21 +9,10 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recha
 import PriceGrapher from '../components/charts/PriceGrapher';
 import ChartTooltip from '../components/charts/ChartTooltip';
 import AssetPricePanel from '../components/charts/AssetPricePanel';
-
-function StatCard({ label, value, sub, color, icon: Icon }) {
-  return (
-    <div className="card card-compact">
-      <div className="flex items-start justify-between mb-3">
-        <p className="label">{label}</p>
-        <Icon size={15} style={{ color: color || 'var(--color-text-muted)', opacity: 0.6 }} />
-      </div>
-      <p className="text-lg font-semibold tracking-tight tabular-nums" style={{ color: color || 'var(--color-text-primary)' }}>
-        {value}
-      </p>
-      {sub && <p className="text-xs mt-1.5" style={{ color: 'var(--color-text-muted)' }}>{sub}</p>}
-    </div>
-  );
-}
+import Card from '../components/ui/Card';
+import StatTile from '../components/ui/StatTile';
+import SectionHeader from '../components/ui/SectionHeader';
+import Divider from '../components/ui/Divider';
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -61,22 +50,18 @@ export default function Dashboard() {
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
 
       {/* Header */}
-      <div>
-        <p className="heading-sm mb-2">Overview</p>
-        <h1 className="display-number" style={{ color: 'var(--color-text-primary)' }}>
-          Hello{user ? `, ${user.name.split(' ')[0]}` : ''}!
-        </h1>
-        <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>
-          Total net worth · {summary?.accountCount || 0} accounts
-        </p>
-      </div>
+      <SectionHeader
+        eyebrow="Overview"
+        title={`Hello${user ? `, ${user.name.split(' ')[0]}` : ''}`}
+        sub={`Your complete picture · ${summary?.accountCount || 0} account${summary?.accountCount === 1 ? '' : 's'}`}
+      />
 
       {/* Stat Cards */}
       <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        <StatCard label="Assets"          value={formatCurrency(summary?.totalAssets || 0)}      sub={`${summary?.holdingsCount || 0} holdings`} icon={TrendingUp} />
-        <StatCard label="Liabilities"     value={formatCurrency(summary?.totalLiabilities || 0)} color="var(--color-danger)"  icon={TrendingDown} />
-        <StatCard label="Monthly Income"  value={formatCurrency(summary?.monthlyIncome || 0)}    color="var(--color-success)" icon={ArrowUpRight} />
-        <StatCard label="Monthly Expense" value={formatCurrency(summary?.monthlyExpense || 0)}   color="var(--color-chart-warm)" icon={BarChart3} />
+        <StatTile label="Assets"          value={formatCurrency(summary?.totalAssets || 0)}      sub={`${summary?.holdingsCount || 0} holdings`} icon={TrendingUp} highlight />
+        <StatTile label="Liabilities"     value={formatCurrency(summary?.totalLiabilities || 0)} accent="var(--color-danger)"  icon={TrendingDown} />
+        <StatTile label="Monthly Income"  value={formatCurrency(summary?.monthlyIncome || 0)}    accent="var(--color-success)" icon={ArrowUpRight} />
+        <StatTile label="Monthly Expense" value={formatCurrency(summary?.monthlyExpense || 0)}   accent="var(--color-chart-warm)" icon={BarChart3} />
       </div>
 
       {/* Charts row */}
@@ -86,17 +71,17 @@ export default function Dashboard() {
         <PriceGrapher height={240} />
 
         {/* Income vs Expense */}
-        <div className="card">
-          <p className="heading-sm" style={{ marginBottom: 20 }}>Income vs Expense</p>
+        <Card>
+          <SectionHeader eyebrow="Income vs Expense" size="sm" style={{ marginBottom: 20 }} />
           {incExp.length > 0 ? (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={incExp} barGap={4}>
-                <XAxis dataKey="month" tick={{ fill: '#636363', fontSize: 11 }} axisLine={false} tickLine={false} dy={8} />
-                <YAxis tick={{ fill: '#636363', fontSize: 11 }} axisLine={false} tickLine={false}
+                <XAxis dataKey="month" tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false} dy={8} />
+                <YAxis tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false}
                   tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={42} />
                 <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} content={<ChartTooltip />} isAnimationActive={false} wrapperStyle={{ transition: 'none' }} />
                 <Bar dataKey="income"  name="Income"  fill="#22c55e" radius={[4,4,0,0]} maxBarSize={22} />
-                <Bar dataKey="expense" name="Expense" fill="#f97316" radius={[4,4,0,0]} maxBarSize={22} />
+                <Bar dataKey="expense" name="Expense" fill="#f0a04b" radius={[4,4,0,0]} maxBarSize={22} />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -104,7 +89,7 @@ export default function Dashboard() {
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No data yet</p>
             </div>
           )}
-        </div>
+        </Card>
       </div>
 
       {/* Asset Prices */}
@@ -116,8 +101,8 @@ export default function Dashboard() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.6fr', gap: 16 }}>
 
         {/* Snapshot */}
-        <div className="card">
-          <p className="heading-sm mb-5">Snapshot</p>
+        <Card>
+          <SectionHeader eyebrow="Snapshot" size="sm" style={{ marginBottom: 20 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {[
               { label: 'Monthly Savings', value: formatCurrency(savings), color: savings >= 0 ? 'var(--color-success)' : 'var(--color-danger)' },
@@ -127,24 +112,24 @@ export default function Dashboard() {
             ].map(({ label, value, color }) => (
               <div key={label} className="flex items-center justify-between">
                 <span className="text-sm" style={{ color: 'var(--color-text-muted)' }}>{label}</span>
-                <span className="text-sm font-semibold tabular-nums" style={{ color: color || 'var(--color-text-primary)' }}>
+                <span className="figure text-sm" style={{ fontWeight: 500, color: color || 'var(--color-text-primary)' }}>
                   {value}
                 </span>
               </div>
             ))}
           </div>
-          <div className="divider" style={{ margin: '20px 0 16px' }} />
+          <Divider gilt margin={20} />
           <Link to="/accounts" className="flex items-center gap-1.5 text-sm font-medium group"
             style={{ color: 'var(--color-accent)', textDecoration: 'none' }}>
             View accounts
             <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
           </Link>
-        </div>
+        </Card>
 
         {/* Recent transactions */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div className="flex items-center justify-between" style={{ padding: '20px 24px 0' }}>
-            <p className="heading-sm">Recent Transactions</p>
+        <Card flush>
+          <div className="flex items-center justify-between" style={{ padding: '22px 24px 4px' }}>
+            <p className="eyebrow">Recent Transactions</p>
             <Link to="/transactions" className="text-xs font-medium"
               style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
               View all →
@@ -162,8 +147,8 @@ export default function Dashboard() {
                       {tx.account?.name} · {formatDate(tx.date)}
                     </p>
                   </div>
-                  <span className={`text-sm font-semibold tabular-nums ${getTransactionColor(tx.type)}`}
-                    style={{ marginLeft: 16 }}>
+                  <span className={`figure text-sm ${getTransactionColor(tx.type)}`}
+                    style={{ marginLeft: 16, fontWeight: 500 }}>
                     {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
                   </span>
                 </div>
@@ -177,7 +162,7 @@ export default function Dashboard() {
               </div>
             </div>
           )}
-        </div>
+        </Card>
       </div>
     </div>
   );

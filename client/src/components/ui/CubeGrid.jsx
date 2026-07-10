@@ -3,7 +3,7 @@ import { useEffect, useRef } from 'react';
 const STEP   = 16;   // grid pitch
 const MAX    = 7;    // max square size (gap = 16 - 7 = 9 px — subtle)
 
-const R = 45, G = 212, B = 191;
+const R = 201, G = 169, B = 106;
 
 // Module-level shared period — all CubeGrid instances use this so their
 // animation phase is always identical (rAF passes performance.now() which

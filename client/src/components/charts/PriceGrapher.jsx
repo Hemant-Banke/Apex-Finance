@@ -360,14 +360,18 @@ export default function PriceGrapher({
   const pad  = (maxVal - minVal) * 0.05 || Math.abs(maxVal) * 0.02 || 1;
   const yMin = minVal - pad;
   const yMax = maxVal + pad;
-  const yRng = yMax - yMin;
-  // stopOffset = vertical % where opening value sits in [yMin,yMax].
-  // 0% = top (max value), 100% = bottom (min value).
-  const stopOffset = yRng > 0
-    ? `${((1 - (openVal - yMin) / yRng) * 100).toFixed(2)}%`
-    : '50%';
+  // The green/red split must sit exactly on the opening-value reference line.
+  // SVG gradients map to the RENDERED PATH's bounding box ([minVal,maxVal]), not
+  // the padded axis domain — so compute the offset in data-range space, or the
+  // colour break drifts off the reference line by `pad`.
+  const dataRng = maxVal - minVal;
+  const stopPct  = dataRng > 0 ? (1 - (openVal - minVal) / dataRng) * 100 : 50;
+  const stopOffset = `${stopPct.toFixed(2)}%`;
+  // Green wins the exact open-line pixel: begin red a hair BELOW the split so a
+  // value sitting on the previous close renders green, not a red/green blend.
+  const stopOffsetRed = `${Math.min(100, stopPct + 0.6).toFixed(2)}%`;
 
-  const strokeColor = isFlat ? '#2dd4bf' : `url(#${pgStrokeId})`;
+  const strokeColor = isFlat ? '#C9A96A' : `url(#${pgStrokeId})`;
   const fillColor   = isFlat ? `url(#${pgFlatFillId})` : `url(#${pgFillId})`;
 
   // ── OHLC Y domain ─────────────────────────────────────────────────────────
@@ -388,8 +392,7 @@ export default function PriceGrapher({
 
   // ── Misc ──────────────────────────────────────────────────────────────────
   const Icon           = isPos ? TrendingUp : TrendingDown;
-  const clr            = isFlat ? '#2dd4bf' : isPos ? 'var(--color-success)' : 'var(--color-danger)';
-  const hexClr         = isFlat ? '#2dd4bf' : isPos ? '#22c55e' : '#ef4444';
+  const clr            = isFlat ? '#C9A96A' : isPos ? 'var(--color-success)' : 'var(--color-danger)';
   const showCompareBtn = !!(onCompare || fetchCompareData);
   const activeEmpty    = chartMode === 'candle' ? ohlcData.length === 0 : data.length === 0;
 
@@ -413,20 +416,19 @@ export default function PriceGrapher({
               {title}
             </p>
           )}
-          <p style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-0.03em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8, fontVariantNumeric: 'tabular-nums' }}>
+          <p className="figure" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8 }}>
             {formatValue(aLast)}
           </p>
           {(chartMode === 'line' ? data.length > 1 : ohlcData.length > 1) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: clr, fontVariantNumeric: 'tabular-nums' }}>
-                {isFlat ? '—' : `${aAbs >= 0 ? '+' : ''}${formatValue(aAbs)}`}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* percentage · trend icon · absolute change — all equal weight */}
+              <span className="figure" style={{ fontSize: 13, fontWeight: 600, color: clr }}>
+                {isFlat ? '0.00%' : `${aPct >= 0 ? '+' : '−'}${Math.abs(aPct).toFixed(2)}%`}
               </span>
-              {!isFlat && <Icon size={13} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
-              {!isFlat && (
-                <span style={{ fontSize: 12, fontWeight: 500, color: clr, opacity: 0.8 }}>
-                  {Math.abs(aPct).toFixed(2)}%
-                </span>
-              )}
+              {!isFlat && <Icon size={14} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
+              <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
+                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${formatValue(Math.abs(aAbs))}`}
+              </span>
             </div>
           )}
         </div>
@@ -510,19 +512,24 @@ export default function PriceGrapher({
 
         /* ── Candlestick chart ──────────────────────────────────────────── */
         <ResponsiveContainer width="100%" height={height}>
-          <ComposedChart data={ohlcData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
-            <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.04)" strokeDasharray="0" />
+          <ComposedChart data={ohlcData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+            <defs>
+              <pattern id={`${pgFillId}-dots-c`} width="22" height="22" patternUnits="userSpaceOnUse">
+                <circle cx="1" cy="1" r="1" fill="rgba(180,196,220,0.10)" />
+              </pattern>
+            </defs>
+            <CartesianGrid vertical={false} horizontal={false} fill={`url(#${pgFillId}-dots-c)`} fillOpacity={1} />
             <XAxis
               dataKey="date"
               ticks={ohlcTicks}
               tickFormatter={d => formatOhlcTick(d, ohlcSpan)}
-              tick={{ fill: '#555', fontSize: 10 }}
+              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false} dy={8}
             />
             <YAxis
               domain={[ohlcYMin, ohlcYMax]}
               tickFormatter={fmtY}
-              tick={{ fill: '#555', fontSize: 10 }}
+              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
             />
@@ -546,40 +553,50 @@ export default function PriceGrapher({
 
         /* ── Line / area chart ──────────────────────────────────────────── */
         <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={displayData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
+          <AreaChart data={displayData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
             <defs>
-              {/* Stroke gradient: green above the period-open price, red below */}
+              {/* Faint dot lattice for the plot background */}
+              <pattern id={`${pgFillId}-dots`} width="22" height="22" patternUnits="userSpaceOnUse">
+                <circle cx="1" cy="1" r="1" fill="rgba(180,196,220,0.10)" />
+              </pattern>
+              {/* Stroke gradient: green above the period-open price, red below.
+                  Red starts a hair below the split so green wins the open pixel. */}
               <linearGradient id={pgStrokeId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset={stopOffset} stopColor="#22c55e" />
-                <stop offset={stopOffset} stopColor="#ef4444" />
+                <stop offset={stopOffsetRed} stopColor="#22c55e" />
+                <stop offset={stopOffsetRed} stopColor="#ef4444" />
               </linearGradient>
               {/* Fill gradient: tinted green above open, tinted red below */}
               <linearGradient id={pgFillId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"         stopColor="#22c55e" stopOpacity={0.13} />
-                <stop offset={stopOffset} stopColor="#22c55e" stopOpacity={0.02} />
-                <stop offset={stopOffset} stopColor="#ef4444" stopOpacity={0.02} />
-                <stop offset="100%"       stopColor="#ef4444" stopOpacity={0.10} />
+                <stop offset="0%"            stopColor="#22c55e" stopOpacity={0.13} />
+                <stop offset={stopOffsetRed} stopColor="#22c55e" stopOpacity={0.02} />
+                <stop offset={stopOffsetRed} stopColor="#ef4444" stopOpacity={0.02} />
+                <stop offset="100%"          stopColor="#ef4444" stopOpacity={0.10} />
               </linearGradient>
               {/* Flat fill: neutral teal tint */}
               <linearGradient id={pgFlatFillId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%"   stopColor="#2dd4bf" stopOpacity={0.10} />
-                <stop offset="100%" stopColor="#2dd4bf" stopOpacity={0.01} />
+                <stop offset="0%"   stopColor="#C9A96A" stopOpacity={0.10} />
+                <stop offset="100%" stopColor="#C9A96A" stopOpacity={0.01} />
               </linearGradient>
             </defs>
 
-            <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.04)" strokeDasharray="0" />
+            <CartesianGrid
+              vertical={false}
+              horizontal={false}
+              fill={`url(#${pgFillId}-dots)`}
+              fillOpacity={1}
+            />
 
             <XAxis
               dataKey="date"
               ticks={ticks}
               tickFormatter={d => formatTick(d, lineSpan)}
-              tick={{ fill: '#555', fontSize: 10 }}
+              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false} dy={8}
             />
             <YAxis
               domain={[yMin, yMax]}
               tickFormatter={fmtY}
-              tick={{ fill: '#555', fontSize: 10 }}
+              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
             />
@@ -606,7 +623,13 @@ export default function PriceGrapher({
               stroke={strokeColor} strokeWidth={1.75}
               fill={fillColor}
               dot={false}
-              activeDot={{ r: 3, fill: hexClr, strokeWidth: 0 }}
+              activeDot={(props) => {
+                // Colour the hover dot by the region it sits in (above/below the
+                // opening reference line), matching the line's own colour there.
+                const v = props?.payload?.value;
+                const color = isFlat ? '#C9A96A' : (v >= openVal ? '#22c55e' : '#ef4444');
+                return <circle cx={props.cx} cy={props.cy} r={3} fill={color} stroke="none" />;
+              }}
               isAnimationActive={true}
               animationDuration={350}
               animationEasing="ease-out"

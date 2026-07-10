@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, ArrowLeft, Plus } from 'lucide-react';
+import Popover from '../ui/Popover';
 
 /**
  * TypePicker — one dropdown "type/option picker" for every place the app needs
@@ -59,18 +60,8 @@ export default function TypePicker({
   const [addError, setAddError]   = useState('');
   const [adding, setAdding]       = useState(false);
 
-  const containerRef = useRef(null);
+  const triggerRef   = useRef(null);
   const nameInputRef = useRef(null);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!isOpen) return;
-    const handler = e => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) close();
-    };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [isOpen]);
 
   useEffect(() => { if (showAdd) setTimeout(() => nameInputRef.current?.focus(), 40); }, [showAdd]);
 
@@ -143,14 +134,18 @@ export default function TypePicker({
   const canAddHere = !!onAdd;
 
   return (
-    <div ref={containerRef} style={{ position: 'relative' }}>
+    <div style={{ position: 'relative' }}>
       {/* ── Trigger ── */}
       <button
+        ref={triggerRef}
         type="button"
         onClick={isOpen ? close : open}
         disabled={disabled}
         className="input-field"
-        style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left', gap: 8 }}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: disabled ? 'not-allowed' : 'pointer', textAlign: 'left', gap: 8,
+          ...(isOpen ? { borderColor: 'var(--color-accent)', background: 'var(--color-bg-secondary)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.28), var(--shadow-md), 0 0 0 3px var(--color-accent-dim)' } : null),
+        }}
       >
         <span style={{ flex: 1, color: displayLabel ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {displayLabel || placeholder}
@@ -161,9 +156,9 @@ export default function TypePicker({
         <ChevronDown size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0, transform: isOpen ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
       </button>
 
-      {/* ── Dropdown ── */}
-      {isOpen && (
-        <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 200, background: 'var(--color-bg-card)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: '0 12px 32px rgba(0,0,0,0.5)' }}>
+      {/* ── Dropdown (portaled, always on top) ── */}
+      <Popover anchorRef={triggerRef} open={isOpen} onClose={close} maxHeight={360}>
+        <div style={{ background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: 'var(--shadow-popover)' }}>
 
           {/* Secondary-phase header */}
           {hierarchical && phase === 'secondary' && (
@@ -260,7 +255,7 @@ export default function TypePicker({
             </div>
           ))}
         </div>
-      )}
+      </Popover>
     </div>
   );
 }

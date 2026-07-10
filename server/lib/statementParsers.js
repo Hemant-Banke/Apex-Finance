@@ -29,10 +29,11 @@ function cleanNarration(raw) {
     .replace(/\b(UPI(INT)?|IMPS|NEFT|RTGS|NWD|FT|NACH|ECS|AUTOPAY|MANDATE|ACH|INB|MMT|CMS)\b[-–_/]*/gi, ' ')
     // 2. Any IFSC code (4 letters + 0 + 6 alphanumeric is the RBI format)
     .replace(/\b[A-Z]{4}0[A-Z0-9]{6}\b/gi, ' ')
-    // 3. UPI handles (vpa@bank)
-    .replace(/\b[A-Za-z0-9._-]{3,}@[A-Za-z0-9.-]+\b/g, ' ')
-    // 4. Long numeric IDs (UTR, transaction refs, phone numbers)
-    .replace(/\b\d{10,}\b/g, ' ')
+    // 3. UPI handles (vpa@bank). The local part excludes '-' so we don't swallow
+    //    a preceding hyphenated name (e.g. "BANKE-7987…@ybl" keeps "BANKE").
+    .replace(/[A-Za-z0-9._]{2,}@[A-Za-z0-9.-]+/g, ' ')
+    // 4. Numeric IDs (UTR, transaction refs, account fragments, phone numbers)
+    .replace(/\b\d{5,}\b/g, ' ')
     // 5. Date-like patterns (DDMMYYYY, DD/MM/YY, YYYYMMDD)
     .replace(/\b\d{2}[-/]?\d{2}[-/]?\d{2,4}\b/g, ' ')
     // 6. Common junk fragments
@@ -40,7 +41,7 @@ function cleanNarration(raw) {
     // 7. Standalone short alphanumeric tokens that look like codes (5+ chars mixed letters+digits)
     .replace(/\b(?=\w*\d)(?=\w*[A-Za-z])\w{5,}\b/g, ' ')
     // 8. Collapse separators and whitespace
-    .replace(/[-–_/]{2,}/g, ' ')
+    .replace(/[-–_/]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -158,19 +159,24 @@ async function parsePDF(buffer, password) {
  * and falls back to the deterministic regex parser (HDFC-style layouts).
  */
 async function buildResultFromText(text, source) {
+  // 1. Try to parse it ourselves first — deterministic and free.
+  const regexTxns = parseBankText(text);
+  if (regexTxns.length) {
+    return { transactions: regexTxns, ...extractBankMeta(text), source };
+  }
+
+  // 2. Fall back to the LLM for formats the regex parser can't handle.
   if (llmService.isLLMAvailable()) {
     try {
       const result = finalizeAiResult(await llmService.extractTransactionsFromText(text), source);
       if (result.transactions.length) return result;
-      // LLM found nothing usable — fall through to the regex parser.
     } catch (err) {
-      console.error('LLM statement parse failed, falling back to regex:', err.message);
+      console.error('LLM statement parse failed:', err.message);
     }
   }
 
-  const transactions = parseBankText(text);
-  const meta = extractBankMeta(text);
-  return { transactions, ...meta, source };
+  // 3. Nothing could parse it.
+  return { transactions: [], ...extractBankMeta(text), source };
 }
 
 function parseBankText(text) {
@@ -239,16 +245,19 @@ function parseBankText(text) {
           if (rm) {
             const amount  = parseAmount(rm[2]);
             const closing = parseAmount(rm[3]);
-            // Skip junk narration lines, join valid ones
+            i++;
+            // Absorb post-ref continuation lines — they carry meaningful narration
+            // (e.g. "TOWARDS US STOCKS") that helps classification, not junk.
+            while (i < lines.length && !DATE_RE.test(lines[i]) && !REF_RE.test(lines[i]) && !SINGLE_RE.test(lines[i])) {
+              if (!JUNK.test(lines[i])) narrationParts.push(lines[i]);
+              i++;
+            }
             const narration = narrationParts.filter(l => l && !JUNK.test(l)).join(' ').trim();
             if (narration && amount > 0.01) {
               const type = resolveType(prevBalance, closing, narration, holderWords);
               transactions.push(buildTx({ date: startDate, narration, amount, type, source: 'pdf' }));
               prevBalance = closing;
             }
-            i++;
-            // Skip post-ref continuation lines (they're extra narration, not a new tx)
-            while (i < lines.length && !DATE_RE.test(lines[i]) && !REF_RE.test(lines[i]) && !SINGLE_RE.test(lines[i])) i++;
             break;
           }
           // Another date line hit before ref → previous block is orphan; don't advance i
@@ -266,14 +275,15 @@ function parseBankText(text) {
 }
 
 function resolveType(prevBalance, closing, narration, holderWords) {
-  let type = prevBalance !== null
+  const type = prevBalance !== null
     ? (closing > prevBalance + 0.5 ? 'income' : 'expense')
     : 'expense';
 
-  // Self-transfer: narration contains all main words of account holder's name
-  if (holderWords.length >= 2) {
+  // Only a DEBIT (money out) can be a self-transfer. A credit (money in) is
+  // income, never a transfer.
+  if (type === 'expense' && holderWords.length >= 2) {
     const upper = narration.toUpperCase();
-    if (holderWords.every(w => upper.includes(w))) type = 'transfer';
+    if (holderWords.every(w => upper.includes(w))) return 'transfer';
   }
   return type;
 }
@@ -348,14 +358,14 @@ function parseUPIHtml(html) {
     const payerName = nameFromVpa(payerVpa);
 
     const payeeVpaBase = payeeVpa.split('(')[0].toLowerCase();
-    const payerVpaBase = payerVpa.split('(')[0].toLowerCase();
 
     let type;
     if (benefitType === 'CR') {
-      // Income unless the payer is one of user's own accounts (= self-transfer)
-      type = ownVpas.has(payerVpaBase) ? 'transfer' : 'income';
+      // A credit (money in) is income — never a transfer.
+      type = 'income';
     } else {
-      // Expense unless the payee is one of user's own accounts (= self-transfer)
+      // A debit (money out) is an expense, or a self-transfer when the payee is
+      // one of the user's own accounts.
       type = ownVpas.has(payeeVpaBase) ? 'transfer' : 'expense';
     }
 

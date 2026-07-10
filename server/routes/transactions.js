@@ -5,8 +5,17 @@ const Account = require('../models/Account');
 
 const { protect }               = require('../middleware/auth');
 const { TRANSACTION_TYPES, ASSET_TRANSACTION_TYPES }     = require('../utils/constants');
+const { midnight, todayMs }     = require('../utils/helpers');
 const { getAccountCashBalance } = require('../services/accountBalance');
 const txService                 = require('../services/transactionService');
+const categoryProfile           = require('../services/categoryProfileService');
+
+/** Record a saved (user-confirmed) transaction into the user's category profile. */
+function learnCategory(userId, tx, narration) {
+  categoryProfile.recordTransactions(userId, [{
+    type: tx.type, category: tx.category, amount: tx.amount, date: tx.date, narration,
+  }]).catch(console.error);
+}
 
 const router = express.Router();
 router.use(protect);
@@ -60,6 +69,10 @@ router.post('/', [
     const errors = validationResult(req);
     if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
 
+    // Reject future-dated transactions — the time-series stores only run to today.
+    if (req.body.date && midnight(new Date(req.body.date)) > todayMs())
+      return res.status(400).json({ message: 'Transaction date cannot be in the future' });
+
     const account = await Account.findOne({ _id: req.body.account, user: req.user._id });
     if (!account) return res.status(404).json({ message: 'Account not found' });
 
@@ -101,6 +114,10 @@ router.post('/', [
     // A store failure is logged but does not undo the committed transaction.
     try { await txService.onCreate(req.user._id, transaction); } catch (e) { console.error(e); }
 
+    // Learn how this user categorizes (non-blocking; uses the original narration
+    // sent from import when available).
+    learnCategory(req.user._id, transaction, req.body.narration);
+
     const populated = await Transaction.findById(transaction._id)
       .populate('account',   'name type')
       .populate('toAccount', 'name type');
@@ -115,6 +132,9 @@ router.post('/', [
 // PUT /api/transactions/:id
 router.put('/:id', async (req, res) => {
   try {
+    if (req.body.date && midnight(new Date(req.body.date)) > todayMs())
+      return res.status(400).json({ message: 'Transaction date cannot be in the future' });
+
     // Fetch old state before update for net worth delta calculation
     const oldTx = await Transaction.findOne({ _id: req.params.id, user: req.user._id }).lean();
     if (!oldTx) return res.status(404).json({ message: 'Transaction not found' });
@@ -131,6 +151,9 @@ router.put('/:id', async (req, res) => {
 
     // Update stores before responding so the client's refetch sees fresh data.
     try { await txService.onUpdate(req.user._id, oldTx, req.body); } catch (e) { console.error(e); }
+
+    // Learn from a re-categorization (non-blocking).
+    learnCategory(req.user._id, transaction, req.body.narration);
 
     res.json(transaction);
   } catch (err) {

@@ -40,14 +40,14 @@ export default function AppShell({ children }) {
     <div style={{
       display: 'flex',
       height: '100vh',
-      background: '#0d0d0d',
+      background: 'var(--color-bg-primary)',
       overflow: 'hidden',
       position: 'relative',
     }}>
       {/* ── Ambient background — persists across all pages (AppShell never unmounts) ── */}
       <CubeGrid period={GRID_PERIOD} style={{ opacity: 0.5 }} />
-      <div className="landing-orb" style={{ width: 680, height: 680, background: 'radial-gradient(circle, rgba(45,212,191,0.09), transparent 65%)', top: '-18%', right: '-2%', animation: 'orbFloat1 28s ease-in-out infinite' }} />
-      <div className="landing-orb" style={{ width: 480, height: 480, background: 'radial-gradient(circle, rgba(99,102,241,0.07), transparent 65%)', bottom: '-12%', right: '22%', animation: 'orbFloat3 24s ease-in-out infinite' }} />
+      <div className="landing-orb" style={{ width: 680, height: 680, background: 'radial-gradient(circle, rgba(201,169,106,0.07), transparent 65%)', top: '-18%', right: '-2%', animation: 'orbFloat1 28s ease-in-out infinite' }} />
+      <div className="landing-orb" style={{ width: 480, height: 480, background: 'radial-gradient(circle, rgba(91,110,142,0.07), transparent 65%)', bottom: '-12%', right: '22%', animation: 'orbFloat3 24s ease-in-out infinite' }} />
 
       {/* ── Sidebar ── */}
       <aside style={{

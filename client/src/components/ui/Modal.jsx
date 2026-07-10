@@ -1,35 +1,56 @@
 import { createPortal } from 'react-dom';
-import { X } from 'lucide-react';
+import { X, ArrowLeft } from 'lucide-react';
 
-export default function Modal({ open, onClose, title, children, wide = false, maxWidth }) {
+/**
+ * Modal — a titled "slip" dialog.
+ *
+ * Props:
+ *   title       — main heading (serif display)
+ *   eyebrow     — small tracked label above the title (gilt tick)
+ *   subtitle    — muted line under the title
+ *   titlePrefix — optional node rendered left of the title (e.g. an asset icon)
+ *   titleSuffix — optional node rendered inline right of the title (e.g. a type pill)
+ *   onBack      — optional; shows a back arrow in the header
+ *   align       — 'center' (default) | 'top' (pins the dialog near the top so it
+ *                 doesn't jump when its content changes height)
+ *   wide / maxWidth — width control
+ */
+export default function Modal({
+  open, onClose, title, eyebrow, subtitle, titlePrefix, titleSuffix, onBack,
+  align = 'center', children, wide = false, maxWidth,
+}) {
   if (!open) return null;
 
-  const width = maxWidth ?? (wide ? 640 : undefined);
+  const width = maxWidth ?? (wide ? 660 : undefined);
 
   return createPortal(
-    <div className="modal-overlay" onClick={onClose}>
+    <div className={`modal-overlay${align === 'top' ? ' modal-overlay-top' : ''}`} onClick={onClose}>
       <div className="modal-content" onClick={e => e.stopPropagation()} style={width ? { maxWidth: width } : undefined}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
-          <h2 style={{ fontSize: 16, fontWeight: 600, color: 'var(--color-text-primary)' }}>
-            {title}
-          </h2>
-          <button
-            onClick={onClose}
-            style={{
-              color: 'var(--color-text-muted)',
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              padding: 4,
-              borderRadius: 6,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <X size={18} />
+
+        {/* Header — [back] eyebrow · title · subtitle, closed by a gilt hairline */}
+        <div className="modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+            {onBack && (
+              <button onClick={onBack} className="btn-icon" aria-label="Back" title="Back" style={{ width: 32, height: 32, flexShrink: 0 }}>
+                <ArrowLeft size={16} />
+              </button>
+            )}
+            {titlePrefix}
+            <div style={{ minWidth: 0 }}>
+              {eyebrow && <p className="eyebrow" style={{ marginBottom: 6 }}>{eyebrow}</p>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                <h2 className="modal-title" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h2>
+                {titleSuffix}
+              </div>
+              {subtitle && <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</p>}
+            </div>
+          </div>
+          <button onClick={onClose} className="btn-icon modal-close" aria-label="Close" title="Close" style={{ width: 32, height: 32 }}>
+            <X size={16} />
           </button>
         </div>
+        <div className="gilt-rule" style={{ marginBottom: 24 }} />
+
         {children}
       </div>
     </div>,

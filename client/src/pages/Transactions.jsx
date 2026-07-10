@@ -10,6 +10,7 @@ import AssetTransactionForm from '../components/market/AssetTransactionForm';
 import { Filter, ArrowLeftRight, X, Pencil, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import ImportModal from '../components/import/ImportModal';
+import AssetIcon from '../components/market/AssetIcon';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
 
@@ -116,7 +117,7 @@ export default function Transactions() {
               <span className="badge badge-default" style={{ marginRight: 12 }}>
                 {tx.type}
               </span>
-              <span className={`text-sm font-semibold tabular-nums ${getTransactionColor(tx.type)}`}>
+              <span className={`figure text-sm ${getTransactionColor(tx.type)}`} style={{ fontWeight: 600 }}>
                 {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
               </span>
               <button onClick={() => setEditTx(tx)}
@@ -173,7 +174,12 @@ export default function Transactions() {
 
       {/* Edit Modal — AssetTransactionForm for buy/sell, TransactionForm for everything else */}
       <Modal open={!!editTx} onClose={() => setEditTx(null)}
-        title={['buy','sell'].includes(editTx?.type) ? `Edit ${editTx?.type} — ${editTx?.assetSymbol}` : 'Edit transaction'}
+        eyebrow="Edit"
+        title={['buy','sell'].includes(editTx?.type) ? `${editTx?.type === 'buy' ? 'Buy' : 'Sell'} · ${editTx?.assetSymbol}` : 'Edit transaction'}
+        subtitle={['buy','sell'].includes(editTx?.type) ? editTx?.assetName : undefined}
+        titlePrefix={['buy','sell'].includes(editTx?.type)
+          ? <AssetIcon symbol={editTx.assetSymbol} name={editTx.assetName} type={editTx.assetType} size={40} />
+          : undefined}
         wide={['buy','sell'].includes(editTx?.type)}>
         {editTx && (['buy','sell'].includes(editTx.type) ? (
           <AssetTransactionForm

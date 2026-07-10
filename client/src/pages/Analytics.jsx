@@ -90,12 +90,12 @@ export default function Analytics() {
           {ie.length > 0 ? (
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={ie} barGap={4}>
-                <XAxis dataKey="month" tick={{ fill: '#636363', fontSize: 11 }} axisLine={false} tickLine={false} dy={8} />
-                <YAxis tick={{ fill: '#636363', fontSize: 11 }} axisLine={false} tickLine={false}
+                <XAxis dataKey="month" tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false} dy={8} />
+                <YAxis tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false}
                   tickFormatter={v => `₹${(v/1000).toFixed(0)}k`} width={42} />
                 <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} content={<ChartTooltip />} isAnimationActive={false} wrapperStyle={{ transition: 'none' }} />
                 <Bar dataKey="income"  name="Income"  fill="#22c55e" radius={[4,4,0,0]} maxBarSize={24} />
-                <Bar dataKey="expense" name="Expense" fill="#f97316" radius={[4,4,0,0]} maxBarSize={24} />
+                <Bar dataKey="expense" name="Expense" fill="#f0a04b" radius={[4,4,0,0]} maxBarSize={24} />
               </BarChart>
             </ResponsiveContainer>
           ) : <Empty text="No data yet" />}

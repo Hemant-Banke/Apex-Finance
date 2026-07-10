@@ -10,8 +10,8 @@ export default function AppLoader({ label = 'Preparing your portfolio' }) {
   return (
     <div className="app-loader">
       <CubeGrid period={GRID_PERIOD} style={{ opacity: 0.5 }} />
-      <div className="landing-orb" style={{ width: 540, height: 540, background: 'radial-gradient(circle, rgba(45,212,191,0.12), transparent 65%)', top: '-14%', left: '-8%', animation: 'orbFloat1 26s ease-in-out infinite' }} />
-      <div className="landing-orb" style={{ width: 440, height: 440, background: 'radial-gradient(circle, rgba(99,102,241,0.09), transparent 65%)', bottom: '-14%', right: '-6%', animation: 'orbFloat3 22s ease-in-out infinite' }} />
+      <div className="landing-orb" style={{ width: 540, height: 540, background: 'radial-gradient(circle, rgba(201,169,106,0.12), transparent 65%)', top: '-14%', left: '-8%', animation: 'orbFloat1 26s ease-in-out infinite' }} />
+      <div className="landing-orb" style={{ width: 440, height: 440, background: 'radial-gradient(circle, rgba(91,110,142,0.10), transparent 65%)', bottom: '-14%', right: '-6%', animation: 'orbFloat3 22s ease-in-out infinite' }} />
 
       <div className="app-loader-inner">
         <div className="app-loader-mark">
