@@ -27,9 +27,18 @@ export default function Login() {
     e.preventDefault();
     setError('');
     setLoading(true);
-    try   { await login(email, password); navigate('/'); }
-    catch (err) { setError(err.response?.data?.message || 'Could not connect. Is the server running?'); }
-    finally { setLoading(false); }
+    try {
+      await login(email, password);
+      navigate('/');
+    } catch (err) {
+      // No account yet? Login doubles as the entry point — carry the email over
+      // to register rather than dead-ending the user on an error.
+      if (err.response?.data?.code === 'NO_ACCOUNT') {
+        navigate('/register', { state: { email, password } });
+        return;
+      }
+      setError(err.response?.data?.message || 'Could not connect. Is the server running?');
+    } finally { setLoading(false); }
   };
 
   return (
@@ -142,51 +151,55 @@ export default function Login() {
             fontFamily: 'var(--font-display)', fontSize: 30, fontWeight: 400,
             color: 'var(--color-text-primary)', letterSpacing: '-0.025em', marginBottom: 8,
           }}>Welcome back</h2>
-          <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 36 }}>
-            Sign in to your portfolio
+          <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 28 }}>
+            Sign in — or start fresh. New here, and we'll set you up.
           </p>
 
           {error && (
-            <div style={{ marginBottom: 24, padding: '12px 16px', borderRadius: 10, fontSize: 13, background: 'var(--color-danger-muted)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.15)' }}>
+            <div style={{ marginBottom: 20, padding: '12px 16px', borderRadius: 10, fontSize: 13, background: 'var(--color-danger-muted)', color: 'var(--color-danger)', border: '1px solid rgba(239,68,68,0.15)' }}>
               {error}
             </div>
           )}
 
-          <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Email</label>
-              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-                className="input-field" placeholder="you@example.com" required autoFocus />
-            </div>
-            <div>
-              <label className="label" style={{ display: 'block', marginBottom: 8 }}>Password</label>
-              <div style={{ position: 'relative' }}>
-                <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-                  className="input-field" style={{ paddingRight: 42 }} placeholder="Enter password" required />
-                <button type="button" onClick={() => setShowPw(!showPw)} tabIndex={-1} style={{
-                  position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-                  color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex',
-                }}>
-                  {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
-                </button>
-              </div>
+          <OAuthButtons onError={setError} />
+
+          {/* Divider between the one-tap providers and the email route */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '22px 0' }}>
+            <span style={{ flex: 1, height: 1, background: 'var(--color-border)' }} />
+            <span style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
+              or with email
+            </span>
+            <span style={{ flex: 1, height: 1, background: 'var(--color-border)' }} />
+          </div>
+
+          <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+              className="input-field" placeholder="you@example.com" aria-label="Email" required autoFocus />
+
+            <div style={{ position: 'relative' }}>
+              <input type={showPw ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                className="input-field" style={{ paddingRight: 42 }} placeholder="Password" aria-label="Password" required />
+              <button type="button" onClick={() => setShowPw(!showPw)} tabIndex={-1} style={{
+                position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
+                color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex',
+              }}>
+                {showPw ? <EyeOff size={15} /> : <Eye size={15} />}
+              </button>
             </div>
 
             <button type="submit" disabled={loading} className="btn-primary"
-              style={{ width: '100%', padding: '13px 18px', marginTop: 6, fontSize: '0.875rem', letterSpacing: '-0.01em' }}>
+              style={{ width: '100%', padding: '13px 18px', marginTop: 4, fontSize: '0.875rem', letterSpacing: '-0.01em' }}>
               {loading
                 ? <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-                : <><span>Sign in</span><ArrowRight size={15} /></>
+                : <><span>Continue</span><ArrowRight size={15} /></>
               }
             </button>
           </form>
 
-          <OAuthButtons onError={setError} />
-
-          <p style={{ textAlign: 'center', marginTop: 32, fontSize: 13, color: 'var(--color-text-muted)' }}>
-            Don't have an account?{' '}
+          <p style={{ textAlign: 'center', marginTop: 24, fontSize: 12.5, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+            No account with Apex yet? We'll take you to sign-up.<br />
             <Link to="/register" style={{ fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}>
-              Create one
+              Register manually
             </Link>
           </p>
         </div>

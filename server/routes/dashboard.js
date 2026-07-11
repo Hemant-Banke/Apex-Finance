@@ -28,13 +28,16 @@ router.get('/summary', async (req, res) => {
     const settledByAccount = {};
     dailyBalances.forEach(d => { settledByAccount[d.account.toString()] = d.settledValue || 0; });
 
+    // Debt balances are already stored negative, so liabilities is just their
+    // sum flipped for display (a positive "you owe" figure). Nothing is forced:
+    // an overpaid debt account reports a negative liability, which is the truth.
     let totalAssets      = 0;
     let totalLiabilities = 0;
     accounts.forEach(acc => {
       const id      = acc._id.toString();
       const settled = settledByAccount[id] || 0;
       if (acc.isDebt) {
-        totalLiabilities += Math.abs(settled);
+        totalLiabilities -= settled;
       } else {
         totalAssets += settled;
       }

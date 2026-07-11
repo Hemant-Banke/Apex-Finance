@@ -9,6 +9,45 @@ const Account     = require('../models/Account');
 
 const dvService     = require('./dailyValueService');
 const { flipTx }    = require('../utils/transactionHelpers');
+const { fetchFxRate } = require('./marketDataService');
+const { midnight, todayMs } = require('../utils/helpers');
+const { normalizeCurrency } = require('../utils/currency');
+const { ASSET_TRANSACTION_TYPES } = require('../utils/constants');
+
+/**
+ * Book an asset transaction's money fields.
+ *
+ * `pricePerUnit` stays in the asset's native currency; `amount` is always INR,
+ * converted at the rate on the transaction's own date (not today's) so a trade is
+ * booked at the FX it actually happened at. The rate is stored alongside it.
+ *
+ * Mutates and returns `data`. Throws when a foreign trade has no rate available —
+ * booking a USD figure as though it were INR would silently corrupt every store.
+ */
+async function applyAssetPricing(data) {
+  if (!ASSET_TRANSACTION_TYPES.includes(data.type)) return data;
+  if (!data.units || !data.pricePerUnit) return data;
+
+  const units    = parseFloat(data.units);
+  const price    = parseFloat(data.pricePerUnit);
+  const currency = normalizeCurrency(data.currency);
+
+  if (!currency) {
+    data.currency = undefined;
+    data.fxRate   = 1;
+    data.amount   = units * price;
+    return data;
+  }
+
+  const dateMs = data.date ? midnight(new Date(data.date)) : todayMs();
+  const fxRate = await fetchFxRate(currency, dateMs);
+  if (!fxRate) throw new Error(`Exchange rate for ${currency} is unavailable — cannot book this trade`);
+
+  data.currency = currency;
+  data.fxRate   = fxRate;
+  data.amount   = units * price * fxRate;
+  return data;
+}
 
 /**
  * Find a user's transactions within a date window (inclusive), sorted ascending.
@@ -69,6 +108,7 @@ async function bulkDelete(userId, txIds) {
 }
 
 module.exports = {
+  applyAssetPricing,
   findTransactions,
   onCreate,
   onDelete,

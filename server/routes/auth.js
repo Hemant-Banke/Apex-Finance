@@ -97,13 +97,23 @@ router.post('/login', [
     const { email, password } = req.body;
 
     const user = await User.findOne({ email }).select('+password');
+    // `code` lets the client route a first-time visitor straight to register
+    // with their email carried over, instead of dead-ending on an error.
     if (!user) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'No account with that email', code: 'NO_ACCOUNT' });
+    }
+
+    // OAuth-only accounts have no password hash to compare against.
+    if (!user.password) {
+      return res.status(401).json({
+        message: `This email is registered with ${user.authProvider}. Continue with ${user.authProvider} instead.`,
+        code: 'OAUTH_ONLY'
+      });
     }
 
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      return res.status(401).json({ message: 'Incorrect password', code: 'BAD_PASSWORD' });
     }
 
     res.json(sessionResponse(user));

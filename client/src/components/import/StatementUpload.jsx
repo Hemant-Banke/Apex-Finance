@@ -72,11 +72,11 @@ export default function StatementUpload({ accounts, defaultAccountId, onParsed }
       <div>
         <label className="label block" style={{ marginBottom: 8 }}>Import into account</label>
         <TypePicker
-          options={accountOptions(accounts.filter(a => !a.isDebt))}
+          options={accountOptions(accounts)}
           value={accountId}
           onChange={setAccountId}
           placeholder="Select account…"
-          searchable={accounts.filter(a => !a.isDebt).length > 6}
+          searchable={accounts.length > 6}
         />
       </div>
 

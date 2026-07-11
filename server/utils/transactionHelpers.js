@@ -77,7 +77,7 @@ function buildCashImpactMap(txns, aid) {
  * @param {Object[]} txns  Transactions sorted by date asc.
  * @returns {{
  *   byAccount: { [aid: string]: { cashTxns, assetTxns, cashStartMs, assetStartMs } },
- *   assets: Array<{ assetSymbol: string, assetType: string }>,
+ *   assets: Array<{ assetSymbol: string, assetType: string, currency?: string }>,
  *   assetStartMs: number
  * }}
  */
@@ -103,7 +103,13 @@ function buildAccountTxnsMap(txns) {
 
       const sym = tx.assetSymbol?.toUpperCase();
       if (sym && !assetsSeen.has(sym)) {
-        assetsSeen.set(sym, { assetSymbol: sym, assetType: tx.assetType || 'stock' });
+        // `currency` rides along so the price fetch knows to convert this
+        // symbol's quotes to INR.
+        assetsSeen.set(sym, {
+          assetSymbol: sym,
+          assetType:   tx.assetType || 'stock',
+          currency:    tx.currency,
+        });
       }
     } else {
       acct.cashTxns.push(tx);

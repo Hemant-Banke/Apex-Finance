@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { accountsAPI, transactionsAPI } from '../lib/api';
 import {
-  formatCurrency, compactIfLarge, formatDate, getTransactionColor, getTransactionSign, getTransactionName
+  formatCurrency, formatNativeCurrency, compactIfLarge, formatDate,
+  getTransactionColor, getTransactionSign, getTransactionName
 } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -66,6 +67,10 @@ export default function AccountDetail() {
   const [assetModal, setAssetModal]         = useState(false);
   const [selectedSecurity, setSelectedSecurity] = useState(null);
   const [importOpen, setImportOpen]         = useState(false);
+  // Rename / edit-details modal
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [details, setDetails]         = useState({ name: '', description: '' });
+  const [savingDetails, setSavingDetails] = useState(false);
 
   useEffect(() => { load(); }, [id]);
 
@@ -115,6 +120,24 @@ export default function AccountDetail() {
   };
 
   const closeAssetModal = () => { setAssetModal(false); setSelectedSecurity(null); };
+
+  const openDetails = () => {
+    setDetails({ name: account.name, description: account.description || '' });
+    setDetailsOpen(true);
+  };
+
+  const saveDetails = async (e) => {
+    e.preventDefault();
+    setSavingDetails(true);
+    try {
+      await accountsAPI.update(id, { name: details.name.trim(), description: details.description });
+      setDetailsOpen(false);
+      load();
+      toast.success('Account updated');
+    } catch (e) {
+      toast.error(e.response?.data?.message || e.response?.data?.errors?.[0]?.msg || 'Failed to update account');
+    } finally { setSavingDetails(false); }
+  };
 
   const openImport = async () => {
     if (allAccounts.length === 0) {
@@ -174,7 +197,14 @@ export default function AccountDetail() {
             <Icon size={20} style={{ color: 'var(--color-text-secondary)' }} strokeWidth={1.5} />
           </div>
           <div>
-            <h1 className="heading-lg">{account.name}</h1>
+            <div className="flex items-center gap-2 group">
+              <h1 className="heading-lg">{account.name}</h1>
+              <button onClick={openDetails} title="Rename account" aria-label="Rename account"
+                className="opacity-0 group-hover:!opacity-100 transition-opacity"
+                style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4 }}>
+                <Pencil size={14} />
+              </button>
+            </div>
             <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
               {account.type.charAt(0).toUpperCase() + account.type.slice(1)}
               {account.description && ` · ${account.description}`}
@@ -199,8 +229,11 @@ export default function AccountDetail() {
       {account.isDebt ? (
         <div className="card">
           <p className="heading-sm mb-3">Outstanding Balance</p>
-          <p className="figure display-number text-[var(--color-danger)]">
-            −{compactIfLarge(Math.abs(account.balance))}
+          {/* Printed as stored — a debt account's balance is already negative. */}
+          <p className="figure display-number" style={{
+            color: account.balance <= 0 ? 'var(--color-danger)' : 'var(--color-success)',
+          }}>
+            {compactIfLarge(account.balance)}
           </p>
         </div>
       ) : (
@@ -267,12 +300,26 @@ export default function AccountDetail() {
                   <div>
                     <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{h.symbol}</p>
                     <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      {h.name} · <span className="figure">{h.qty}</span> units · avg <span className="figure">{formatCurrency(h.avgCostPerUnit)}</span> · {h.type?.replace('_', ' ')}
+                      {h.name} · <span className="figure">{h.qty}</span> units · avg{' '}
+                      {/* Foreign holding: the average it was actually bought at, in its
+                          own currency. The INR cost sits on the right of the row. */}
+                      <span className="figure">
+                        {h.currency
+                          ? formatNativeCurrency(h.avgCostPerUnitNative, h.currency)
+                          : formatCurrency(h.avgCostPerUnit)}
+                      </span> · {h.type?.replace('_', ' ')}
                     </p>
                   </div>
                 </div>
-                <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                  {formatCurrency(h.totalInvested)}
+                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                  <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                    {formatCurrency(h.totalInvested)}
+                  </span>
+                  {h.currency && (
+                    <span className="figure" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                      {formatNativeCurrency(h.totalInvestedNative, h.currency)}
+                    </span>
+                  )}
                 </span>
               </div>
             ))}
@@ -368,6 +415,31 @@ export default function AccountDetail() {
         message={`Delete this ${deleteTx?.type} transaction of ${deleteTx ? formatCurrency(deleteTx.amount) : ''}? This action cannot be undone.`}
         skipKey={SKIP_DELETE_KEY}
       />
+
+      {/* Rename / edit account details */}
+      <Modal open={detailsOpen} onClose={() => setDetailsOpen(false)}
+        eyebrow="Edit" title="Account details" icon={Pencil}>
+        <form onSubmit={saveDetails} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <div>
+            <label className="label block" style={{ marginBottom: 8 }}>Name</label>
+            <input type="text" value={details.name}
+              onChange={e => setDetails({ ...details, name: e.target.value })}
+              className="input-field" placeholder="e.g., HDFC Savings" required autoFocus />
+          </div>
+          <div>
+            <label className="label block" style={{ marginBottom: 8 }}>Description</label>
+            <input type="text" value={details.description}
+              onChange={e => setDetails({ ...details, description: e.target.value })}
+              className="input-field" placeholder="Optional note" />
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <Button type="button" variant="secondary" onClick={() => setDetailsOpen(false)}>Cancel</Button>
+            <Button type="submit" variant="gold" disabled={savingDetails || !details.name.trim()}>
+              {savingDetails ? 'Saving…' : 'Save changes'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* Import statement modal — pre-targets this account */}
       <ImportModal

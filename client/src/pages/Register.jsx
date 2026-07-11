@@ -1,19 +1,21 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import ApexLogo from '../components/ui/ApexLogo';
 import CubeGrid, { GRID_PERIOD } from '../components/ui/CubeGrid';
-import OAuthButtons from '../components/auth/OAuthButtons';
 
 const PHRASES = ['Your wealth', 'Your growth', 'Your future', 'Your legacy'];
 
 export default function Register() {
   const { register } = useAuth();
   const navigate = useNavigate();
+  // Login forwards an unrecognised email (and whatever password was typed) here,
+  // so the user only fills in what's actually missing.
+  const carried = useLocation().state || {};
   const [name, setName]           = useState('');
-  const [email, setEmail]         = useState('');
-  const [password, setPassword]   = useState('');
+  const [email, setEmail]         = useState(carried.email || '');
+  const [password, setPassword]   = useState(carried.password || '');
   const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw]       = useState(false);
   const [error, setError]         = useState('');
@@ -150,7 +152,9 @@ export default function Register() {
             color: 'var(--color-text-primary)', letterSpacing: '-0.025em', marginBottom: 8,
           }}>Get started</h2>
           <p style={{ fontSize: 14, color: 'var(--color-text-muted)', marginBottom: 36 }}>
-            Create your account — free, always.
+            {carried.email
+              ? `No account for ${carried.email} yet — let's create one.`
+              : 'Create your account — free, always.'}
           </p>
 
           {error && (
@@ -198,9 +202,7 @@ export default function Register() {
             </button>
           </form>
 
-          <OAuthButtons onError={setError} />
-
-          <p style={{ textAlign: 'center', marginTop: 32, fontSize: 13, color: 'var(--color-text-muted)' }}>
+          <p style={{ textAlign: 'center', marginTop: 28, fontSize: 13, color: 'var(--color-text-muted)' }}>
             Already on Apex?{' '}
             <Link to="/login" style={{ fontWeight: 500, color: 'var(--color-accent)', textDecoration: 'none' }}>
               Sign in

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { isManualSymbol } from '../../lib/constants';
 
 /**
  * AssetIcon — an instrument avatar for the asset picker.
@@ -6,6 +7,10 @@ import { useState } from 'react';
  * Shows the real brand logo via logo.dev when we can resolve a domain, and
  * gracefully falls back to a themed emoji glyph (per-symbol store → asset-type)
  * otherwise — so it always renders something clean, never a broken image.
+ *
+ * Unlisted / physical assets (an FD, a gold chain, an unlisted bond) have no
+ * brand logo by definition, so they go straight to the emoji — we never fire a
+ * request that could only 404.
  *
  * logo.dev needs a publishable token in `VITE_LOGODEV_TOKEN`; without it we skip
  * straight to the emoji glyph.
@@ -22,6 +27,7 @@ const TYPE_TINT = {
   bond:        '#3fbf9a',
   commodity:   '#e0b64b',
   gold:        '#e0b64b',
+  silver:      '#b8c2cc',
   fd:          '#3fbf9a',
   epf_nps:     '#60a5fa',
   other:       '#8ea0b8',
@@ -36,6 +42,7 @@ const TYPE_EMOJI = {
   bond:        '📜',
   commodity:   '🛢️',
   gold:        '🥇',
+  silver:      '🥈',
   fd:          '🏦',
   epf_nps:     '🛡️',
   other:       '💠',
@@ -52,8 +59,9 @@ const SYMBOL_EMOJI = {
 };
 
 // Equity-like assets resolve on logo.dev's /ticker endpoint; crypto has its own
-// /crypto endpoint. Everything else (commodity / manual) falls to the emoji.
-const TICKER_TYPES = new Set(['stock', 'etf', 'mutual_fund', 'bond']);
+// /crypto endpoint. Everything else (bonds, commodities, physical & unlisted
+// holdings) has no brand behind it and falls to the emoji.
+const TICKER_TYPES = new Set(['stock', 'etf', 'mutual_fund']);
 
 // Build a logo.dev URL for a symbol per its docs:
 //   stocks/ETFs → /ticker/:symbol   (kept whole incl. exchange suffix, e.g.
@@ -63,6 +71,8 @@ const TICKER_TYPES = new Set(['stock', 'etf', 'mutual_fund', 'bond']);
 // logo, so `onError` fires and we drop to the themed emoji glyph.
 function logoSrc(symbol, type, px) {
   if (!LOGODEV_TOKEN || !symbol) return null;
+  // Off-market holdings have no logo to find — don't ask for one.
+  if (isManualSymbol(symbol)) return null;
   const q = `token=${LOGODEV_TOKEN}&size=${px}&format=png&fallback=404`;
   if (type === 'crypto') {
     const coin = symbol.replace(/-USDT?$/i, '').trim().toLowerCase();

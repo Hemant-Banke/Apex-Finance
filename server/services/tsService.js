@@ -13,6 +13,7 @@ const { DAY_MS } = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder } = require('../utils/tsHelpers');
 const { buildCashImpactMap, directionalAssetImpact } = require('../utils/transactionHelpers');
+const { resolveUnitPrice } = require('../utils/assetPricing');
 
 // ─── Pure TS builders ─────────────────────────────────────────────────────────
 
@@ -54,7 +55,9 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
   const numDays   = Math.round((endMs - startMs) / DAY_MS) + 1;
   const holdings  = {}; // { SYM: qty } — accumulated forward
   const lastPrice = {}; // carry-forward last known MARKET price per symbol
-  const bookPrice = {}; // last transaction pricePerUnit — fallback before any market price
+  const bookPrice = {}; // last transaction pricePerUnit — cost basis for accrual / fallback
+  const basisMs   = {}; // day that cost basis was set — accrual runs from here
+  const meta      = {}; // { assetType, purity, rate } — drives purity scaling & accrual
 
   // Index transactions by their settlement day for O(1) per-day lookup.
   const txsByDay = {};
@@ -68,25 +71,43 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
     const dayMs = startMs + i * DAY_MS;
 
     // Apply today's transactions to the rolling holdings map, and remember the
-    // transacted price as the cost-basis fallback for valuation.
+    // transacted price as the cost basis for valuation / accrual.
     for (const tx of (txsByDay[dayMs] || [])) {
       const sym = tx.assetSymbol?.toUpperCase();
       if (sym && tx.units) {
         holdings[sym] = (holdings[sym] || 0) + directionalAssetImpact(tx.type) * tx.units;
-        if (tx.pricePerUnit != null) bookPrice[sym] = Number(tx.pricePerUnit);
+        // Cost basis must be INR to sit alongside the (INR) market prices. `amount`
+        // is already booked in INR, so derive from it; `pricePerUnit` alone would
+        // be the NATIVE figure for a foreign asset. Calibration txns carry no
+        // amount, and their pricePerUnit is already INR.
+        const inrUnitCost = tx.amount != null && tx.units
+          ? Math.abs(Number(tx.amount) / Number(tx.units))
+          : (tx.pricePerUnit != null ? Number(tx.pricePerUnit) : null);
+        if (inrUnitCost != null) {
+          bookPrice[sym] = inrUnitCost;
+          basisMs[sym]   = dayMs;
+        }
+        meta[sym] = { assetType: tx.assetType, purity: tx.purity, rate: tx.rate };
       }
     }
 
-    // Value the accumulated holdings. Prefer the carried-forward market price;
-    // before any market price is available for a symbol, fall back to its
-    // invested (book) price so the series is never spuriously 0/null.
+    // Value the accumulated holdings. A market quote wins (scaled by purity for
+    // physical metal); failing that the cost basis accrues at the holding's rate;
+    // failing that the book price stands, so the series is never spuriously 0.
     let value = 0;
     for (const [sym, qty] of Object.entries(holdings)) {
       if (qty === 0) continue;
       const p = pricesBySymbol[sym]?.[dayMs];
       if (p != null) lastPrice[sym] = Number(p);
-      const effective = lastPrice[sym] ?? bookPrice[sym] ?? 0;
-      value += qty * effective;
+
+      const resolved = resolveUnitPrice(meta[sym], {
+        marketPrice: lastPrice[sym] ?? null,
+        basePrice:   bookPrice[sym] ?? null,
+        basisMs:     basisMs[sym],
+        atMs:        dayMs,
+      });
+
+      value += qty * (resolved ?? bookPrice[sym] ?? 0);
     }
     assetTS.push(value);
   }

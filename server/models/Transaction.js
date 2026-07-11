@@ -48,7 +48,30 @@ const transactionSchema = new mongoose.Schema({
   units: {
     type: Number
   },
+  // NOTE: `pricePerUnit` is in the asset's NATIVE currency; `amount` is always INR.
   pricePerUnit: {
+    type: Number
+  },
+  // Quote currency, only set when it isn't INR (e.g. 'USD' for a US stock).
+  currency: {
+    type: String,
+    trim: true,
+    uppercase: true
+  },
+  // INR per one unit of `currency` on the transaction date — the rate `amount`
+  // was booked at. Stored so the booking stays auditable and reproducible.
+  fxRate: {
+    type: Number
+  },
+  // Purity of a physical metal ('22K', '925', …). Units are grams; the market
+  // quote is per gram of pure metal and is scaled by this.
+  purity: {
+    type: String,
+    trim: true
+  },
+  // Annual percentage — a coupon rate for FD/bond/EPF, an expected return for
+  // any other unlisted asset. Used to accrue a price when there is no quote.
+  rate: {
     type: Number
   },
   usesCashBalance: {

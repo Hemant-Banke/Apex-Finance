@@ -89,10 +89,13 @@ router.post('/', [
       if (!toAccount) return res.status(404).json({ message: 'Destination account not found' });
     }
 
-    // Asset Transaction Amount
+    // Asset Transaction Amount — booked in INR at the trade date's FX rate.
     let transactionData = { ...req.body, user: req.user._id };
-    if (ASSET_TRANSACTION_TYPES.includes(type) && req.body.units && req.body.pricePerUnit)
-      transactionData.amount = parseFloat(req.body.units) * parseFloat(req.body.pricePerUnit);
+    try {
+      await txService.applyAssetPricing(transactionData);
+    } catch (e) {
+      return res.status(400).json({ message: e.message });
+    }
 
     // Transaction Amount Checks
     // const amount = parseFloat(transactionData.amount);
@@ -139,9 +142,12 @@ router.put('/:id', async (req, res) => {
     const oldTx = await Transaction.findOne({ _id: req.params.id, user: req.user._id }).lean();
     if (!oldTx) return res.status(404).json({ message: 'Transaction not found' });
 
-    // Recompute Transaction Amount for Asset Txn
-    if (ASSET_TRANSACTION_TYPES.includes(req.body.type) && req.body.units && req.body.pricePerUnit)
-      req.body.amount = parseFloat(req.body.units) * parseFloat(req.body.pricePerUnit);
+    // Recompute Transaction Amount for Asset Txn (re-books INR at the trade date's FX).
+    try {
+      await txService.applyAssetPricing(req.body);
+    } catch (e) {
+      return res.status(400).json({ message: e.message });
+    }
 
     const transaction = await Transaction.findOneAndUpdate(
       { _id: req.params.id, user: req.user._id },

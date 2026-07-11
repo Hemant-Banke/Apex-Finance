@@ -171,15 +171,15 @@ router.post('/', [
     const nwDoc = await DailyNetworth.findOne({ user: req.user._id }).select('user').lean();
     if (!nwDoc) await DailyNetworth.create({ user: req.user._id, startDate: new Date(), endDate: new Date() });
 
-    // Make initial transaction
+    // Make initial transaction. The amount is stored exactly as given — a debt
+    // account is simply opened with a negative balance, never negated here.
     const initAmount = parseFloat(initialBalance);
     if (!isNaN(initAmount) && initAmount !== 0) {
-      const adjustmentAmount = account.isDebt ? -Math.abs(initAmount) : initAmount;
       const openingTx = await Transaction.create({
         user:     req.user._id,
         account:  account._id,
         type:     'adjustment',
-        amount:   adjustmentAmount,
+        amount:   initAmount,
         category: 'initial balance',
         notes:    'Opening balance',
         date:     new Date()

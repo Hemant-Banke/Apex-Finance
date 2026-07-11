@@ -16,7 +16,56 @@ import { useToast } from '../context/ToastContext';
 
 const iconMap = { bank: Landmark, brokerage: TrendingUp, retirement: Shield, debt: CreditCard, wallet: Wallet, other: Briefcase };
 
-const EMPTY_FORM = { name: '', type: 'bank', description: '', initialBalance: '' };
+const EMPTY_FORM = { name: '', type: 'bank', description: '', initialBalance: '0' };
+
+/**
+ * One account row. The balance is printed exactly as stored — debt accounts
+ * carry a negative balance of their own, so nothing is negated for display.
+ */
+function AccountRow({ acc, first, onEdit }) {
+  const Icon = iconMap[acc.type] || Briefcase;
+  const negative = acc.balance < 0;
+  return (
+    <Link to={`/accounts/${acc._id}`} className="data-row group"
+      style={{ textDecoration: 'none', borderTop: first ? 'none' : '1px solid var(--color-border-subtle)' }}>
+      <div className="flex items-center gap-4" style={{ flex: 1, minWidth: 0 }}>
+        <div className="flex-shrink-0" style={{
+          width: 38, height: 38, borderRadius: 10,
+          background: 'var(--color-bg-elevated)',
+          border: '1px solid var(--color-border-subtle)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <Icon size={16} style={{ color: 'var(--color-text-secondary)' }} strokeWidth={1.5} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{acc.name}</p>
+            {acc.isDebt && <Badge variant="danger">Debt</Badge>}
+          </div>
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+            {acc.type.charAt(0).toUpperCase() + acc.type.slice(1)}
+            {acc.description && ` · ${acc.description}`}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-3">
+        <span className="figure text-sm" style={{
+          fontWeight: 500,
+          color: negative ? 'var(--color-danger)' : 'var(--color-text-primary)',
+        }}>
+          {formatCurrency(acc.balance)}
+        </span>
+        <button onClick={(e) => onEdit(acc, e)}
+          className="text-xs opacity-0 group-hover:!opacity-100 transition-opacity"
+          style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px' }}>
+          Edit
+        </button>
+        <ChevronRight size={14} style={{ color: 'var(--color-text-muted)', opacity: 0 }}
+          className="group-hover:!opacity-100 transition-opacity" />
+      </div>
+    </Link>
+  );
+}
 
 export default function Accounts() {
   const toast = useToast();
@@ -69,7 +118,12 @@ export default function Accounts() {
   };
 
   const isDebt = form.type === 'debt';
-  const total = accounts.reduce((s, a) => s + (a.isDebt ? -Math.abs(a.balance) : a.balance), 0);
+  // Debt balances are stored negative, so the net position is a plain sum —
+  // liabilities pull it down on their own, with no sign forced here.
+  const total = accounts.reduce((s, a) => s + a.balance, 0);
+  const assetAccounts = accounts.filter(a => !a.isDebt);
+  const debtAccounts  = accounts.filter(a => a.isDebt);
+  const debtTotal     = debtAccounts.reduce((s, a) => s + a.balance, 0);
 
   if (loading) return <div className="flex items-center justify-center" style={{ height: '60vh' }}><div className="spinner" /></div>;
 
@@ -89,53 +143,33 @@ export default function Accounts() {
         <Button variant="gold" icon={Plus} onClick={openNew}>New account</Button>
       </div>
 
-      {/* Account list */}
+      {/* Account list — assets first, liabilities in their own section below */}
       {accounts.length > 0 ? (
-        <Card flush>
-          {accounts.map((acc, i) => {
-            const Icon = iconMap[acc.type] || Briefcase;
-            return (
-              <div key={acc._id} style={{ position: 'relative' }}>
-                <Link to={`/accounts/${acc._id}`} className="data-row group"
-                  style={{ textDecoration: 'none', borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none' }}>
-                  <div className="flex items-center gap-4" style={{ flex: 1, minWidth: 0 }}>
-                    <div className="flex-shrink-0" style={{
-                      width: 38, height: 38, borderRadius: 10,
-                      background: 'var(--color-bg-elevated)',
-                      border: '1px solid var(--color-border-subtle)',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center'
-                    }}>
-                      <Icon size={16} style={{ color: 'var(--color-text-secondary)' }} strokeWidth={1.5} />
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{acc.name}</p>
-                        {acc.isDebt && <Badge variant="danger">Debt</Badge>}
-                      </div>
-                      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                        {acc.type.charAt(0).toUpperCase() + acc.type.slice(1)}
-                        {acc.description && ` · ${acc.description}`}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <span className={`figure text-sm ${acc.isDebt ? 'text-[var(--color-danger)]' : ''}`}
-                      style={{ fontWeight: 500, ...(acc.isDebt ? {} : { color: 'var(--color-text-primary)' }) }}>
-                      {acc.isDebt ? '−' : ''}{formatCurrency(Math.abs(acc.balance))}
-                    </span>
-                    <button onClick={(e) => openEdit(acc, e)}
-                      className="text-xs opacity-0 group-hover:!opacity-100 transition-opacity"
-                      style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px' }}>
-                      Edit
-                    </button>
-                    <ChevronRight size={14} style={{ color: 'var(--color-text-muted)', opacity: 0 }}
-                      className="group-hover:!opacity-100 transition-opacity" />
-                  </div>
-                </Link>
+        <>
+          {assetAccounts.length > 0 && (
+            <Card flush>
+              {assetAccounts.map((acc, i) => (
+                <AccountRow key={acc._id} acc={acc} first={i === 0} onEdit={openEdit} />
+              ))}
+            </Card>
+          )}
+
+          {debtAccounts.length > 0 && (
+            <div>
+              <div className="flex items-baseline justify-between" style={{ marginBottom: 12 }}>
+                <p className="eyebrow">Liabilities</p>
+                <span className="figure text-sm" style={{ fontWeight: 500, color: 'var(--color-danger)' }}>
+                  {formatCurrency(debtTotal)}
+                </span>
               </div>
-            );
-          })}
-        </Card>
+              <Card flush>
+                {debtAccounts.map((acc, i) => (
+                  <AccountRow key={acc._id} acc={acc} first={i === 0} onEdit={openEdit} />
+                ))}
+              </Card>
+            </div>
+          )}
+        </>
       ) : (
         <Card className="flex flex-col items-center justify-center" style={{ padding: '64px 24px' }}>
           <Wallet size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.3, marginBottom: 12 }} />
@@ -174,16 +208,15 @@ export default function Accounts() {
           {/* Initial balance — only on creation */}
           {!editing && (
             <div>
-              <label className="label block" style={{ marginBottom: 8 }}>
-                {isDebt ? 'Current debt amount' : 'Opening balance'}
-              </label>
-              <input type="number" step="any" min="0" value={form.initialBalance}
+              <label className="label block" style={{ marginBottom: 8 }}>Opening balance</label>
+              <input type="number" step="any" {...(isDebt ? {} : { min: '0' })}
+                value={form.initialBalance}
                 onChange={e => setForm({...form, initialBalance: e.target.value})}
                 className="input-field"
-                placeholder={isDebt ? 'Amount you currently owe' : 'Starting cash balance'} />
+                placeholder={isDebt ? 'e.g. -50000 for ₹50,000 owed' : 'Starting cash balance'} />
               <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 6 }}>
                 {isDebt
-                  ? 'Records how much debt this account starts with.'
+                  ? 'Enter what you owe as a negative amount — a debt simply holds a negative balance.'
                   : 'Records the current cash in this account as an opening adjustment.'}
               </p>
             </div>

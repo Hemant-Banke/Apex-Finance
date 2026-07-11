@@ -98,7 +98,9 @@ export const dashboardAPI = {
 // Market data (search + historical prices via Yahoo Finance proxy)
 export const marketAPI = {
   search: (q)            => api.get('/market/search', { params: { q } }),
-  price:  (symbol, date) => api.get('/market/price',  { params: { symbol, date } }),
+  // assetType/purity are only needed for physical metal, which is priced per gram
+  // by type rather than by symbol.
+  price:  (symbol, date, opts = {}) => api.get('/market/price', { params: { symbol, date, ...opts } }),
   ohlc:   (symbol, days) => api.get('/market/ohlc',   { params: days ? { symbol, days } : { symbol } }),
 };
 

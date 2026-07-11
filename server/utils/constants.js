@@ -39,6 +39,7 @@ const ASSET_TYPES = [
   'etf',
   'crypto',
   'gold',
+  'silver',
   'commodity',
   'epf_nps',
   'fd',

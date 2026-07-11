@@ -61,10 +61,11 @@ function AppleMark({ size = 16 }) {
 }
 
 /**
- * OAuthButtons — Google + Apple sign-in, appended below the email/password form
- * on Login and Register. Each button shows only when its client ID is configured
- * (VITE_GOOGLE_CLIENT_ID / VITE_APPLE_CLIENT_ID); the whole block hides if neither
- * is set. Errors are surfaced via `onError` so the host page renders them inline.
+ * OAuthButtons — Google + Apple sign-in, shown only on Login (which doubles as
+ * sign-up: an unknown OAuth identity is created server-side and signed straight in).
+ * Each button shows only when its client ID is configured (VITE_GOOGLE_CLIENT_ID /
+ * VITE_APPLE_CLIENT_ID); the whole block hides if neither is set. Errors are
+ * surfaced via `onError` so the host page renders them inline.
  */
 export default function OAuthButtons({ onError }) {
   const { loginWithGoogle, loginWithApple } = useAuth();
@@ -108,16 +109,7 @@ export default function OAuthButtons({ onError }) {
   if (!GOOGLE_CLIENT_ID && !APPLE_CLIENT_ID) return null;
 
   return (
-    <div ref={wrapRef} style={{ marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12 }}>
-      {/* Divider */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, margin: '4px 0 8px' }}>
-        <span style={{ flex: 1, height: 1, background: 'var(--color-border)' }} />
-        <span style={{ fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
-          or continue with
-        </span>
-        <span style={{ flex: 1, height: 1, background: 'var(--color-border)' }} />
-      </div>
-
+    <div ref={wrapRef} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
       {GOOGLE_CLIENT_ID && (
         <div style={{
           display: 'flex', justifyContent: 'center', colorScheme: 'light',

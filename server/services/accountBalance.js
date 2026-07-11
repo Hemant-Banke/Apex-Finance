@@ -12,7 +12,22 @@ const Account             = require('../models/Account');
 const DailyAccountBalance = require('../models/DailyAccountBalance');
 const AccountHoldings     = require('../models/AccountHoldings');
 const { fetchLatestPrices } = require('./marketDataService');
-const { todayStr, t1Str }   = require('../utils/helpers');
+const { todayStr, t1Str, todayMs, midnight } = require('../utils/helpers');
+const { resolveUnitPrice }  = require('../utils/assetPricing');
+
+/**
+ * Live unit price for a raw stored holding: a market quote (scaled by purity for
+ * physical metal), else the cost basis accrued at the holding's annual rate.
+ * null means we genuinely cannot price it — the caller falls back to settled.
+ */
+function livePrice(h, prices) {
+  return resolveUnitPrice(h, {
+    marketPrice: prices[h.assetSymbol] ?? null,
+    basePrice:   h.avgPricePerUnit ?? null,
+    basisMs:     midnight(new Date(h.lastTransactionDate || h.firstPurchaseDate || Date.now())),
+    atMs:        todayMs(),
+  });
+}
 
 /** Load an account's raw holdings array (or []). */
 async function loadHoldings(accountId, userId) {
@@ -49,12 +64,13 @@ async function getAccountAssetBalance(account, user, fetchLatestBal = false, acc
   if (!active.length) return { value: 0, asof: todayStr() };
 
   const prices = await fetchLatestPrices(active);
-  // If any holding is missing a live price, fall back to the last known settled
+  const priced = active.map(h => livePrice(h, prices));
+  // If any holding cannot be priced at all, fall back to the last known settled
   // (T-1) asset balance rather than under-counting that holding as 0.
-  if (active.some(h => prices[h.assetSymbol] == null)) {
+  if (priced.some(p => p == null)) {
     return { value: settledAsset, asof: t1Str() };
   }
-  const value = active.reduce((sum, h) => sum + h.units * prices[h.assetSymbol], 0);
+  const value = active.reduce((sum, h, i) => sum + h.units * priced[i], 0);
   return { value, asof: todayStr() };
 }
 
@@ -86,11 +102,12 @@ async function getAllAccountsAssetBalance(user, fetchLatestBal = false) {
   if (!allHoldings.length) return { value: 0, asof: todayStr() };
 
   const prices = await fetchLatestPrices(allHoldings);
-  // If any holding is missing a live price, fall back to the settled (T-1) total.
-  if (allHoldings.some(h => prices[h.assetSymbol] == null)) {
+  const priced = allHoldings.map(h => livePrice(h, prices));
+  // If any holding cannot be priced at all, fall back to the settled (T-1) total.
+  if (priced.some(p => p == null)) {
     return getAllAccountsAssetBalance(user, false);
   }
-  const value = allHoldings.reduce((sum, h) => sum + h.units * prices[h.assetSymbol], 0);
+  const value = allHoldings.reduce((sum, h, i) => sum + h.units * priced[i], 0);
   return { value, asof: todayStr() };
 }
 

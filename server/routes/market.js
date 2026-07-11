@@ -1,7 +1,9 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
 const { DAY_MS, YF_HEADERS } = require('../utils/constants');
-const { mapQuoteType, nowMs, toDateStr_from_ms, todayMs } = require('../utils/helpers');
+const { mapQuoteType, nowMs, toDateStr_from_ms, todayMs, midnight } = require('../utils/helpers');
+const { isPurityAsset } = require('../utils/assetPricing');
+const { fetchMetalPricePerGram, fetchFxRate } = require('../services/marketDataService');
 
 const router = express.Router();
 router.use(protect);
@@ -37,13 +39,28 @@ router.get('/search', async (req, res) => {
 // GET /api/market/price?symbol=AAPL&date=2024-01-15
 // Returns the close price on or before the requested date (handles weekends/holidays).
 // If date is today or future, returns current price.
+//
+// Physical gold/silver (assetType=gold|silver) have no market symbol of their own,
+// so they are priced by type: INR per gram, scaled to the given purity.
 router.get('/price', async (req, res) => {
-  const { symbol, date } = req.query;
+  const { symbol, date, assetType, purity } = req.query;
   if (!symbol || !date) return res.status(400).json({ message: 'symbol and date are required' });
 
   try {
     const requestedDate = new Date(date).getTime();
     const today         = todayMs();
+
+    if (isPurityAsset(assetType)) {
+      const metal = await fetchMetalPricePerGram(assetType, purity, midnight(new Date(date)));
+      if (!metal) return res.status(404).json({ message: 'Metal price unavailable' });
+      return res.json({
+        symbol, date,
+        price:      metal.price,
+        currency:   'INR',
+        actualDate: metal.asof,
+        perGram:    true,
+      });
+    }
 
     // For today/future, fetch a short window ending now
     const isToday = requestedDate >= today;
@@ -63,11 +80,22 @@ router.get('/price', async (req, res) => {
 
     const currency = result.meta?.currency || '';
 
+    // `price` stays in the asset's native currency (that is what the user sees on
+    // the exchange and what we store); `fxRate`/`priceInr` give the INR booking.
+    const withFx = async (price, actualDate) => {
+      const fxRate = await fetchFxRate(currency, midnight(new Date(actualDate || date)));
+      return {
+        symbol, date, price, currency, actualDate,
+        fxRate,
+        priceInr: fxRate ? Math.round(price * fxRate * 100) / 100 : null,
+      };
+    };
+
     // For today, use the regularMarketPrice from meta
     if (isToday) {
       const price = result.meta?.regularMarketPrice;
       if (!price) return res.status(404).json({ message: 'Price unavailable' });
-      return res.json({ symbol, date, price, currency });
+      return res.json(await withFx(price, null));
     }
 
     // For historical — find the last valid close on or before the requested date
@@ -87,7 +115,7 @@ router.get('/price', async (req, res) => {
 
     if (price === null) return res.status(404).json({ message: 'No price available for this date' });
 
-    res.json({ symbol, date, price, currency, actualDate });
+    res.json(await withFx(price, actualDate));
   } catch (err) {
     console.error('Price fetch error:', err.message);
     res.status(500).json({ message: 'Price data unavailable' });

@@ -22,6 +22,27 @@ export function formatCurrency(amount, currency = 'INR') {
 }
 
 /**
+ * A figure in a foreign asset's own currency (e.g. a US stock's "$200.00" average
+ * cost). Uses that currency's own conventions — `en-IN` would group dollars into
+ * lakhs — and always shows paise/cents, since native prices are quoted precisely.
+ * Falls back to INR formatting when there is no foreign currency.
+ */
+export function formatNativeCurrency(amount, currency) {
+  if (!currency || currency === 'INR') return formatCurrency(amount);
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  } catch {
+    // Unknown/!ISO currency code — show the code rather than throwing.
+    return `${amount.toFixed(2)} ${currency}`;
+  }
+}
+
+/**
  * Condense large INR amounts into Indian units (L / Cr) so they don't overflow
  * tight UI like tooltips. Below ₹1L the full formatted value is kept.
  */

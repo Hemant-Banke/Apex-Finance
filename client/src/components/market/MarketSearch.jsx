@@ -49,7 +49,7 @@ const MANUAL = [
   { symbol: 'FIXED-DEPOSIT', name: 'Fixed Deposit (FD)', type: 'fd', isManual: true, keywords: ['fixed deposit', 'fd', 'deposit', 'recurring deposit', 'rd'] },
   { symbol: 'EPF-NPS',       name: 'EPF / NPS', type: 'epf_nps',   isManual: true, keywords: ['epf', 'nps', 'pf', 'provident fund', 'pension', 'retirement'] },
   { symbol: 'PHYS-GOLD',     name: 'Physical Gold', type: 'gold',   isManual: true, keywords: ['gold', 'jewellery', 'jewelry', 'bullion'] },
-  { symbol: 'PHYS-SILVER',   name: 'Physical Silver', type: 'commodity', isManual: true, keywords: ['silver'] },
+  { symbol: 'PHYS-SILVER',   name: 'Physical Silver', type: 'silver', isManual: true, keywords: ['silver'] },
   { symbol: 'PRIVATE-EQUITY',name: 'Private Equity', type: 'other', isManual: true, keywords: ['private equity', 'pe', 'startup', 'esop', 'unlisted equity', 'venture'] },
   { symbol: 'UNLISTED-BOND', name: 'Unlisted Bond', type: 'bond',   isManual: true, keywords: ['bond', 'debenture', 'ncd'] },
   { symbol: 'OTHER-ASSET',   name: 'Other', type: 'other',          isManual: true, keywords: ['other', 'misc', 'custom'] },

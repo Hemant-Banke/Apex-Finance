@@ -32,6 +32,7 @@ const { DAY_MS }              = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder }             = require('../utils/tsHelpers');
 const { buildAccountTxnsMap } = require('../utils/transactionHelpers');
+const { accruedPrice }        = require('../utils/assetPricing');
 
 
 // ─── Shared loaders ─────────────────────────────────────────────────────────
@@ -159,7 +160,13 @@ async function ensureUpToToday(userId) {
     minAssetStart = Math.min(minAssetStart, assetStart);
     for (const h of holdings) {
       const sym = h.assetSymbol?.toUpperCase();
-      if (sym && !assetsSeen.has(sym)) assetsSeen.set(sym, { assetSymbol: sym, assetType: h.assetType || 'stock' });
+      if (sym && !assetsSeen.has(sym)) {
+        assetsSeen.set(sym, {
+          assetSymbol: sym,
+          assetType:   h.assetType || 'stock',
+          currency:    h.currency,   // so foreign quotes convert to INR
+        });
+      }
     }
   }
 
@@ -195,7 +202,20 @@ async function ensureUpToToday(userId) {
             assetSymbol:  h.assetSymbol,
             assetType:    h.assetType,
             units:        h.units,
-            pricePerUnit: h.avgPricePerUnit,
+            // The cost basis is accrued forward to the calibration day, so a
+            // rate-bearing asset resumes where it left off instead of snapping
+            // back to book cost. Accrual is exponential, so basis-at-assetStart
+            // then compounding on from there is continuous with a full rebuild.
+            pricePerUnit: accruedPrice(
+              h.avgPricePerUnit,
+              h.rate,
+              midnight(new Date(h.lastTransactionDate || h.firstPurchaseDate || assetStart)),
+              assetStart,
+            ),
+            // Carry valuation metadata, or the extended days would lose purity
+            // scaling and rate accrual and fall back to flat book value.
+            purity:       h.purity,
+            rate:         h.rate,
             date:         new Date(assetStart),
           }));
           newAssetTS = assetTS.concat(tsService.buildAssetTS(calibTxns, pricesBySymbol, assetStart, t1));
