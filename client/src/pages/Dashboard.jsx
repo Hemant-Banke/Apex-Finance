@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { dashboardAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { formatCurrency, formatDate, getTransactionColor, getTransactionSign, getTransactionName } from '../lib/utils';
+import { formatCurrency, compactIfLarge, formatDate, getTransactionColor, getTransactionSign, getTransactionName } from '../lib/utils';
 import { TrendingUp, TrendingDown, ArrowUpRight, Wallet, BarChart3, ArrowRight } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -58,10 +58,10 @@ export default function Dashboard() {
 
       {/* Stat Cards */}
       <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-        <StatTile label="Assets"          value={formatCurrency(summary?.totalAssets || 0)}      sub={`${summary?.holdingsCount || 0} holdings`} icon={TrendingUp} highlight />
-        <StatTile label="Liabilities"     value={formatCurrency(summary?.totalLiabilities || 0)} accent="var(--color-danger)"  icon={TrendingDown} />
-        <StatTile label="Monthly Income"  value={formatCurrency(summary?.monthlyIncome || 0)}    accent="var(--color-success)" icon={ArrowUpRight} />
-        <StatTile label="Monthly Expense" value={formatCurrency(summary?.monthlyExpense || 0)}   accent="var(--color-chart-warm)" icon={BarChart3} />
+        <StatTile label="Assets"          value={compactIfLarge(summary?.totalAssets || 0)}      sub={`${summary?.holdingsCount || 0} holdings`} icon={TrendingUp} highlight />
+        <StatTile label="Liabilities"     value={compactIfLarge(summary?.totalLiabilities || 0)} accent="var(--color-danger)"  icon={TrendingDown} />
+        <StatTile label="Monthly Income"  value={compactIfLarge(summary?.monthlyIncome || 0)}    accent="var(--color-success)" icon={ArrowUpRight} />
+        <StatTile label="Monthly Expense" value={compactIfLarge(summary?.monthlyExpense || 0)}   accent="var(--color-chart-warm)" icon={BarChart3} />
       </div>
 
       {/* Charts row */}
@@ -105,7 +105,7 @@ export default function Dashboard() {
           <SectionHeader eyebrow="Snapshot" size="sm" style={{ marginBottom: 20 }} />
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {[
-              { label: 'Monthly Savings', value: formatCurrency(savings), color: savings >= 0 ? 'var(--color-success)' : 'var(--color-danger)' },
+              { label: 'Monthly Savings', value: compactIfLarge(savings), color: savings >= 0 ? 'var(--color-success)' : 'var(--color-danger)' },
               { label: 'Savings Rate',    value: summary?.monthlyIncome ? `${((savings / summary.monthlyIncome) * 100).toFixed(0)}%` : '—', color: savings >= 0 ? 'var(--color-success)' : 'var(--color-danger)' },
               { label: 'Total Accounts',  value: summary?.accountCount || 0 },
               { label: 'Total Holdings',  value: summary?.holdingsCount || 0 },

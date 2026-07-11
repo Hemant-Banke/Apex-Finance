@@ -48,6 +48,7 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
             letterSpacing: '0.08em',
             color: 'rgba(255,255,255,0.38)',
             margin: 0,
+            fontFamily: 'var(--font-mono)',
           }}>
             {dateLabel}
           </p>
@@ -61,6 +62,7 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
             </span>
             <span style={{
               fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
+              fontFamily: 'var(--font-mono)', whiteSpace: 'nowrap',
               color: p.color || p.fill || 'rgba(255,255,255,0.88)',
             }}>
               {formatValue(p.value)}

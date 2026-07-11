@@ -1,16 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine, CartesianGrid, ComposedChart, Bar
+  ReferenceLine, ReferenceArea, CartesianGrid, ComposedChart, Bar
 } from 'recharts';
 import { TrendingUp, TrendingDown, Layers, Activity, CandlestickChart } from 'lucide-react';
 import { networthAPI } from '../../lib/api';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, compactIfLarge } from '../../lib/utils';
 import ChartTooltip from './ChartTooltip';
 
 // ── Default config ────────────────────────────────────────────────────────────
 
-export const DEFAULT_RANGES = [
+const DEFAULT_RANGES = [
   { label: '1D',  days: 2   },
   { label: '5D',  days: 5   },
   { label: '1M',  days: 30  },
@@ -214,7 +214,7 @@ function OhlcTooltip({ active, payload, formatValue }) {
       minWidth: 175,
     }}>
       <div style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.38)', margin: 0 }}>
+        <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.38)', margin: 0, fontFamily: 'var(--font-mono)' }}>
           {formatOhlcDate(d.date)}
         </p>
       </div>
@@ -222,7 +222,7 @@ function OhlcTooltip({ active, payload, formatValue }) {
         {rows.map(({ label, value, color }) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
             <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>{label}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color }}>
+            <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', color, whiteSpace: 'nowrap' }}>
               {formatValue(value)}
             </span>
           </div>
@@ -258,6 +258,52 @@ function useAnimatedValue(target, duration = 380) {
   }, [target, duration]);
 
   return value;
+}
+
+// ── Drag-selection summary label ───────────────────────────────────────────────
+
+/**
+ * Floating summary for a drag-selected range, drawn inside the chart SVG at the
+ * top-centre of the selection. Recharts injects `viewBox` (the selected band's
+ * pixel box); `chartW` clamps it so the box never spills past the chart edge.
+ */
+function SelectionLabel({ viewBox, pct, abs, pos, formatValue, chartW }) {
+  if (!viewBox) return null;
+  // A wide frame centred on the selection; the box inside sizes to its content
+  // (nowrap) so full, un-condensed numbers extend it instead of overflowing.
+  const FRAME_W = 260, FRAME_H = 56;
+  const centre  = viewBox.x + viewBox.width / 2 - FRAME_W / 2;
+  const maxX    = (chartW || viewBox.x + viewBox.width) - FRAME_W - 4;
+  const x       = Math.max(4, Math.min(centre, maxX));
+  const y       = (viewBox.y ?? 0) + 6;
+  const color   = pos ? '#22c55e' : '#ef4444';
+  const sign    = pos ? '+' : '−';
+
+  return (
+    <foreignObject x={x} y={y} width={FRAME_W} height={FRAME_H} style={{ overflow: 'visible', pointerEvents: 'none' }}>
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <div style={{
+          background: 'rgba(10,10,10,0.9)',
+          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid rgba(255,255,255,0.08)',
+          borderRadius: 9, padding: '6px 11px', whiteSpace: 'nowrap',
+          boxShadow: '0 8px 24px -10px rgba(0,0,0,0.7)',
+        }}>
+          <p style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'rgba(255,255,255,0.4)', margin: '0 0 3px', fontFamily: 'var(--font-mono)' }}>
+            Period change
+          </p>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>
+              {sign}{Math.abs(pct).toFixed(2)}%
+            </span>
+            <span style={{ fontSize: 12, fontWeight: 500, color, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>
+              {sign}{formatValue(Math.abs(abs))}
+            </span>
+          </div>
+        </div>
+      </div>
+    </foreignObject>
+  );
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
@@ -335,6 +381,47 @@ export default function PriceGrapher({
 
   useEffect(() => { doFetch(range, chartMode); }, [range, doFetch, refreshKey, chartMode]);
 
+  // ── Drag-to-measure selection (line mode) ─────────────────────────────────
+  // A click-drag across the plot highlights a range and shows its % / absolute
+  // change. Refs mirror the live drag so mouse-up logic never reads stale state.
+  const [selStart, setSelStart] = useState(null); // x-label (date) where drag began
+  const [selEnd,   setSelEnd]   = useState(null); // x-label under the cursor
+  const [selecting, setSelecting] = useState(false);
+  const selectingRef = useRef(false);
+  const dragStartRef = useRef(null);
+  const chartAreaRef = useRef(null);
+
+  const clearSelection = useCallback(() => {
+    selectingRef.current = false;
+    dragStartRef.current = null;
+    setSelecting(false);
+    setSelStart(null);
+    setSelEnd(null);
+  }, []);
+
+  const handleSelectDown = (e) => {
+    if (chartMode !== 'line' || !e || e.activeLabel == null) return;
+    selectingRef.current = true;
+    dragStartRef.current = e.activeLabel;
+    setSelecting(true);
+    setSelStart(e.activeLabel);
+    setSelEnd(e.activeLabel);
+  };
+  const handleSelectMove = (e) => {
+    if (!selectingRef.current || !e || e.activeLabel == null) return;
+    setSelEnd(e.activeLabel);
+  };
+  const handleSelectUp = (e) => {
+    if (!selectingRef.current) return;
+    selectingRef.current = false;
+    setSelecting(false);
+    const end = e && e.activeLabel != null ? e.activeLabel : selEnd;
+    // A plain click (no drag) clears any existing selection instead of leaving
+    // a zero-width band.
+    if (end == null || end === dragStartRef.current) clearSelection();
+    else setSelEnd(end);
+  };
+
   // ── Derived values ────────────────────────────────────────────────────────
   const values  = data.map(d => d.value);
   const openVal = chartMode === 'candle' ? (ohlcData[0]?.open ?? 0)                    : (data[0]?.value ?? 0);
@@ -352,9 +439,25 @@ export default function PriceGrapher({
   const aPct  = useAnimatedValue(pctChng);
 
   // ── Pad single point so Recharts renders a line ───────────────────────────
-  const displayData = data.length === 1
-    ? [data[0], { ...data[0], date: nextDayStr(data[0].date) }]
-    : data;
+  const displayData = useMemo(() => (
+    data.length === 1
+      ? [data[0], { ...data[0], date: nextDayStr(data[0].date) }]
+      : data
+  ), [data]);
+
+  // Resolve the drag selection into ordered endpoints + change metrics.
+  const selection = useMemo(() => {
+    if (selStart == null || selEnd == null) return null;
+    const iA = displayData.findIndex(d => d.date === selStart);
+    const iB = displayData.findIndex(d => d.date === selEnd);
+    if (iA < 0 || iB < 0 || iA === iB) return null;
+    const lo = Math.min(iA, iB), hi = Math.max(iA, iB);
+    const startVal = displayData[lo].value;
+    const endVal   = displayData[hi].value;
+    const abs = endVal - startVal;
+    const pct = startVal !== 0 ? (abs / Math.abs(startVal)) * 100 : 0;
+    return { x1: displayData[lo].date, x2: displayData[hi].date, abs, pct, pos: abs >= 0 };
+  }, [selStart, selEnd, displayData]);
 
   // ── Line chart: Y domain + gradient stop at opening price ─────────────────
   const pad  = (maxVal - minVal) * 0.05 || Math.abs(maxVal) * 0.02 || 1;
@@ -366,7 +469,6 @@ export default function PriceGrapher({
   // colour break drifts off the reference line by `pad`.
   const dataRng = maxVal - minVal;
   const stopPct  = dataRng > 0 ? (1 - (openVal - minVal) / dataRng) * 100 : 50;
-  const stopOffset = `${stopPct.toFixed(2)}%`;
   // Green wins the exact open-line pixel: begin red a hair BELOW the split so a
   // value sitting on the previous close renders green, not a red/green blend.
   const stopOffsetRed = `${Math.min(100, stopPct + 0.6).toFixed(2)}%`;
@@ -417,7 +519,7 @@ export default function PriceGrapher({
             </p>
           )}
           <p className="figure" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8 }}>
-            {formatValue(aLast)}
+            {compactIfLarge(aLast, formatValue)}
           </p>
           {(chartMode === 'line' ? data.length > 1 : ohlcData.length > 1) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -427,7 +529,7 @@ export default function PriceGrapher({
               </span>
               {!isFlat && <Icon size={14} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
               <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
-                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${formatValue(Math.abs(aAbs))}`}
+                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${compactIfLarge(Math.abs(aAbs), formatValue)}`}
               </span>
             </div>
           )}
@@ -441,7 +543,7 @@ export default function PriceGrapher({
             {fetchOHLC && (
               <div style={{ display: 'flex', gap: 2, background: 'var(--color-bg-elevated)', borderRadius: 8, padding: 2 }}>
                 <button
-                  onClick={() => setChartMode('line')}
+                  onClick={() => { setChartMode('line'); clearSelection(); }}
                   title="Line chart"
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -454,7 +556,7 @@ export default function PriceGrapher({
                   <Activity size={12} />
                 </button>
                 <button
-                  onClick={() => setChartMode('candle')}
+                  onClick={() => { setChartMode('candle'); clearSelection(); }}
                   title="Candlestick chart"
                   style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -474,7 +576,7 @@ export default function PriceGrapher({
               {ranges.map(r => (
                 <button
                   key={r.label}
-                  onClick={() => setRange(r)}
+                  onClick={() => { setRange(r); clearSelection(); }}
                   className={`pill-item${range.label === r.label ? ' active' : ''}`}
                   style={{ fontSize: 11, padding: '3px 9px' }}
                 >
@@ -552,8 +654,16 @@ export default function PriceGrapher({
       ) : (
 
         /* ── Line / area chart ──────────────────────────────────────────── */
+        <div ref={chartAreaRef} style={{ position: 'relative', cursor: 'crosshair', userSelect: 'none', WebkitUserSelect: 'none' }}>
         <ResponsiveContainer width="100%" height={height}>
-          <AreaChart data={displayData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+          <AreaChart
+            data={displayData}
+            margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
+            onMouseDown={handleSelectDown}
+            onMouseMove={handleSelectMove}
+            onMouseUp={handleSelectUp}
+            onMouseLeave={handleSelectUp}
+          >
             <defs>
               {/* Faint dot lattice for the plot background */}
               <pattern id={`${pgFillId}-dots`} width="22" height="22" patternUnits="userSpaceOnUse">
@@ -601,12 +711,15 @@ export default function PriceGrapher({
               width={56} tickCount={5}
             />
 
-            <Tooltip
-              content={<ChartTooltip formatValue={formatValue} valueLabel={valueLabel} />}
-              cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
-              isAnimationActive={false}
-              wrapperStyle={{ transition: 'none', outline: 'none' }}
-            />
+            {/* Point tooltip — suppressed while a range is being measured */}
+            {!selecting && !selection && (
+              <Tooltip
+                content={<ChartTooltip formatValue={formatValue} valueLabel={valueLabel} />}
+                cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
+                isAnimationActive={false}
+                wrapperStyle={{ transition: 'none', outline: 'none' }}
+              />
+            )}
 
             {/* Reference line at the period's opening value */}
             {data.length > 1 && !isFlat && (
@@ -623,9 +736,10 @@ export default function PriceGrapher({
               stroke={strokeColor} strokeWidth={1.75}
               fill={fillColor}
               dot={false}
-              activeDot={(props) => {
+              activeDot={(selecting || selection) ? false : (props) => {
                 // Colour the hover dot by the region it sits in (above/below the
                 // opening reference line), matching the line's own colour there.
+                // Suppressed while measuring so it never covers the selection box.
                 const v = props?.payload?.value;
                 const color = isFlat ? '#C9A96A' : (v >= openVal ? '#22c55e' : '#ef4444');
                 return <circle cx={props.cx} cy={props.cy} r={3} fill={color} stroke="none" />;
@@ -645,8 +759,45 @@ export default function PriceGrapher({
                 animationDuration={350}
               />
             )}
+
+            {/* Drag-selected range — tinted band + change summary */}
+            {selection && (
+              <ReferenceArea
+                x1={selection.x1}
+                x2={selection.x2}
+                fill={selection.pos ? '#22c55e' : '#ef4444'}
+                fillOpacity={0.1}
+                stroke={selection.pos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}
+                strokeWidth={1}
+                isAnimationActive={false}
+                label={(
+                  <SelectionLabel
+                    pct={selection.pct}
+                    abs={selection.abs}
+                    pos={selection.pos}
+                    formatValue={formatValue}
+                    chartW={chartAreaRef.current?.clientWidth || 0}
+                  />
+                )}
+              />
+            )}
           </AreaChart>
         </ResponsiveContainer>
+        {/* Discoverability hint for the drag-to-measure gesture — top-right so
+            it clears the x-axis labels along the bottom. Prompts to measure when
+            idle, and to release once a range is selected. Kept mounted and driven
+            by opacity so it fades in/out instead of jumping; the label swap
+            happens while it's hidden (mid-drag), so there's no visible text jump. */}
+        <div style={{
+          position: 'absolute', top: -12, right: 14, pointerEvents: 'none',
+          fontSize: 9.5, letterSpacing: '0.05em', textTransform: 'uppercase',
+          color: 'var(--color-text-muted)',
+          opacity: (data.length > 1 && !selecting) ? 0.5 : 0,
+          transition: 'opacity 0.28s ease',
+        }}>
+          {selection ? 'Click to release' : 'Drag to measure'}
+        </div>
+        </div>
       )}
     </div>
   );

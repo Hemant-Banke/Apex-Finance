@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import ApexLogo from '../components/ui/ApexLogo';
 import CubeGrid, { GRID_PERIOD } from '../components/ui/CubeGrid';
+import OAuthButtons from '../components/auth/OAuthButtons';
 
 const WORDS = ['Tracks', 'Invests', 'Grows', 'Protects', 'Compounds'];
 
@@ -179,6 +180,8 @@ export default function Login() {
               }
             </button>
           </form>
+
+          <OAuthButtons onError={setError} />
 
           <p style={{ textAlign: 'center', marginTop: 32, fontSize: 13, color: 'var(--color-text-muted)' }}>
             Don't have an account?{' '}

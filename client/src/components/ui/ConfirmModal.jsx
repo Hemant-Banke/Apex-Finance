@@ -10,6 +10,7 @@ export default function ConfirmModal({
   const [skipFuture, setSkipFuture] = useState(false);
 
   // Reset checkbox each time modal opens
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { if (open) setSkipFuture(false); }, [open]);
 
   const handleConfirm = () => {

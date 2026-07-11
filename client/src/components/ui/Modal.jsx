@@ -17,7 +17,7 @@ import { X, ArrowLeft } from 'lucide-react';
  */
 export default function Modal({
   open, onClose, title, eyebrow, subtitle, titlePrefix, titleSuffix, onBack,
-  align = 'center', children, wide = false, maxWidth,
+  align = 'center', children, wide = false, maxWidth, className = '',
 }) {
   if (!open) return null;
 
@@ -25,13 +25,13 @@ export default function Modal({
 
   return createPortal(
     <div className={`modal-overlay${align === 'top' ? ' modal-overlay-top' : ''}`} onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={width ? { maxWidth: width } : undefined}>
+      <div className={`modal-content${className ? ` ${className}` : ''}`} onClick={e => e.stopPropagation()} style={width ? { maxWidth: width } : undefined}>
 
         {/* Header — [back] eyebrow · title · subtitle, closed by a gilt hairline */}
         <div className="modal-header">
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
             {onBack && (
-              <button onClick={onBack} className="btn-icon" aria-label="Back" title="Back" style={{ width: 32, height: 32, flexShrink: 0 }}>
+              <button onClick={onBack} className="btn-icon btn-icon-circle" aria-label="Back" title="Back" style={{ width: 34, height: 34, flexShrink: 0 }}>
                 <ArrowLeft size={16} />
               </button>
             )}
@@ -45,7 +45,7 @@ export default function Modal({
               {subtitle && <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</p>}
             </div>
           </div>
-          <button onClick={onClose} className="btn-icon modal-close" aria-label="Close" title="Close" style={{ width: 32, height: 32 }}>
+          <button onClick={onClose} className="btn-icon btn-icon-circle modal-close" aria-label="Close" title="Close" style={{ width: 34, height: 34 }}>
             <X size={16} />
           </button>
         </div>

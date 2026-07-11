@@ -60,6 +60,12 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
 
   function patch(id, changes) {
     setRows(rs => rs.map(r => r.id === id ? { ...r, ...changes } : r));
+    // If a row's date is edited outside the active filter window, widen the
+    // window so the row it belongs to doesn't silently drop out of view.
+    if (changes.date) {
+      if (rangeFrom && changes.date < rangeFrom) setRangeFrom(changes.date);
+      if (rangeTo && changes.date > rangeTo)     setRangeTo(changes.date);
+    }
   }
 
   // Select/deselect only the currently-visible (in-range) rows.
@@ -152,12 +158,12 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
   const isFiltered   = rangeFrom !== fullFrom || rangeTo !== fullTo;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 0, minWidth: 0, flex: 1, minHeight: 0 }}>
 
       {/* Header summary — source identity + selected totals on one recessed strip */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-        marginBottom: 14, flexWrap: 'wrap',
+        marginBottom: 14, flexWrap: 'wrap', flexShrink: 0,
         padding: '12px 16px', borderRadius: 'var(--radius)',
         background: 'var(--color-bg-input)', border: '1px solid var(--color-border)',
         boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.22)',
@@ -213,7 +219,7 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
 
       {/* AI-generated badge */}
       {aiParsed && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, padding: '7px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--color-accent-muted)', border: '1px solid var(--color-accent-dim)' }}>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, flexShrink: 0, padding: '7px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--color-accent-muted)', border: '1px solid var(--color-accent-dim)' }}>
           <Sparkles size={12} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
             <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>AI-generated</span> — review dates, amounts, and categories before importing.
@@ -222,7 +228,7 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
       )}
 
       {/* Select all row */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', marginBottom: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', marginBottom: 4, flexShrink: 0 }}>
         <Checkbox
           checked={allSelected}
           indeterminate={!allSelected && !noneSelected}
@@ -237,12 +243,14 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         </button>
       </div>
 
-      {/* Transaction rows */}
+      {/* Transaction rows — the only scrollable region; the modal itself stays fixed */}
       <div style={{
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius)',
         overflow: 'hidden',
-        maxHeight: 460,
+        flex: '1 1 auto',
+        minHeight: 180,
+        maxHeight: 'min(42vh, 380px)',
         overflowY: 'auto',
       }}>
         {visibleRows.map((row, i) => (
@@ -264,7 +272,7 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
 
       {/* Error */}
       {error && (
-        <p className="text-xs" style={{ color: 'var(--color-danger)', marginTop: 12 }}>{error}</p>
+        <p className="text-xs" style={{ color: 'var(--color-danger)', marginTop: 12, flexShrink: 0 }}>{error}</p>
       )}
 
       {/* Import button */}
@@ -273,7 +281,7 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         onClick={handleImport}
         disabled={submitting || !selected.length}
         className="btn-primary"
-        style={{ width: '100%', padding: '11px 18px', marginTop: 16 }}
+        style={{ width: '100%', padding: '11px 18px', marginTop: 16, flexShrink: 0 }}
       >
         {submitting ? (
           <><div className="spinner" style={{ width: 15, height: 15, borderWidth: 2 }} /><span>Importing…</span></>
@@ -350,9 +358,9 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
 
         {/* Edit */}
         <button type="button" onClick={() => setExpanded(e => !e)}
-          className="btn-icon" title="Edit details" aria-label="Edit details"
-          style={{ width: 30, height: 30, flexShrink: 0, ...(expanded ? { borderColor: 'var(--color-accent)', color: 'var(--color-accent)' } : null) }}>
-          <Pencil size={13} />
+          className="btn-icon btn-icon-sm" title="Edit details" aria-label="Edit details"
+          style={{ flexShrink: 0, ...(expanded ? { borderColor: 'var(--color-accent)', color: 'var(--color-accent)' } : null) }}>
+          <Pencil size={14} />
         </button>
       </div>
 
@@ -468,9 +476,10 @@ function formatCategoryDisplay(code) {
 }
 
 function Checkbox({ checked, indeterminate, onChange, tone = 'accent' }) {
-  // 'accent' — the master select-all (gilt, outlined). 'plain' — per-row (neutral
-  // white); unchecked rows are a soft filled square with no grey outline, so the
-  // gilt select-all reads as the primary control.
+  // 'accent' — the master select-all: gilt, filled when checked (the primary
+  // control). 'plain' — per-row: when checked it stays an outlined square with
+  // just a white tick (no filled background), so rows read lighter than the
+  // master. Unchecked states are an empty square with a greyish border.
   const isPlain = tone === 'plain';
   const on = tone === 'accent'
     ? { line: 'var(--color-accent)', fill: 'var(--color-accent)', tick: 'var(--color-bg-primary)' }
@@ -482,13 +491,17 @@ function Checkbox({ checked, indeterminate, onChange, tone = 'accent' }) {
       onClick={() => onChange(!checked)}
       style={{
         width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-        border: active ? `2px solid ${on.line}` : isPlain ? '2px solid transparent' : '2px solid var(--color-border-hover)',
-        background: checked ? on.fill : indeterminate ? 'var(--color-accent-muted)' : isPlain ? 'var(--color-bg-elevated)' : 'transparent',
+        border: active
+          ? `2px solid ${isPlain ? 'var(--color-text-muted)' : on.line}`
+          : `2px solid ${isPlain ? 'var(--color-border)' : 'var(--color-border-hover)'}`,
+        background: checked
+          ? (isPlain ? 'transparent' : on.fill)
+          : indeterminate ? 'var(--color-accent-muted)' : 'transparent',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         cursor: 'pointer', padding: 0,
       }}
     >
-      {checked && <Check size={11} style={{ color: on.tick, strokeWidth: 3 }} />}
+      {checked && <Check size={12} style={{ color: isPlain ? on.line : on.tick, strokeWidth: 3 }} />}
       {indeterminate && !checked && <span style={{ width: 8, height: 2, background: on.line, borderRadius: 1, display: 'block' }} />}
     </button>
   );

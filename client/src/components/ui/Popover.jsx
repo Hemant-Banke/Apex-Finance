@@ -19,14 +19,19 @@ import { createPortal } from 'react-dom';
  */
 export default function Popover({ anchorRef, open, onClose, width, maxHeight = 320, children }) {
   const [style, setStyle] = useState(null);
+  // Kept hidden until the anchor position is stable, so the panel appears at its
+  // final spot instead of visibly jumping into place mid-animation.
+  const [ready, setReady] = useState(false);
   const panelRef = useRef(null);
 
   useLayoutEffect(() => {
     if (!open) return;
 
+    // Measure the anchor and set the panel style; returns a positional key so the
+    // settle loop can tell when the anchor has stopped moving.
     const place = () => {
       const el = anchorRef.current;
-      if (!el) return;
+      if (!el) return null;
       const r = el.getBoundingClientRect();
       const gap = 6;
       const spaceBelow = window.innerHeight - r.bottom - gap - 8;
@@ -47,9 +52,25 @@ export default function Popover({ anchorRef, open, onClose, width, maxHeight = 3
           ? { top: r.bottom + gap }
           : { bottom: window.innerHeight - r.top + gap }),
       });
+      return `${Math.round(r.top)},${Math.round(r.left)},${Math.round(r.width)}`;
     };
 
-    place();
+    // The anchor may still be mid-transform (e.g. a modal's fade-down entrance),
+    // so getBoundingClientRect reads a transient position. Re-place each frame
+    // and reveal only once it holds steady for two frames (or after a timeout).
+    let raf;
+    let prevKey = null;
+    let stable = 0;
+    const start = performance.now();
+    const settle = () => {
+      const key = place();
+      if (key && key === prevKey) stable += 1;
+      else { stable = 0; prevKey = key; }
+      if (stable >= 2 || performance.now() - start > 500) { setReady(true); return; }
+      raf = requestAnimationFrame(settle);
+    };
+    settle();
+
     // Dismiss when the page/anchor scrolls, but NOT when scrolling inside the
     // panel itself (e.g. a long option list).
     const onScroll = (e) => {
@@ -61,8 +82,10 @@ export default function Popover({ anchorRef, open, onClose, width, maxHeight = 3
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize);
+      setReady(false);
     };
   }, [open, anchorRef, width, maxHeight, onClose]);
 
@@ -87,8 +110,24 @@ export default function Popover({ anchorRef, open, onClose, width, maxHeight = 3
 
   if (!open || !style) return null;
 
+  // The panel itself carries the popover surface (bg + border + radius + shadow)
+  // and the scroll. An element's own box-shadow is not clipped by its own
+  // overflow, so the shadow renders fully instead of being cut off at the edges.
   return createPortal(
-    <div ref={panelRef} style={{ ...style, overflowY: 'auto' }} className="popover-panel">
+    <div
+      ref={panelRef}
+      className="popover-panel"
+      style={{
+        ...style,
+        overflowY: 'auto',
+        background: 'var(--color-bg-popover)',
+        border: '1px solid var(--color-border-hover)',
+        borderRadius: 'var(--radius)',
+        boxShadow: 'var(--shadow-popover)',
+        opacity: ready ? 1 : 0,
+        transition: 'opacity 0.14s ease',
+      }}
+    >
       {children}
     </div>,
     document.body

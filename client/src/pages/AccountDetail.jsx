@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { accountsAPI, transactionsAPI } from '../lib/api';
 import {
-  formatCurrency, formatDate, getTransactionColor, getTransactionSign, getTransactionName
+  formatCurrency, compactIfLarge, formatDate, getTransactionColor, getTransactionSign, getTransactionName
 } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
@@ -200,7 +200,7 @@ export default function AccountDetail() {
         <div className="card">
           <p className="heading-sm mb-3">Outstanding Balance</p>
           <p className="figure display-number text-[var(--color-danger)]">
-            −{formatCurrency(Math.abs(account.balance))}
+            −{compactIfLarge(Math.abs(account.balance))}
           </p>
         </div>
       ) : (
@@ -208,19 +208,19 @@ export default function AccountDetail() {
           <div style={{ paddingRight: 24, borderRight: '1px solid var(--color-border-subtle)' }}>
             <p className="label" style={{ marginBottom: 8 }}>Cash</p>
             <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              {formatCurrency(cashBalance)}
+              {compactIfLarge(cashBalance)}
             </p>
           </div>
           <div style={{ padding: '0 24px', borderRight: '1px solid var(--color-border-subtle)' }}>
             <p className="label" style={{ marginBottom: 8 }}>Assets (book value)</p>
             <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              {formatCurrency(totalInvested)}
+              {compactIfLarge(totalInvested)}
             </p>
           </div>
           <div style={{ paddingLeft: 24 }}>
             <p className="label" style={{ marginBottom: 8 }}>Total Value</p>
             <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-accent)' }}>
-              {formatCurrency(totalValue)}
+              {compactIfLarge(totalValue)}
             </p>
           </div>
         </div>
@@ -381,6 +381,7 @@ export default function AccountDetail() {
       {/* Add Asset Modal — MarketSearch → AssetTransactionForm */}
       <Modal open={assetModal} onClose={closeAssetModal}
         align="top"
+        className={selectedSecurity ? undefined : 'modal-fade-down'}
         onBack={selectedSecurity ? () => setSelectedSecurity(null) : undefined}
         eyebrow={selectedSecurity ? 'Record trade' : 'Add asset'}
         title={selectedSecurity ? (selectedSecurity.isManual ? selectedSecurity.name : selectedSecurity.symbol) : 'Find an asset'}

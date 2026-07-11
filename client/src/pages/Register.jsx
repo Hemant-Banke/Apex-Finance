@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import ApexLogo from '../components/ui/ApexLogo';
 import CubeGrid, { GRID_PERIOD } from '../components/ui/CubeGrid';
+import OAuthButtons from '../components/auth/OAuthButtons';
 
 const PHRASES = ['Your wealth', 'Your growth', 'Your future', 'Your legacy'];
 
@@ -196,6 +197,8 @@ export default function Register() {
               }
             </button>
           </form>
+
+          <OAuthButtons onError={setError} />
 
           <p style={{ textAlign: 'center', marginTop: 32, fontSize: 13, color: 'var(--color-text-muted)' }}>
             Already on Apex?{' '}

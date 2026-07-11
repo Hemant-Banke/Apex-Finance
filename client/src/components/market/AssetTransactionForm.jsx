@@ -147,19 +147,17 @@ export default function AssetTransactionForm({
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Manual asset: custom name + type (create mode only) */}
+      {/* Manual asset: custom name + type on one row (create mode only) */}
       {isManual && !isEdit && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <div>
-            <label className="label block" style={{ marginBottom: 6 }}>Asset Name</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+          <div className="field">
+            <label className="label">Asset Name</label>
             <input type="text" value={customName} onChange={e => setCustomName(e.target.value)}
-              className="input-field" placeholder="e.g. Mumbai Apartment, HDFC FD 2024" required />
+              className="input-field" placeholder="e.g. Mumbai Apartment" required />
           </div>
-          <div>
-            <label className="label block" style={{ marginBottom: 6 }}>Asset Type</label>
-            <select value={assetType} onChange={e => setAssetType(e.target.value)} className="input-field">
-              {ASSET_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+          <div className="field">
+            <label className="label">Asset Type</label>
+            <TypePicker options={ASSET_TYPES} value={assetType} onChange={setAssetType} searchable={ASSET_TYPES.length > 6} />
           </div>
         </div>
       )}
@@ -299,7 +297,7 @@ export default function AssetTransactionForm({
           background: `color-mix(in srgb, ${submitTone} 68%, #0B0D10)`,
           color: 'var(--color-text-primary)',
           border: `1px solid color-mix(in srgb, ${submitTone} 45%, transparent)`,
-          boxShadow: `0 6px 16px -10px ${submitTone}, var(--elev-ring)`,
+          boxShadow: 'none',
         }}>
         {saving ? (
           <div className="spinner" style={{ width: 16, height: 16, borderWidth: 2, margin: '0 auto' }} />

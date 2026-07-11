@@ -44,7 +44,8 @@ api.interceptors.response.use(
     // Don't redirect for login/register — wrong credentials should show an in-page error.
     // All other 401s (including /auth/me on session restore) redirect to login.
     const url = error.config?.url || '';
-    const isUnauthenticatedEndpoint = url.includes('/auth/login') || url.includes('/auth/register');
+    const isUnauthenticatedEndpoint = url.includes('/auth/login') || url.includes('/auth/register')
+      || url.includes('/auth/google') || url.includes('/auth/apple');
     if (error.response?.status === 401 && !isUnauthenticatedEndpoint) {
       localStorage.removeItem('apex_token');
       localStorage.removeItem('apex_user');
@@ -61,6 +62,8 @@ api.interceptors.response.use(
 export const authAPI = {
   register: (data) => api.post('/auth/register', data),
   login: (data) => api.post('/auth/login', data),
+  google: (credential) => api.post('/auth/google', { credential }),
+  apple: (payload) => api.post('/auth/apple', payload), // { id_token, user? }
   getMe: () => api.get('/auth/me')
 };
 

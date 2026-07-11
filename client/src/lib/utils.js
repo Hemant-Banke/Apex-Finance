@@ -21,6 +21,24 @@ export function formatCurrency(amount, currency = 'INR') {
   }).format(amount);
 }
 
+/**
+ * Condense large INR amounts into Indian units (L / Cr) so they don't overflow
+ * tight UI like tooltips. Below ₹1L the full formatted value is kept.
+ */
+export function formatCompact(amount) {
+  if (amount == null || isNaN(amount)) return '—';
+  const a = Math.abs(amount);
+  const sign = amount < 0 ? '−' : '';
+  if (a >= 1_00_00_000) return `${sign}₹${+(a / 1_00_00_000).toFixed(2)}Cr`;
+  if (a >= 1_00_000)    return `${sign}₹${+(a / 1_00_000).toFixed(2)}L`;
+  return formatCurrency(amount);
+}
+
+/** Formatter that condenses only when the magnitude is large (≥ ₹1L). */
+export function compactIfLarge(amount, formatValue = formatCurrency) {
+  return Math.abs(amount) >= 1_00_000 ? formatCompact(amount) : formatValue(amount);
+}
+
 export function formatDate(date) {
   return new Date(date).toLocaleDateString('en-IN', {
     year: 'numeric',

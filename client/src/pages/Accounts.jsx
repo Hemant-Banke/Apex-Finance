@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { accountsAPI } from '../lib/api';
-import { formatCurrency } from '../lib/utils';
+import { formatCurrency, compactIfLarge } from '../lib/utils';
 import { ACCOUNT_TYPE_OPTIONS } from '../lib/accountPickerOptions';
 import Modal from '../components/ui/Modal';
 import TypePicker from '../components/forms/TypePicker';
@@ -80,7 +80,7 @@ export default function Accounts() {
         <div>
           <p className="eyebrow" style={{ marginBottom: 12 }}>Accounts · Net position</p>
           <h1 className="display-number" style={{ color: total < 0 ? 'var(--color-danger)' : 'var(--color-text-primary)' }}>
-            {formatCurrency(total)}
+            {compactIfLarge(total)}
           </h1>
           <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>
             {accounts.length} account{accounts.length !== 1 ? 's' : ''}

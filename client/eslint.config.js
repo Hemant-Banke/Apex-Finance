@@ -23,7 +23,14 @@ export default defineConfig([
       },
     },
     rules: {
-      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
+      // Ignore PascalCase / CONSTANT names for both vars and args: component
+      // identifiers used only inside JSX (e.g. a destructured `Icon`) aren't seen
+      // as "used" by core no-unused-vars without eslint-plugin-react's
+      // jsx-uses-vars, so this keeps them from being false-flagged.
+      'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]', argsIgnorePattern: '^[A-Z_]' }],
+      // React Compiler rule — this project doesn't run the compiler (plain
+      // @vitejs/plugin-react), so its manual useMemo/useCallback are intentional.
+      'react-hooks/preserve-manual-memoization': 'off',
     },
   },
 ])

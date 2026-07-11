@@ -6,7 +6,7 @@ import Popover from '../ui/Popover';
 
 // ── Popular securities shown before user types ──────────────────────────────
 const POPULAR = {
-  'Indian Stocks': [
+  'Popular Indian Stocks': [
     { symbol: 'RELIANCE.NS', name: 'Reliance Industries', type: 'stock' },
     { symbol: 'TCS.NS',      name: 'Tata Consultancy Services', type: 'stock' },
     { symbol: 'INFY.NS',     name: 'Infosys', type: 'stock' },
@@ -14,7 +14,7 @@ const POPULAR = {
     { symbol: 'ICICIBANK.NS',name: 'ICICI Bank', type: 'stock' },
     { symbol: 'WIPRO.NS',    name: 'Wipro', type: 'stock' },
   ],
-  'US Stocks': [
+  'Popular US Stocks': [
     { symbol: 'AAPL',  name: 'Apple', type: 'stock' },
     { symbol: 'MSFT',  name: 'Microsoft', type: 'stock' },
     { symbol: 'GOOGL', name: 'Alphabet', type: 'stock' },
@@ -22,37 +22,59 @@ const POPULAR = {
     { symbol: 'AMZN',  name: 'Amazon', type: 'stock' },
     { symbol: 'NVDA',  name: 'Nvidia', type: 'stock' },
   ],
-  'ETFs': [
+  'Popular ETFs': [
     { symbol: 'NIFTYBEES.NS', name: 'Nippon Nifty BeES', type: 'etf' },
     { symbol: 'GOLDBEES.NS',  name: 'Nippon Gold BeES', type: 'etf' },
     { symbol: 'SPY',          name: 'SPDR S&P 500', type: 'etf' },
     { symbol: 'QQQ',          name: 'Invesco QQQ', type: 'etf' },
     { symbol: 'VTI',          name: 'Vanguard Total Market', type: 'etf' },
   ],
-  'Crypto': [
+  'Popular Crypto': [
     { symbol: 'BTC-USD', name: 'Bitcoin', type: 'crypto' },
     { symbol: 'ETH-USD', name: 'Ethereum', type: 'crypto' },
     { symbol: 'SOL-USD', name: 'Solana', type: 'crypto' },
     { symbol: 'BNB-USD', name: 'BNB', type: 'crypto' },
   ],
-  'Commodities': [
+  'Popular Commodities': [
     { symbol: 'GC=F', name: 'Gold Futures', type: 'commodity' },
     { symbol: 'SI=F', name: 'Silver Futures', type: 'commodity' },
     { symbol: 'CL=F', name: 'Crude Oil', type: 'commodity' },
   ],
 };
 
-// Manual / unlisted assets — price auto-fetch is skipped for these
+// Manual / unlisted assets — price auto-fetch is skipped for these. `keywords`
+// let a free-text query surface the right option (e.g. "house" → Real Estate).
 const MANUAL = [
-  { symbol: 'REAL-ESTATE',   name: 'Real Estate', type: 'other',    isManual: true },
-  { symbol: 'FIXED-DEPOSIT', name: 'Fixed Deposit (FD)', type: 'fd', isManual: true },
-  { symbol: 'EPF-NPS',       name: 'EPF / NPS', type: 'epf_nps',   isManual: true },
-  { symbol: 'PHYS-GOLD',     name: 'Physical Gold', type: 'gold',   isManual: true },
-  { symbol: 'PHYS-SILVER',   name: 'Physical Silver', type: 'commodity', isManual: true },
-  { symbol: 'PRIVATE-EQUITY',name: 'Private Equity', type: 'other', isManual: true },
-  { symbol: 'UNLISTED-BOND', name: 'Unlisted Bond', type: 'bond',   isManual: true },
-  { symbol: 'OTHER-ASSET',   name: 'Other', type: 'other',          isManual: true },
+  { symbol: 'REAL-ESTATE',   name: 'Real Estate', type: 'other',    isManual: true, keywords: ['real estate', 'house', 'home', 'property', 'apartment', 'flat', 'land', 'plot'] },
+  { symbol: 'FIXED-DEPOSIT', name: 'Fixed Deposit (FD)', type: 'fd', isManual: true, keywords: ['fixed deposit', 'fd', 'deposit', 'recurring deposit', 'rd'] },
+  { symbol: 'EPF-NPS',       name: 'EPF / NPS', type: 'epf_nps',   isManual: true, keywords: ['epf', 'nps', 'pf', 'provident fund', 'pension', 'retirement'] },
+  { symbol: 'PHYS-GOLD',     name: 'Physical Gold', type: 'gold',   isManual: true, keywords: ['gold', 'jewellery', 'jewelry', 'bullion'] },
+  { symbol: 'PHYS-SILVER',   name: 'Physical Silver', type: 'commodity', isManual: true, keywords: ['silver'] },
+  { symbol: 'PRIVATE-EQUITY',name: 'Private Equity', type: 'other', isManual: true, keywords: ['private equity', 'pe', 'startup', 'esop', 'unlisted equity', 'venture'] },
+  { symbol: 'UNLISTED-BOND', name: 'Unlisted Bond', type: 'bond',   isManual: true, keywords: ['bond', 'debenture', 'ncd'] },
+  { symbol: 'OTHER-ASSET',   name: 'Other', type: 'other',          isManual: true, keywords: ['other', 'misc', 'custom'] },
 ];
+
+// Manual assets whose name or keywords match the query — so typing "real estate"
+// or "house" surfaces our manual listing alongside live market results.
+function matchManual(q) {
+  const s = q.trim().toLowerCase();
+  if (!s) return [];
+  return MANUAL.filter(m =>
+    m.name.toLowerCase().includes(s) ||
+    m.keywords.some(k => k.includes(s) || s.includes(k))
+  );
+}
+
+// Per-category header meta — an emoji marker + colour-coded accent, so the empty
+// state reads as an organised board, not a flat list.
+const CATEGORY_META = {
+  'Popular Indian Stocks': { emoji: '🇮🇳', accent: 'var(--color-accent)' },
+  'Popular US Stocks':     { emoji: '🇺🇸', accent: '#60a5fa' },
+  'Popular ETFs':          { emoji: '🧺', accent: 'var(--color-chart-warm)' },
+  'Popular Crypto':        { emoji: '🪙', accent: '#a78bfa' },
+  'Popular Commodities':   { emoji: '🛢️', accent: '#fbbf24' },
+};
 
 const TYPE_COLORS = {
   stock:       'var(--color-accent)',
@@ -81,9 +103,11 @@ function TypeBadge({ type }) {
   );
 }
 
-// Compact clickable chip: icon + short ticker + company name.
+// Compact clickable chip: icon + short ticker + company name. Lifts slightly and
+// warms to a gilt hairline on hover so the board feels tactile.
 function SecurityChip({ s, onPick, dashed = false }) {
   const short = s.symbol.replace('.NS', '').replace('-USD', '').replace('=F', '');
+  const rest = dashed ? 'transparent' : 'var(--color-bg-elevated)';
   return (
     <button
       onMouseDown={() => onPick(s)}
@@ -91,20 +115,34 @@ function SecurityChip({ s, onPick, dashed = false }) {
         display: 'flex', alignItems: 'center', gap: 9, minWidth: 0,
         padding: '7px 9px', borderRadius: 'var(--radius-sm)',
         border: `1px ${dashed ? 'dashed' : 'solid'} var(--color-border)`,
-        background: dashed ? 'transparent' : 'var(--color-bg-elevated)',
+        background: rest,
         cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
         boxShadow: dashed ? 'none' : 'var(--elev-ring)',
-        transition: 'border-color 0.15s, background 0.15s',
+        transition: 'border-color 0.15s, background 0.15s, transform 0.15s',
       }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-border-hover)'; e.currentTarget.style.background = 'var(--color-bg-card-hover)'; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = dashed ? 'transparent' : 'var(--color-bg-elevated)'; }}
+      onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-accent-muted)'; e.currentTarget.style.background = 'var(--color-bg-card-hover)'; e.currentTarget.style.transform = 'translateY(-1px)'; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border)'; e.currentTarget.style.background = rest; e.currentTarget.style.transform = 'none'; }}
     >
       <AssetIcon symbol={s.symbol} name={s.name} type={s.type} size={26} />
-      <div style={{ minWidth: 0 }}>
-        <div className="figure" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-primary)', lineHeight: 1.2 }}>{short}</div>
+      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+        <div className="figure" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{short}</div>
         <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{s.name}</div>
       </div>
     </button>
+  );
+}
+
+// Category header — a bare emoji marker + tracked label, with a hairline rule
+// that carries the eye across the row.
+function CategoryHeader({ label, emoji, accent }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
+      {emoji
+        ? <span style={{ fontSize: '0.95rem', flexShrink: 0 }}>{emoji}</span>
+        : <span style={{ width: 6, height: 6, borderRadius: '50%', background: accent, flexShrink: 0, boxShadow: `0 0 8px -1px ${accent}` }} />}
+      <p className="eyebrow" style={{ margin: 0 }}>{label}</p>
+      <span style={{ flex: 1, height: 1, background: 'var(--color-border-subtle)' }} />
+    </div>
   );
 }
 
@@ -136,7 +174,18 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
   const inputRef                = useRef(null);
   const searchBoxRef            = useRef(null);
 
-  // Search when debounced query changes
+  // Focus after the host modal's entrance settles, so the results popover opens
+  // against a stationary field and lands in its natural spot (just below it) —
+  // exactly as it does on a manual click — instead of during the fade-down.
+  useEffect(() => {
+    if (!autoFocus) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 210);
+    return () => clearTimeout(t);
+  }, [autoFocus]);
+
+  // Search when debounced query changes — a data-fetching effect that owns the
+  // results/loading/error state, so the synchronous resets here are intentional.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!debouncedQ.trim()) { setResults([]); setError(''); return; }
     let cancelled = false;
@@ -148,6 +197,7 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [debouncedQ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const showResults = query.trim().length > 0;
 
@@ -159,53 +209,94 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
 
   // Shared panel content (results or popular grid) — a render helper, not a
   // nested component, so it doesn't remount on every keystroke.
-  const renderPanel = () => showResults ? (
-    error ? (
-      <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>{error}</div>
-    ) : results.length === 0 && !loading ? (
-      <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>No results for "{query}"</div>
-    ) : (
-      results.map(r => (
-        <button key={r.symbol} onMouseDown={() => select(r)}
-          style={{
-            width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-            padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer',
-            textAlign: 'left', transition: 'background 0.12s',
-            borderBottom: '1px solid var(--color-border-subtle)'
-          }}
-          onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-elevated)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'none'}>
-          <AssetIcon symbol={r.symbol} name={r.name} type={r.type} size={34} />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 2 }}>
-              <span className="figure" style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.symbol}</span>
-              <TypeBadge type={r.type} />
+  const renderResults = () => {
+    const manualMatches = matchManual(query);
+    if (error && results.length === 0 && manualMatches.length === 0) {
+      return <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>{error}</div>;
+    }
+    if (!loading && results.length === 0 && manualMatches.length === 0) {
+      return <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>No results for "{query}"</div>;
+    }
+    // When we also surface a manual option, drop one live result so the list
+    // doesn't overflow into a scroll.
+    const shown = manualMatches.length ? results.slice(0, Math.max(0, results.length - 1)) : results;
+    return (
+      <div style={{ padding: 6 }}>
+        {shown.map(r => (
+          <button key={r.symbol} onMouseDown={() => select(r)}
+            style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '9px 10px', background: 'none', border: 'none', cursor: 'pointer',
+              textAlign: 'left', transition: 'background 0.12s', borderRadius: 'var(--radius-sm)',
+            }}
+            onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-elevated)'}
+            onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+            <AssetIcon symbol={r.symbol} name={r.name} type={r.type} size={34} />
+            <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="figure" style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.symbol}</span>
+                <TypeBadge type={r.type} />
+              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {r.name}{r.exchange ? ` · ${r.exchange}` : ''}
+              </span>
             </div>
-            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {r.name}{r.exchange ? ` · ${r.exchange}` : ''}
-            </span>
-          </div>
-        </button>
-      ))
-    )
-  ) : (
-    /* Popular securities — compact icon chips (icon + ticker + name) */
-    <div style={{ padding: '14px 16px' }}>
+          </button>
+        ))}
+
+        {/* Manual / unlisted matches for the query (e.g. "house" → Real Estate) */}
+        {manualMatches.length > 0 && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 4px' }}>
+              <p className="eyebrow" style={{ margin: 0 }}>Add manually</p>
+              <span style={{ flex: 1, height: 1, background: 'var(--color-border-subtle)' }} />
+            </div>
+            {manualMatches.map(m => (
+              <button key={m.symbol} onMouseDown={() => select(m)}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '9px 10px', background: 'none', border: 'none', cursor: 'pointer',
+                  textAlign: 'left', transition: 'background 0.12s', borderRadius: 'var(--radius-sm)',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-elevated)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                <AssetIcon symbol={m.symbol} name={m.name} type={m.type} size={34} />
+                <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{m.name}</span>
+                    <span className="badge badge-gold" style={{ fontSize: '0.5625rem' }}>Manual</span>
+                  </div>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Track this holding yourself</span>
+                </div>
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+    );
+  };
+
+  const renderPanel = () => showResults ? renderResults() : (
+    /* Empty state — a colour-coded board of popular markets + manual options */
+    <div style={{ padding: '16px 16px 14px' }}>
       {Object.entries(POPULAR).map(([category, items]) => (
-        <div key={category} style={{ marginBottom: 16 }}>
-          <p className="eyebrow" style={{ marginBottom: 8 }}>{category}</p>
+        <div key={category} style={{ marginBottom: 18 }}>
+          <CategoryHeader
+            label={category}
+            emoji={CATEGORY_META[category]?.emoji}
+            accent={CATEGORY_META[category]?.accent || 'var(--color-accent)'}
+          />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
             {items.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} />)}
           </div>
         </div>
       ))}
 
-      {/* Manual / Unlisted */}
-      <div>
-        <p className="eyebrow" style={{ marginBottom: 8 }}>Manual / Unlisted</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-          {MANUAL.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} dashed />)}
-        </div>
+      {/* Manual / Unlisted — set off by a gilt hairline; these are self-priced */}
+      <div className="gilt-rule" style={{ margin: '4px 0 14px' }} />
+      <CategoryHeader label="Manual · self-priced" emoji="✍️" accent="var(--color-text-muted)" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+        {MANUAL.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} dashed />)}
       </div>
     </div>
   );
@@ -228,7 +319,6 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
         }
         <input
           ref={inputRef}
-          autoFocus={autoFocus}
           value={query}
           onChange={e => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
@@ -246,14 +336,12 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
         )}
       </div>
 
-      {/* Inline panel — caps its own height and scrolls internally so the
-          surrounding modal stays fixed instead of growing. */}
+      {/* Inline panel — flows directly beneath the search field (no detached
+          block) so it reads as part of the dialog. Caps its own height and
+          scrolls internally so the surrounding modal stays fixed. */}
       {inline && (
         <div style={{
-          marginTop: 12,
-          background: 'var(--color-bg-elevated)',
-          border: '1px solid var(--color-border)',
-          borderRadius: 'var(--radius)',
+          marginTop: 8,
           maxHeight: 'min(52vh, 420px)',
           overflowY: 'auto',
         }}>
@@ -261,17 +349,11 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
         </div>
       )}
 
-      {/* Floating dropdown — portaled, always on top of the modal */}
+      {/* Floating dropdown — portaled, always on top of the modal. The Popover
+          panel supplies the surface (bg + border + radius + shadow). */}
       {!inline && (
-        <Popover anchorRef={searchBoxRef} open={focused} onClose={() => setFocused(false)} maxHeight={440}>
-          <div style={{
-            background: 'var(--color-bg-popover)',
-            border: '1px solid var(--color-border-hover)',
-            borderRadius: 'var(--radius)',
-            boxShadow: 'var(--shadow-popover)',
-          }}>
-            {renderPanel()}
-          </div>
+        <Popover anchorRef={searchBoxRef} open={focused} onClose={() => setFocused(false)} maxHeight={480}>
+          {renderPanel()}
         </Popover>
       )}
     </div>

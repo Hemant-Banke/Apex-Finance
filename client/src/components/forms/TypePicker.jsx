@@ -158,7 +158,7 @@ export default function TypePicker({
 
       {/* ── Dropdown (portaled, always on top) ── */}
       <Popover anchorRef={triggerRef} open={isOpen} onClose={close} maxHeight={360}>
-        <div style={{ background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', overflow: 'hidden', boxShadow: 'var(--shadow-popover)' }}>
+        <div>
 
           {/* Secondary-phase header */}
           {hierarchical && phase === 'secondary' && (

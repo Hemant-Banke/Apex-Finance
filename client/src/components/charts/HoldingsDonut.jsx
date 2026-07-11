@@ -23,8 +23,8 @@ function CustomTooltip({ active, payload }) {
       fontSize: '0.8125rem', boxShadow: '0 8px 24px rgba(0,0,0,0.3)'
     }}>
       <p style={{ fontWeight: 600, color: 'var(--color-text-primary)', marginBottom: 4 }}>{d.name}</p>
-      <p style={{ color: d.payload.fill }}>{formatCurrency(d.value)}</p>
-      <p style={{ color: 'var(--color-text-muted)', marginTop: 2, fontSize: '0.75rem' }}>
+      <p style={{ color: d.payload.fill, fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{formatCurrency(d.value)}</p>
+      <p style={{ color: 'var(--color-text-muted)', marginTop: 2, fontSize: '0.75rem', fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' }}>
         {d.payload.pct}% of total
       </p>
     </div>

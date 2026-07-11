@@ -11,9 +11,10 @@
   --color-bg-elevated: #1E242C;
   --color-bg-input: #0E1114;
   --color-bg-modal: #14181E;
-  /* Floating popover surface — deliberately lighter than the modal card so it
-     lifts off the background rather than blending in. */
-  --color-bg-popover: #1C222A;
+  /* Floating popover surface — same dark tone as the card; it lifts off the
+     background via the layered --shadow-popover (contact edge + drop + top rim)
+     rather than by being a lighter fill. */
+  --color-bg-popover: #13171C;
 
   /* Accent — champagne gold (the gilt). Used with restraint: hairline
      rules, active markers, focus, links. This is the brand's one indulgence. */
@@ -48,10 +49,11 @@
      a crisp dark contact edge, a deep ambient drop, and a light top rim that
      separates the panel from a same-toned surface behind it. */
   --shadow-popover:
-    0 0 0 1px rgba(0, 0, 0, 0.55),
-    0 30px 64px -16px rgba(0, 0, 0, 0.9),
-    0 12px 28px -10px rgba(0, 0, 0, 0.7),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 30px 64px -16px rgba(0, 0, 0, 0.92),
+    0 12px 28px -10px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.5);
   --elev-ring: inset 0 1px 0 rgba(255, 255, 255, 0.035);
 
   /* Radius */
@@ -312,13 +314,16 @@ body {
 .btn-ghost:active { transform: scale(0.98); }
 .btn-ghost:disabled { opacity: 0.4; cursor: not-allowed; box-shadow: none; }
 
-/* Icon-only button — square, solid, same elevated fill as the secondary. */
+/* Icon-only button — a true square (width === height), solid, same elevated
+   fill as the secondary. align-self:center keeps it square inside stretch rows. */
 .btn-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 36px;
-  height: 36px;
+  align-self: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
   padding: 0;
   background: var(--color-bg-elevated);
   color: var(--color-text-secondary);
@@ -335,6 +340,10 @@ body {
   box-shadow: var(--shadow-md);
 }
 .btn-icon:active { transform: scale(0.96); }
+/* Compact square — for inline affordances like the review-row edit pencil. */
+.btn-icon-sm { width: 30px; height: 30px; border-radius: 7px; }
+/* Circular — for close / back affordances. */
+.btn-icon-circle { border-radius: 50%; }
 
 /* Pill toggle group */
 .pill-group {
@@ -486,25 +495,32 @@ select.input-field {
   bottom: 0 !important;
   z-index: 9999;
   display: flex !important;
-  align-items: center !important;
+  /* All modals pin to the top so they don't recentre (jump) when their content
+     height changes between steps. */
+  align-items: flex-start !important;
   justify-content: center !important;
-  padding: 40px 24px;
-  background: rgba(0, 0, 0, 0.65);
+  padding: 7vh 24px 40px;
+  background-color: rgba(0, 0, 0, 0.65);
+  /* Cool cross-hatch backdrop over the blurred page — a dense grid of small
+     champagne X marks for a premium, technical feel. */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18'%3E%3Cpath d='M6 6 L12 12 M12 6 L6 12' stroke='%23C9A96A' stroke-opacity='0.14' stroke-width='1' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-size: 18px 18px;
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
+  animation: overlayFadeIn 0.2s ease-out;
 }
-/* Top-anchored variant — pins the dialog near the top so it doesn't recentre
-   (jump) when its content height changes between steps. */
+/* Legacy alias — top alignment is now the default for every overlay. */
 .modal-overlay-top {
-  align-items: flex-start !important;
   padding-top: 7vh;
 }
 
 .modal-content {
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 440px;
-  max-height: calc(100vh - 80px);
+  max-height: calc(100vh - 7vh - 40px);
   overflow-y: auto;
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border-hover);
@@ -558,6 +574,24 @@ select.input-field {
 @keyframes modalIn {
   from { opacity: 0; transform: scale(0.96) translateY(8px); }
   to { opacity: 1; transform: scale(1) translateY(0); }
+}
+@keyframes overlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+/* Fade-down entrance — the dialog descends into place from above. */
+@keyframes modalDown {
+  from { opacity: 0; transform: translateY(-24px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* The fade-down dialog also dissolves vertically: fully opaque through the top
+   half (so the search field stays solid), fading to transparent at the bottom.
+   The min-height keeps the field within that opaque upper half. */
+.modal-content.modal-fade-down {
+  animation: modalDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  min-height: 430px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
 }
 
 .animate-in {
@@ -806,5 +840,23 @@ select.input-field {
   );
 }
 
-/* Kill Recharts tooltip animation */
-.recharts-tooltip-wrapper { transition: none !important; }
+/* Kill Recharts tooltip animation; lift it above the SVG so the hover dot
+   (drawn inside the chart surface) never paints over the tooltip. */
+.recharts-tooltip-wrapper { transition: none !important; z-index: 1000 !important; }
+
+/* Chart drag-select: no browser focus ring / tap-highlight / text-selection on
+   the SVG surface (otherwise a drag paints a big default outline). */
+.recharts-wrapper,
+.recharts-surface {
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.recharts-wrapper:focus,
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus,
+.recharts-surface:focus-visible,
+.recharts-wrapper *:focus,
+.recharts-wrapper *:focus-visible {
+  outline: none !important;
+}

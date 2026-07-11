@@ -114,7 +114,7 @@ export function DateRangePicker({ value, onChange, min, max, disabled = false, t
       )}
 
       <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} width={288} maxHeight={440}>
-        <div style={{ background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-popover)', padding: 14, width: 288, display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
           <div className="field">
             <label className="label">From</label>
             <DatePicker value={val.from || ''} onChange={v => onChange({ from: v, to: val.to })} min={min} max={val.to || max} placeholder="Start date" />
@@ -221,7 +221,7 @@ function DesktopCalendar({ value, onChange, min, max, placeholder, disabled }) {
       </button>
 
       <Popover anchorRef={ref} open={open} onClose={() => setOpen(false)} width={264} maxHeight={360}>
-        <div style={{ background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 'var(--radius)', boxShadow: 'var(--shadow-popover)', padding: 12, width: 264 }}>
+        <div style={{ padding: 12 }}>
 
           {/* Header — ‹ [clickable label] › ; label drills days → months → years */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
