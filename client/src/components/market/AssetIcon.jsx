@@ -71,8 +71,9 @@ const TICKER_TYPES = new Set(['stock', 'etf', 'mutual_fund']);
 // logo, so `onError` fires and we drop to the themed emoji glyph.
 function logoSrc(symbol, type, px) {
   if (!LOGODEV_TOKEN || !symbol) return null;
-  // Off-market holdings have no logo to find — don't ask for one.
-  if (isManualSymbol(symbol)) return null;
+  // Off-market holdings have no logo to find — don't ask for one. Nor do AMFI
+  // schemes, whose "symbol" is a scheme code (AMFI:120828), not a ticker.
+  if (isManualSymbol(symbol) || symbol.startsWith('AMFI:')) return null;
   const q = `token=${LOGODEV_TOKEN}&size=${px}&format=png&fallback=404`;
   if (type === 'crypto') {
     const coin = symbol.replace(/-USDT?$/i, '').trim().toLowerCase();

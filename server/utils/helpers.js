@@ -55,6 +55,30 @@ function mapQuoteType(quoteType) {
   return map[quoteType] || 'other';
 }
 
+/**
+ * Display name for a Yahoo search quote.
+ *
+ * Indian mutual funds come back with `shortname` set to the ticker itself
+ * ("0P0001RO8V.BO") and the real fund name only in `longname`, so a plain
+ * `shortname || longname` shows the user an opaque code.
+ *
+ * We still prefer `shortname` when it is a genuine name: for US funds it is the
+ * only field carrying the share class (VFIAX / VFINX / VFFSX all share the
+ * longname "Vanguard 500 Index Fund"). So `longname` is used only when
+ * `shortname` is missing or merely repeats the symbol.
+ */
+function resolveQuoteName({ symbol = '', shortname = '', longname = '' } = {}) {
+  const sym  = symbol.trim().toUpperCase();
+  // Compare against the bare ticker too — "0P0001RO8V" vs "0P0001RO8V.BO".
+  const base = sym.split('.')[0];
+  const short = shortname.trim();
+  const isPlaceholder = !short
+    || short.toUpperCase() === sym
+    || short.toUpperCase() === base;
+
+  return (isPlaceholder ? (longname.trim() || symbol) : short);
+}
+
 module.exports = {
   midnight,
   midnight_from_ms,
@@ -66,4 +90,5 @@ module.exports = {
   todayStr,
   t1Str,
   mapQuoteType,
+  resolveQuoteName,
 };

@@ -1,3 +1,11 @@
+// Network defaults — must be set before ANY module opens a socket.
+// Some upstreams (mfapi in particular) advertise an AAAA record that black-holes
+// from many networks. Node connects verbatim (IPv6 first) and stalls for seconds
+// where curl would fall back instantly; the first request measured 2.4s instead of
+// 89ms. Prefer IPv4 and enable Happy-Eyeballs fallback for everything.
+require('dns').setDefaultResultOrder('ipv4first');
+require('net').setDefaultAutoSelectFamily(true);
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');

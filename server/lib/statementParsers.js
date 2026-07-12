@@ -76,7 +76,10 @@ function buildTx({ date, narration, amount, type, source, assetSymbol, assetName
   };
 
   if (isAsset) {
-    tx.assetSymbol  = (assetSymbol || assetName || '').toUpperCase();
+    // Keep the symbol EMPTY when the statement only gave a name — symbolResolver
+    // looks the real ticker up from the name (and the traded NAV). Defaulting it
+    // to the name here would produce a symbol that prices to nothing.
+    tx.assetSymbol  = (assetSymbol || '').toUpperCase();
     tx.assetName    = assetName || assetSymbol || '';
     tx.assetType    = assetType || 'stock';
     tx.units        = u;

@@ -16,6 +16,7 @@ const {
 const {
   isBaseCurrency, fxSymbol, normalizeCurrency, distinctCurrencies,
 } = require('../utils/currency');
+const mfService = require('./mfService');
 
 function _adjustDateForYF(date, assetType) {
   return assetType === 'crypto' ? date - IST_OFFSET_MS : date;
@@ -137,6 +138,20 @@ function _toInrSeries(nativeMap, fxMap) {
 async function fetchHistoricPrices(holdings, startMs, endMs) {
   if (!holdings.length) return {};
 
+  // Indian mutual funds are AMFI schemes — their NAVs come from mfService, never
+  // from Yahoo (which cannot even tell one plan of a fund from another).
+  const mfHoldings = holdings.filter(h => mfService.isMfSymbol(h.assetSymbol));
+  const rest       = holdings.filter(h => !mfService.isMfSymbol(h.assetSymbol));
+
+  const mfSeries = {};
+  await Promise.all(mfHoldings.map(async (h) => {
+    const code = mfService.schemeCodeOf(h.assetSymbol);
+    mfSeries[h.assetSymbol] = await mfService.getNavHistory(code, startMs, endMs);
+  }));
+
+  if (!rest.length) return mfSeries;
+  holdings = rest;
+
   const metalSpots = _metalSpotsNeeded(holdings);
   const listed     = holdings.filter(h => !isPurityAsset(h.assetType));
 
@@ -178,7 +193,7 @@ async function fetchHistoricPrices(holdings, startMs, endMs) {
     }
   }
 
-  return out;
+  return { ...mfSeries, ...out };
 }
 
 /** Last non-null value of an array, or null. */
@@ -202,6 +217,22 @@ function _lastNonNull(arr) {
  */
 async function fetchLatestPrices(holdings) {
   if (!holdings.length) return {};
+
+  // Indian mutual funds: latest NAV from AMFI (via mfService), never Yahoo.
+  const mfHoldings = holdings.filter(h => mfService.isMfSymbol(h.assetSymbol));
+  const mfPrices   = {};
+  if (mfHoldings.length) {
+    const codes = mfHoldings.map(h => mfService.schemeCodeOf(h.assetSymbol));
+    const navs  = await mfService.getLatestNavs(codes);
+    for (const h of mfHoldings) {
+      const nav = navs[mfService.schemeCodeOf(h.assetSymbol)];
+      if (nav != null) mfPrices[h.assetSymbol] = nav;
+    }
+  }
+
+  holdings = holdings.filter(h => !mfService.isMfSymbol(h.assetSymbol));
+  if (!holdings.length) return mfPrices;
+
   try {
     const metalSpots  = _metalSpotsNeeded(holdings);
     const listedItems = holdings.filter(h => !isPurityAsset(h.assetType));
@@ -212,13 +243,15 @@ async function fetchLatestPrices(holdings) {
 
     const extras  = [...metalSpots, ...fxSymbols];
     const symbols = [...listed, ...extras];
-    if (!symbols.length) return {};
+    // Every exit keeps the fund NAVs already resolved — a Yahoo failure must not
+    // drop prices that came from a different source entirely.
+    if (!symbols.length) return mfPrices;
 
     const url = `https://query1.finance.yahoo.com/v8/finance/spark`
               + `?symbols=${encodeURIComponent(symbols.join(','))}&range=1d&interval=1d`;
 
     const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return {};
+    if (!resp.ok) return mfPrices;
     const data = await resp.json();
 
     const quote = (sym) => {
@@ -250,9 +283,9 @@ async function fetchLatestPrices(holdings) {
       }
     }
 
-    return out;
+    return { ...mfPrices, ...out };
   } catch {
-    return {};
+    return mfPrices;
   }
 }
 
@@ -316,9 +349,58 @@ async function fetchFxRate(currency, dateMs) {
   return days.length ? series[days[days.length - 1]] : null;
 }
 
+/**
+ * Current price + currency for a handful of symbols, straight from each chart's
+ * metadata (one request per symbol, in parallel).
+ *
+ * Used to tell apart search hits that Yahoo reports under an identical name —
+ * Indian mutual-fund plans (Direct/Regular, Growth/IDCW) all share one `longname`,
+ * and the plan is in no field of any endpoint we can reach. Their NAVs differ
+ * sharply, so the NAV is what actually identifies the plan.
+ *
+ * Unlike the other fetchers this returns the NATIVE price and its currency, since
+ * it feeds a display label rather than a valuation.
+ *
+ * @returns {Promise<Object.<string, {price: number, currency: string}>>}
+ */
+async function fetchQuoteMeta(symbols = []) {
+  if (!symbols.length) return {};
+
+  // AMFI schemes: NAV from mfService — they have no Yahoo chart at all.
+  const out = {};
+  const mfSyms = symbols.filter(mfService.isMfSymbol);
+  if (mfSyms.length) {
+    const navs = await mfService.getLatestNavs(mfSyms.map(mfService.schemeCodeOf));
+    for (const sym of mfSyms) {
+      const nav = navs[mfService.schemeCodeOf(sym)];
+      if (nav != null) out[sym] = { price: nav, currency: 'INR' };
+    }
+  }
+
+  symbols = symbols.filter(s => !mfService.isMfSymbol(s));
+  if (!symbols.length) return out;
+
+  const results = await Promise.all(symbols.map(async (sym) => {
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`;
+      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(5000) });
+      if (!resp.ok) return null;
+      const meta = (await resp.json())?.chart?.result?.[0]?.meta;
+      if (meta?.regularMarketPrice == null) return null;
+      return { price: _round2(meta.regularMarketPrice), currency: meta.currency || '' };
+    } catch {
+      return null;
+    }
+  }));
+
+  symbols.forEach((sym, i) => { if (results[i]) out[sym] = results[i]; });
+  return out;
+}
+
 module.exports = {
   fetchHistoricPrices,
   fetchLatestPrices,
   fetchMetalPricePerGram,
   fetchFxRate,
+  fetchQuoteMeta,
 };

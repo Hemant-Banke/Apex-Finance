@@ -40,10 +40,16 @@ function AssetTypePill({ type }) {
   );
 }
 
-// Highlighted asset name for a modal subtitle (item 4).
-function AssetName({ name }) {
-  if (!name) return null;
-  return <span style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>{name}</span>;
+// The asset's ticker, for a modal subtitle — the name carries the title, so the
+// symbol reads as the quieter reference line, in the mono figure face.
+function AssetTicker({ symbol, exchange }) {
+  if (!symbol) return null;
+  return (
+    <span>
+      <span className="figure" style={{ color: 'var(--color-text-secondary)', fontWeight: 600 }}>{symbol}</span>
+      {exchange ? <span style={{ color: 'var(--color-text-muted)' }}> · {exchange}</span> : null}
+    </span>
+  );
 }
 
 const iconMap = {
@@ -298,9 +304,9 @@ export default function AccountDetail() {
                 <div className="flex items-center gap-3">
                   <Package size={15} style={{ color: 'var(--color-text-muted)' }} />
                   <div>
-                    <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{h.symbol}</p>
+                    <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{h.name}</p>
                     <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      {h.name} · <span className="figure">{h.qty}</span> units · avg{' '}
+                      <span className="figure">{h.symbol}</span> · <span className="figure">{h.qty}</span> units · avg{' '}
                       {/* Foreign holding: the average it was actually bought at, in its
                           own currency. The INR cost sits on the right of the row. */}
                       <span className="figure">
@@ -380,9 +386,14 @@ export default function AccountDetail() {
 
       {/* Edit Transaction Modal — AssetTransactionForm for buy/sell */}
       <Modal open={!!editTx} onClose={() => setEditTx(null)}
-        eyebrow="Edit"
-        title={['buy','sell'].includes(editTx?.type) ? `${editTx?.type === 'buy' ? 'Buy' : 'Sell'} · ${editTx?.assetSymbol}` : 'Edit transaction'}
-        subtitle={['buy','sell'].includes(editTx?.type) ? <AssetName name={editTx?.assetName} /> : undefined}
+        // Buy/Sell moves to the eyebrow now that the asset name owns the title.
+        eyebrow={['buy','sell'].includes(editTx?.type)
+          ? `Edit ${editTx?.type === 'buy' ? 'purchase' : 'sale'}`
+          : 'Edit'}
+        title={['buy','sell'].includes(editTx?.type)
+          ? (editTx?.assetName || editTx?.assetSymbol)
+          : 'Edit transaction'}
+        subtitle={['buy','sell'].includes(editTx?.type) ? <AssetTicker symbol={editTx?.assetSymbol} /> : undefined}
         titleSuffix={['buy','sell'].includes(editTx?.type) ? <AssetTypePill type={editTx?.assetType} /> : undefined}
         titlePrefix={['buy','sell'].includes(editTx?.type)
           ? <AssetIcon symbol={editTx.assetSymbol} name={editTx.assetName} type={editTx.assetType} size={40} />
@@ -456,8 +467,10 @@ export default function AccountDetail() {
         className={selectedSecurity ? undefined : 'modal-fade-down'}
         onBack={selectedSecurity ? () => setSelectedSecurity(null) : undefined}
         eyebrow={selectedSecurity ? 'Record trade' : 'Add asset'}
-        title={selectedSecurity ? (selectedSecurity.isManual ? selectedSecurity.name : selectedSecurity.symbol) : 'Find an asset'}
-        subtitle={selectedSecurity ? (selectedSecurity.isManual ? undefined : <AssetName name={selectedSecurity.name} />) : 'Search stocks, ETFs, crypto, funds — or add a manual holding.'}
+        title={selectedSecurity ? selectedSecurity.name : 'Find an asset'}
+        subtitle={selectedSecurity
+          ? (selectedSecurity.isManual ? undefined : <AssetTicker symbol={selectedSecurity.symbol} exchange={selectedSecurity.exchange} />)
+          : 'Search stocks, ETFs, crypto, funds — or add a manual holding.'}
         titleSuffix={selectedSecurity ? <AssetTypePill type={selectedSecurity.type} /> : undefined}
         titlePrefix={selectedSecurity ? <AssetIcon symbol={selectedSecurity.symbol} name={selectedSecurity.name} type={selectedSecurity.type} size={40} /> : undefined}
         wide>

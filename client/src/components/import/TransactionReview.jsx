@@ -5,6 +5,8 @@ import { formatCurrency, formatDate } from '../../lib/utils';
 import CategoryPicker from '../forms/CategoryPicker';
 import DatePicker, { DateRangePicker } from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
+import MarketSearch from '../market/MarketSearch';
+import Modal from '../ui/Modal';
 import { accountOptions } from '../../lib/accountPickerOptions';
 
 const TODAY = new Date().toISOString().split('T')[0];
@@ -38,6 +40,11 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         notes:      tx.notes || '',
         toAccount:  '',
         editing:    false,
+        // Whether the trade settles against the account's cash. A buy is tracked
+        // independently of cash by default (the money usually left a different
+        // account); a sell's proceeds land in this one. Same default as the manual
+        // asset form — overridable per row below.
+        usesCashBalance: tx.type === 'sell',
       }))
   );
   const [submitting, setSubmitting] = useState(false);
@@ -55,8 +62,23 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
 
   const visibleRows  = rows.filter(inRange);
   const selected     = visibleRows.filter(r => r.selected);
-  const totalIncome  = selected.filter(r => r.type === 'income').reduce((s, r) => s + r.amount, 0);
-  const totalExpense = selected.filter(r => r.type === 'expense').reduce((s, r) => s + r.amount, 0);
+
+  // In / Out = value entering or leaving the SYSTEM because of this statement.
+  //
+  //   income                     → in
+  //   expense                    → out
+  //   buy  NOT settled in cash   → in   (the asset arrived; no cash of ours paid for
+  //                                      it, so value came from outside the system)
+  //   sell NOT settled in cash   → out  (the asset left and its proceeds went outside)
+  //   buy / sell settled in cash → nothing (cash and asset just swap places INSIDE
+  //                                      the system — the net position is unchanged)
+  const tradeValue = (r) => (Number(r.units) || 0) * (Number(r.pricePerUnit) || 0);
+  const externalTrade = (r) => (r.usesCashBalance ? 0 : tradeValue(r));
+
+  const totalIncome = selected.reduce((s, r) =>
+    s + (r.type === 'income' ? r.amount : r.type === 'buy' ? externalTrade(r) : 0), 0);
+  const totalExpense = selected.reduce((s, r) =>
+    s + (r.type === 'expense' ? r.amount : r.type === 'sell' ? externalTrade(r) : 0), 0);
 
   function patch(id, changes) {
     setRows(rs => rs.map(r => r.id === id ? { ...r, ...changes } : r));
@@ -111,6 +133,10 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
           payload.assetSymbol  = row.assetSymbol;
           payload.assetName    = row.assetName;
           payload.assetType    = row.assetType;
+          payload.usesCashBalance = !!row.usesCashBalance;
+          // A foreign-quoted asset's price is NATIVE — without this the server
+          // would book a USD figure as rupees.
+          if (row.currency && row.currency !== 'INR') payload.currency = row.currency;
         } else {
           payload.amount   = row.amount;
           payload.category = row.category || undefined;
@@ -217,17 +243,9 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         </div>
       </div>
 
-      {/* AI-generated badge */}
-      {aiParsed && (
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12, flexShrink: 0, padding: '7px 12px', borderRadius: 'var(--radius-sm)', background: 'var(--color-accent-muted)', border: '1px solid var(--color-accent-dim)' }}>
-          <Sparkles size={12} style={{ color: 'var(--color-accent)', flexShrink: 0 }} />
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)' }}>
-            <span style={{ fontWeight: 600, color: 'var(--color-accent)' }}>AI-generated</span> — review dates, amounts, and categories before importing.
-          </p>
-        </div>
-      )}
-
-      {/* Select all row */}
+      {/* Select all row — the AI-generated badge rides along here as a pill rather
+          than a full-width banner, which cost a whole row of vertical space. The
+          caution it carried lives on as its tooltip. */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', marginBottom: 4, flexShrink: 0 }}>
         <Checkbox
           checked={allSelected}
@@ -237,6 +255,21 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         <span className="text-xs" style={{ color: 'var(--color-text-muted)', flex: 1 }}>
           {selected.length} of {visibleRows.length} selected{isFiltered ? ` · ${rows.length - visibleRows.length} outside range` : ''}
         </span>
+        {aiParsed && (
+          <span
+            title="Parsed by AI — check dates, amounts and categories before importing."
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+              padding: '3px 8px', borderRadius: 999,
+              fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em',
+              color: 'var(--color-accent)',
+              background: 'var(--color-accent-muted)',
+              border: '1px solid var(--color-accent-dim)',
+              cursor: 'default',
+            }}>
+            <Sparkles size={10} /> AI-generated
+          </span>
+        )}
         <button type="button" onClick={onBack}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}>
           <ChevronLeft size={12} /> Upload different file
@@ -297,6 +330,7 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
 
 function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
   const [expanded, setExpanded] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);   // Find-an-asset dialog
 
   const isAsset = row.type === 'buy' || row.type === 'sell';
   const typeColor = {
@@ -311,9 +345,14 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
   const assetAmount = (Number(row.units) || 0) * (Number(row.pricePerUnit) || 0);
 
   // A short flag when the row needs manual input before it can import.
+  // The symbol flags come from the server's symbolResolver: an asset it could not
+  // match to a real ticker, or one it matched by name where the traded NAV did not
+  // line up (usually a fund plan Yahoo does not list) — both need a human look.
   const needsReview =
     (row.type === 'transfer' && !row.toAccount) ? 'Needs account'
     : (isAsset && !(Number(row.units) > 0 && Number(row.pricePerUnit) > 0)) ? 'Needs price'
+    : row.symbolUnresolved ? 'Unknown ticker'
+    : row.symbolAmbiguous ? 'Check ticker'
     : null;
 
   return (
@@ -335,7 +374,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
               {row.type}
             </span>
             <p className="text-sm" style={{ color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-              {isAsset ? (row.assetSymbol || row.assetName || 'Asset') : (row.description || row.narration)}
+              {isAsset ? (row.assetName || row.assetSymbol || 'Asset') : (row.description || row.narration)}
             </p>
             {needsReview && (
               <span className="badge" style={{ flexShrink: 0, gap: 4, background: 'var(--color-chart-warm)', color: '#1A1408', fontWeight: 600 }}>
@@ -345,6 +384,9 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
           </div>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             <span className="figure">{row.date}</span>
+            {/* The resolved ticker rides on the detail line — it is the reference,
+                not the identity, and for a fund it is an opaque Morningstar code. */}
+            {isAsset && row.assetSymbol && <> · <span className="figure">{row.assetSymbol}</span></>}
             {isAsset
               ? ` · ${row.units || 0} units${row.pricePerUnit ? ` @ ${formatCurrency(row.pricePerUnit)}` : ''}`
               : (row.category ? ` · ${formatCategoryDisplay(row.category)}` : '')}
@@ -367,20 +409,23 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
       {/* Expanded editor */}
       {expanded && (
         <div style={{ padding: '4px 16px 16px 22px', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--color-bg-input)', borderTop: '1px solid var(--color-border-subtle)' }}>
-          {/* Type + Date */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, paddingTop: 12 }}>
-            {!isAsset && (
+          {/* Cash — type + date */}
+          {!isAsset && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, paddingTop: 12 }}>
               <div className="field">
                 <label className="label">Type</label>
-                <div style={{ display: 'flex', gap: 4 }}>
+                {/* The pill row fills the field's remaining height, so it lines up
+                    with the DatePicker's input beside it whatever that measures. */}
+                <div style={{ display: 'flex', gap: 4, flex: 1 }}>
                   {['income','expense','transfer'].map(t => {
                     const c = TYPE_PILL_COLOR[t];
                     const on = row.type === t;
                     return (
                       <button key={t} type="button" onClick={() => onChange({ type: t, category: '' })}
                         style={{
-                          flex: 1, padding: '7px 4px', fontSize: '0.6875rem', fontWeight: 600, textTransform: 'capitalize',
+                          flex: 1, padding: '0 4px', fontSize: '0.6875rem', fontWeight: 600, textTransform: 'capitalize',
                           borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
                           border: `1px solid ${on ? c : 'var(--color-border)'}`,
                           background: on ? `color-mix(in srgb, ${c} 15%, transparent)` : 'var(--color-bg-elevated)',
                           color: on ? c : 'var(--color-text-muted)',
@@ -391,29 +436,97 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                   })}
                 </div>
               </div>
-            )}
-            <div className="field" style={isAsset ? { gridColumn: '1 / -1' } : undefined}>
-              <label className="label">Date</label>
-              <DatePicker value={row.date} onChange={v => onChange({ date: v })} max={TODAY} />
+              <div className="field">
+                <label className="label">Date</label>
+                <DatePicker value={row.date} onChange={v => onChange({ date: v })} max={TODAY} />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Asset trade — units & price per unit */}
+          {/* Asset — the figures first (date, units, price), then what it is.
+              Two compact rows; picking a different instrument opens the full
+              Find-an-asset dialog rather than cramming a search box in here. */}
           {isAsset && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="field">
-                <label className="label">Units</label>
-                <input type="number" step="any" min="0" value={row.units ?? ''}
-                  onChange={e => onChange({ units: e.target.value })}
-                  className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0" />
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr', gap: 12, paddingTop: 12 }}>
+                <div className="field">
+                  <label className="label">Date</label>
+                  <DatePicker value={row.date} onChange={v => onChange({ date: v })} max={TODAY} />
+                </div>
+                <div className="field">
+                  <label className="label">Units</label>
+                  <input type="number" step="any" min="0" value={row.units ?? ''}
+                    onChange={e => onChange({ units: e.target.value })}
+                    className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0" />
+                </div>
+                <div className="field">
+                  <label className="label">
+                    Price
+                    <span style={{ marginLeft: 4, color: 'var(--color-accent)', fontWeight: 600 }}>
+                      {row.currency && row.currency !== 'INR' ? `(${row.currency})` : ''}
+                    </span>
+                  </label>
+                  <input type="number" step="any" min="0" value={row.pricePerUnit ?? ''}
+                    onChange={e => onChange({ pricePerUnit: e.target.value })}
+                    className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
+                </div>
               </div>
-              <div className="field">
-                <label className="label">Price per unit</label>
-                <input type="number" step="any" min="0" value={row.pricePerUnit ?? ''}
-                  onChange={e => onChange({ pricePerUnit: e.target.value })}
-                  className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
+
+              {/* Same grid as the row above, so the columns line up exactly: Asset
+                  spans Date+Units, Note sits under Price. `minWidth: 0` is what pins
+                  them — a grid item defaults to min-width:auto, so a long fund name
+                  would otherwise force its column wider and crush Note. */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 1fr', gap: 12, alignItems: 'start' }}>
+                <div className="field" style={{ minWidth: 0, gridColumn: 'span 2' }}>
+                  <label className="label">Asset</label>
+                  <button type="button" onClick={() => setPickerOpen(true)}
+                    className="input-field"
+                    style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                      cursor: 'pointer', textAlign: 'left', minWidth: 0,
+                    }}>
+                    <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      {/* A long plan name wraps to a second line inside the fixed
+                          column rather than stretching it. */}
+                      <span style={{
+                        lineHeight: 1.3,
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden', overflowWrap: 'anywhere',
+                      }}>
+                        {row.assetName || row.assetSymbol || 'Choose an asset'}
+                      </span>
+                      {row.assetSymbol && (
+                        <span className="figure" style={{ color: 'var(--color-text-muted)', fontSize: '0.6875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {row.assetSymbol}
+                        </span>
+                      )}
+                    </span>
+                    <span style={{ flexShrink: 0, color: 'var(--color-accent)', fontSize: '0.75rem' }}>Change</span>
+                  </button>
+                </div>
+                <div className="field" style={{ minWidth: 0 }}>
+                  <label className="label">Note</label>
+                  <input type="text" value={row.notes} onChange={e => onChange({ notes: e.target.value })}
+                    className="input-field" placeholder="Optional" />
+                </div>
               </div>
-            </div>
+
+              {/* Settle against cash — off for a buy, on for a sell, the same
+                  convention as the manual asset form. Drives the In/Out totals.
+                  Checkbox is itself a <button>, so the label is a span beside it
+                  rather than a wrapping button (which would nest buttons). */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, alignSelf: 'flex-start' }}>
+                <Checkbox tone="plain" checked={!!row.usesCashBalance}
+                  onChange={v => onChange({ usesCashBalance: v })} />
+                <span onClick={() => onChange({ usesCashBalance: !row.usesCashBalance })}
+                  className="text-xs" style={{ color: 'var(--color-text-secondary)', cursor: 'pointer' }}>
+                  Settle against account cash{' '}
+                  <span style={{ color: 'var(--color-text-muted)' }}>
+                    ({row.type === 'buy' ? 'deduct cost' : 'add proceeds'})
+                  </span>
+                </span>
+              </div>
+            </>
           )}
 
           {/* Category / destination + Note — one row */}
@@ -444,15 +557,6 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
             </div>
           )}
 
-          {/* Asset note */}
-          {isAsset && (
-            <div className="field">
-              <label className="label">Note</label>
-              <input type="text" value={row.notes} onChange={e => onChange({ notes: e.target.value })}
-                className="input-field" placeholder="Optional" />
-            </div>
-          )}
-
           {/* Narration (read-only) */}
           {row.narration && (
             <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.5, fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
@@ -461,6 +565,32 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
           )}
         </div>
       )}
+
+      {/* Re-pick the instrument in the full Find-an-asset dialog — the same one the
+          Add-asset flow uses — so the search has room to breathe instead of being
+          wedged into the row. */}
+      <Modal open={pickerOpen} onClose={() => setPickerOpen(false)}
+        align="top" wide
+        className="modal-fade-down"
+        eyebrow="Import"
+        title="Find an asset"
+        subtitle="Search stocks, ETFs, crypto and mutual funds — pick the one this row should book against.">
+        <MarketSearch
+          autoFocus
+          onSelect={(sec) => {
+            onChange({
+              assetSymbol: sec.symbol,
+              assetName:   sec.name,
+              assetType:   sec.type,
+              currency:    sec.currency && sec.currency !== 'INR' ? sec.currency : undefined,
+              // The user has chosen outright — the resolver's doubts no longer apply.
+              symbolUnresolved: false,
+              symbolAmbiguous:  false,
+            });
+            setPickerOpen(false);
+          }}
+        />
+      </Modal>
     </div>
   );
 }

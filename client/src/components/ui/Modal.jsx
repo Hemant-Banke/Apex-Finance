@@ -36,10 +36,17 @@ export default function Modal({
               </button>
             )}
             {titlePrefix}
-            <div style={{ minWidth: 0 }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               {eyebrow && <p className="eyebrow" style={{ marginBottom: 6 }}>{eyebrow}</p>}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                <h2 className="modal-title" style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{title}</h2>
+              {/* Long instrument names (a fund plan runs to ~60 chars) wrap onto a
+                  second line rather than being truncated to an unreadable stub. The
+                  suffix pill is allowed to drop below them instead of squeezing. */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
+                <h2 className="modal-title" style={{
+                  minWidth: 0,
+                  display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden', overflowWrap: 'anywhere',
+                }}>{title}</h2>
                 {titleSuffix}
               </div>
               {subtitle && <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</p>}

@@ -50,11 +50,15 @@ function buildCashTS(impactsByDay, startMs, endMs = todayMs(), initialCashBalanc
  * @param {number} endMs    UTC-midnight ms of last entry (T-1 = yesterday).
  * @returns {number[]}  length = (endMs - startMs) / DAY_MS + 1
  */
-function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
+function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPrices = {}) {
   if (endMs < startMs) return [];
   const numDays   = Math.round((endMs - startMs) / DAY_MS) + 1;
   const holdings  = {}; // { SYM: qty } — accumulated forward
-  const lastPrice = {}; // carry-forward last known MARKET price per symbol
+  // Carry-forward last known MARKET price per symbol, pre-seeded with the last quote
+  // from BEFORE this window. Without the seed, a window containing no trading day at
+  // all (extending the store across a weekend) would find no price and fall back to
+  // book value — the holding would appear to snap back to cost every Saturday.
+  const lastPrice = { ...seedPrices };
   const bookPrice = {}; // last transaction pricePerUnit — cost basis for accrual / fallback
   const basisMs   = {}; // day that cost basis was set — accrual runs from here
   const meta      = {}; // { assetType, purity, rate } — drives purity scaling & accrual
@@ -113,6 +117,29 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms()) {
   }
 
   return assetTS;
+}
+
+/**
+ * The last market price quoted for each symbol strictly BEFORE `beforeMs`.
+ *
+ * Feeds `buildAssetTS`'s carry-forward so a window that contains no trading day
+ * (a weekend extend) still values holdings at the last real close rather than
+ * dropping to book cost.
+ *
+ * @param {{ [sym: string]: { [dayMs: number]: number } }} pricesBySymbol
+ * @returns {{ [sym: string]: number }}
+ */
+function seedPricesBefore(pricesBySymbol, beforeMs) {
+  const seeds = {};
+  for (const [sym, series] of Object.entries(pricesBySymbol || {})) {
+    let bestDay = -Infinity;
+    for (const k of Object.keys(series)) {
+      const day = Number(k);
+      if (day < beforeMs && day > bestDay) bestDay = day;
+    }
+    if (bestDay > -Infinity) seeds[sym] = series[bestDay];
+  }
+  return seeds;
 }
 
 /**
@@ -189,8 +216,10 @@ function buildTransactionsTS(byAccount, pricesBySymbol, accountsById = {}, initi
 
     // Asset TS — rolling market value; skipped for debt accounts. Empty when the
     // window ends before it starts (startMs already at/after today → no settled day).
+    // Seeded with the last close before the window, so a series that opens on a
+    // non-trading day is still marked to market rather than to book cost.
     const assetTS = (!isDebt && assetTxns.length)
-      ? buildAssetTS(assetTxns, pricesBySymbol, startMs, t1)
+      ? buildAssetTS(assetTxns, pricesBySymbol, startMs, t1, seedPricesBefore(pricesBySymbol, startMs))
       : new Array(Math.max(0, Math.round((t1 - startMs) / DAY_MS) + 1)).fill(0);
 
     accountStores[aid] = { cashTS, assetTS, startMs, endMs: today };
@@ -204,4 +233,5 @@ module.exports = {
   buildAssetTS,
   buildNetWorthTS,
   buildTransactionsTS,
+  seedPricesBefore,
 };

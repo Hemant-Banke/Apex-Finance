@@ -3,6 +3,7 @@ import { marketAPI } from '../../lib/api';
 import { Search, Loader2 } from 'lucide-react';
 import AssetIcon from './AssetIcon';
 import Popover from '../ui/Popover';
+import { formatNativeCurrency } from '../../lib/utils';
 
 // ── Popular securities shown before user types ──────────────────────────────
 const POPULAR = {
@@ -125,8 +126,8 @@ function SecurityChip({ s, onPick, dashed = false }) {
     >
       <AssetIcon symbol={s.symbol} name={s.name} type={s.type} size={26} />
       <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
-        <div className="figure" style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{short}</div>
-        <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{s.name}</div>
+        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{s.name}</div>
+        <div className="figure" style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{short}</div>
       </div>
     </button>
   );
@@ -225,22 +226,41 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
         {shown.map(r => (
           <button key={r.symbol} onMouseDown={() => select(r)}
             style={{
-              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              width: '100%', display: 'flex', alignItems: 'flex-start', gap: 12,
               padding: '9px 10px', background: 'none', border: 'none', cursor: 'pointer',
               textAlign: 'left', transition: 'background 0.12s', borderRadius: 'var(--radius-sm)',
             }}
             onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-elevated)'}
             onMouseLeave={e => e.currentTarget.style.background = 'none'}>
             <AssetIcon symbol={r.symbol} name={r.name} type={r.type} size={34} />
-            <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span className="figure" style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.symbol}</span>
-                <TypeBadge type={r.type} />
-              </div>
-              <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {r.name}{r.exchange ? ` · ${r.exchange}` : ''}
+            {/* Name leads — it is what the user is actually looking for; the ticker
+                is the reference, so it sits beneath in the mono figure face.
+                A fund's full plan name runs long ("… - Direct Plan - Growth Option"),
+                so it WRAPS to a second line rather than being clipped to a stub that
+                hides the very part that distinguishes one plan from another. */}
+            <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2 }}>
+              <span style={{
+                fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)',
+                minWidth: 0, lineHeight: 1.35,
+                display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                overflow: 'hidden', overflowWrap: 'anywhere',
+              }}>{r.name}</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span className="figure">{r.symbol}</span>{r.exchange ? ` · ${r.exchange}` : ''}
+                {/* Same-named fund plans (Direct/Regular, Growth/IDCW) are only
+                    distinguishable by NAV — Yahoo exposes the plan nowhere. */}
+                {r.nav != null && (
+                  <> · NAV <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>
+                    {formatNativeCurrency(r.nav, r.navCurrency)}
+                  </span></>
+                )}
               </span>
             </div>
+
+            {/* Type tag pinned to the right edge, clear of the wrapping name. */}
+            <span style={{ flexShrink: 0, marginTop: 2 }}>
+              <TypeBadge type={r.type} />
+            </span>
           </button>
         ))}
 

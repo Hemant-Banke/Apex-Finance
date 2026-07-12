@@ -61,9 +61,10 @@ ASSET / BROKER RULES:
 - On broker or demat statements, each instrument (stock/ETF/fund/bond) movement is a "buy" or "sell".
 - Units/shares credited IN (a "Buy/Cr" column, a "payin", an acquisition) -> "buy". Units/shares debited OUT (a "Sell/Dr" column, a "payout", a sale/delivery-out) -> "sell".
 - "units" = the quantity of shares/units moved (a positive number).
-- "assetName" = the full instrument name. "assetSymbol" = the ticker if present; if only a company name or ISIN is shown, derive a short UPPERCASE symbol from the name (no spaces).
-- "assetType": names containing "ETF" -> "etf"; "GOLD" -> "gold"; "MUTUAL"/"FUND" -> "mutual_fund"; "BOND"/"GILT" -> "bond"; otherwise "stock".
-- "pricePerUnit": the per-unit price/rate for that trade. Demat "transaction" rows often have NO price — in that case look for a separate HOLDINGS / valuation table in the same statement and use that instrument's per-unit Rate as the price. If no price exists anywhere, use null.
+- "assetName" = the full instrument name, transcribed EXACTLY as printed (e.g. "Quant Small Cap Fund", "Reliance Industries Ltd"). Do not abbreviate, expand or reorder it — it is matched against a market database downstream.
+- "assetSymbol" = the ticker ONLY if the statement actually prints one (e.g. "RELIANCE", "INFY.NS", "TCS"). Copy it verbatim, including or omitting any exchange suffix exactly as shown. If the statement shows only a name, an ISIN or a scheme code, set "assetSymbol" to null. NEVER invent, guess or derive a ticker from the name — a wrong ticker is far worse than none.
+- "assetType": names containing "ETF" -> "etf"; "GOLD" -> "gold"; "MUTUAL"/"FUND"/"SCHEME"/"NAV" -> "mutual_fund"; "BOND"/"GILT" -> "bond"; otherwise "stock".
+- "pricePerUnit": the per-unit price/rate for that trade. For mutual funds this is the NAV (often printed inline, e.g. "164.34 (Nav 221.78)" -> units 164.34, pricePerUnit 221.78). Demat "transaction" rows often have NO price — in that case look for a separate HOLDINGS / valuation table in the same statement and use that instrument's per-unit Rate as the price. If no price exists anywhere, use null.
 - Do NOT set "amount" on buy/sell rows — it is computed from units x pricePerUnit.
 
 GENERAL:

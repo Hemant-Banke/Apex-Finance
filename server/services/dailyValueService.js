@@ -48,10 +48,21 @@ async function loadAccountsById(userId) {
   return Object.fromEntries(accounts.map(a => [a._id.toString(), a]));
 }
 
+/**
+ * How far back to reach beyond the window we are building.
+ *
+ * The extra days are never plotted — they exist so the series can be SEEDED with the
+ * last real close before it starts. A store extended on a Sunday covers only
+ * non-trading days, and without a seed every holding would fall back to book cost.
+ * Ten days clears a weekend plus a run of market holidays (Diwali, etc).
+ */
+const PRICE_LOOKBACK_DAYS = 10;
+
 /** Fetch all symbol price series in one batched call. */
 function fetchPrices(assets, assetStartMs) {
   const today = todayMs();
-  return fetchHistoricPrices(assets || [], assetStartMs || today, today);
+  const start = (assetStartMs || today) - PRICE_LOOKBACK_DAYS * DAY_MS;
+  return fetchHistoricPrices(assets || [], start, today);
 }
 
 
@@ -218,7 +229,14 @@ async function ensureUpToToday(userId) {
             rate:         h.rate,
             date:         new Date(assetStart),
           }));
-          newAssetTS = assetTS.concat(tsService.buildAssetTS(calibTxns, pricesBySymbol, assetStart, t1));
+          // Seed the carry-forward with the last close BEFORE the extend window.
+          // Extending across a weekend covers no trading day at all, so with no seed
+          // every holding would be valued at book cost — the series would visibly
+          // snap back to what was paid every Saturday, then jump on Monday.
+          const seeds = tsService.seedPricesBefore(pricesBySymbol, assetStart);
+          newAssetTS = assetTS.concat(
+            tsService.buildAssetTS(calibTxns, pricesBySymbol, assetStart, t1, seeds),
+          );
         } else {
           // Non-debt account with no holdings — settled asset value stays 0.
           const zeros = Math.round((t1 - assetStart) / DAY_MS) + 1;

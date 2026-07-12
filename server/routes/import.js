@@ -6,6 +6,7 @@ const { parseStatement } = require('../lib/statementParsers');
 const llmService         = require('../lib/llmService');
 const categoryProfile    = require('../services/categoryProfileService');
 const { getUserCategoryTaxonomy } = require('../services/categoryService');
+const { resolveStatementAssets }  = require('../services/symbolResolver');
 const { MISC_CATEGORY }  = require('../lib/categoryRules');
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -100,6 +101,14 @@ router.post('/parse', protect, upload.single('file'), async (req, res) => {
       originalname: req.file.originalname,
       password:     req.body.password || null,
     });
+
+    // Turn each asset row's name/ticker into a real market symbol before review,
+    // so the user confirms something that will actually price.
+    try {
+      await resolveStatementAssets(result.transactions);
+    } catch (e) {
+      console.error('Symbol resolution failed:', e.message);
+    }
 
     await applySmartCategories(req.user._id, result);
 

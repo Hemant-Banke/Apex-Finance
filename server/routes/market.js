@@ -1,9 +1,16 @@
 const express = require('express');
 const { protect } = require('../middleware/auth');
 const { DAY_MS, YF_HEADERS } = require('../utils/constants');
-const { mapQuoteType, nowMs, toDateStr_from_ms, todayMs, midnight } = require('../utils/helpers');
+const { mapQuoteType, resolveQuoteName, nowMs, toDateStr_from_ms, todayMs, midnight } = require('../utils/helpers');
 const { isPurityAsset } = require('../utils/assetPricing');
 const { fetchMetalPricePerGram, fetchFxRate } = require('../services/marketDataService');
+const mfService = require('../services/mfService');
+
+/** Yahoo's Morningstar-coded Indian mutual funds — replaced wholesale by AMFI. */
+const INDIAN_MF_SYMBOL = /^0P\w+\.(BO|NS)$/i;
+
+/** Queries that are asking for a mutual fund, so AMFI results should lead. */
+const FUND_QUERY = /\b(fund|mutual|mf|nav|sip|scheme|direct|regular|idcw|growth)\b/i;
 
 const router = express.Router();
 router.use(protect);
@@ -14,22 +21,38 @@ router.get('/search', async (req, res) => {
   if (q.trim().length < 1) return res.json([]);
 
   try {
-    const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
-    const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(5000) });
-    if (!resp.ok) return res.status(502).json({ message: 'Market data unavailable' });
+    // The two sources are independent — hit them CONCURRENTLY, or the user waits for
+    // Yahoo and AMFI back to back. Neither is allowed to sink the other: a failing
+    // source contributes nothing rather than failing the whole search.
+    const yahooSearch = (async () => {
+      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
+      // Tight timeout: this is a type-ahead, and the route waits on both sources.
+      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(4000) });
+      if (!resp.ok) return [];
+      const data = await resp.json();
+      return (data.quotes || [])
+        .filter(x => x.symbol && x.quoteType !== 'INDEX')
+        // Indian mutual funds are served from AMFI, never Yahoo: Yahoo lists them as
+        // opaque Morningstar codes (0P…), reports every plan of a fund under one
+        // identical name, and mixes in foreign cross-listings. Drop them outright.
+        .filter(x => !INDIAN_MF_SYMBOL.test(x.symbol))
+        .map(x => ({
+          symbol:   x.symbol,
+          name:     resolveQuoteName(x),
+          type:     mapQuoteType(x.quoteType),
+          exchange: x.exchDisp || x.exchange || '',
+          currency: x.currency || ''
+        }));
+    })().catch(() => []);
 
-    const data = await resp.json();
-    const quotes = (data.quotes || [])
-      .filter(q => q.symbol && q.quoteType !== 'INDEX')
-      .map(q => ({
-        symbol:   q.symbol,
-        name:     q.shortname || q.longname || q.symbol,
-        type:     mapQuoteType(q.quoteType),
-        exchange: q.exchDisp || q.exchange || '',
-        currency: q.currency || ''
-      }));
+    const [quotes, funds] = await Promise.all([
+      yahooSearch,
+      mfService.searchSchemes(q, 8).catch(() => []),
+    ]);
 
-    res.json(quotes);
+    // Funds first when the query looks like a fund; the market list is long and a
+    // user typing "quant small cap fund" wants the scheme, not a namesake equity.
+    res.json(FUND_QUERY.test(q) ? [...funds, ...quotes] : [...quotes, ...funds]);
   } catch (err) {
     console.error('Market search error:', err.message);
     res.status(500).json({ message: 'Market search unavailable' });
@@ -49,6 +72,20 @@ router.get('/price', async (req, res) => {
   try {
     const requestedDate = new Date(date).getTime();
     const today         = todayMs();
+
+    // Indian mutual fund — NAV from AMFI on (or last published before) the date.
+    if (mfService.isMfSymbol(symbol)) {
+      const dayMs = Math.min(midnight(new Date(date)), today);
+      const nav   = await mfService.getNavOn(mfService.schemeCodeOf(symbol), dayMs);
+      if (nav == null) return res.status(404).json({ message: 'NAV unavailable for this date' });
+      return res.json({
+        symbol, date,
+        price:    nav,
+        currency: 'INR',
+        fxRate:   1,
+        priceInr: nav,
+      });
+    }
 
     if (isPurityAsset(assetType)) {
       const metal = await fetchMetalPricePerGram(assetType, purity, midnight(new Date(date)));
