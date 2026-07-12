@@ -1,11 +1,11 @@
 const express = require('express');
-const { body, validationResult } = require('express-validator');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
 
 const { protect }               = require('../middleware/auth');
 const { TRANSACTION_TYPES, ASSET_TRANSACTION_TYPES }     = require('../utils/constants');
 const { midnight, todayMs }     = require('../utils/helpers');
+const { normalizeCategory }     = require('../lib/categoryRules');
 const { getAccountCashBalance } = require('../services/accountBalance');
 const txService                 = require('../services/transactionService');
 const categoryProfile           = require('../services/categoryProfileService');
@@ -19,6 +19,61 @@ function learnCategory(userId, tx, narration) {
 
 const router = express.Router();
 router.use(protect);
+
+/** Validate one row and return the document to insert. Throws a human-readable message. */
+async function prepareTransaction(userId, body) {
+  if (!body.account) throw new Error('Account is required');
+  if (!TRANSACTION_TYPES.includes(body.type)) throw new Error('Invalid transaction type');
+
+  // The time-series stores only run to today.
+  if (body.date && midnight(new Date(body.date)) > todayMs())
+    throw new Error('Transaction date cannot be in the future');
+
+  const account = await Account.findOne({ _id: body.account, user: userId }).lean();
+  if (!account) throw new Error('Account not found');
+
+  const isAsset = ASSET_TRANSACTION_TYPES.includes(body.type);
+  if (isAsset && account.isDebt)
+    throw new Error('Buy/Sell transactions are not available on debt accounts');
+
+  if (!isAsset && (body.amount === undefined || body.amount === null || isNaN(Number(body.amount))))
+    throw new Error('Amount is required');
+
+  if (body.type === 'transfer') {
+    if (!body.toAccount) throw new Error('Transfer requires a destination account');
+    if (String(body.toAccount) === String(body.account)) throw new Error('Cannot transfer to the same account');
+    const toAccount = await Account.findOne({ _id: body.toAccount, user: userId }).lean();
+    if (!toAccount) throw new Error('Destination account not found');
+  }
+
+  const data = { ...body, user: userId };
+  // A bare "Other" is a group, not a classification — file it under Other · Miscellaneous.
+  data.category = normalizeCategory(data.category, data.type);
+  await txService.applyAssetPricing(data);   // native price → INR `amount` at the trade date's FX
+  return data;
+}
+
+/**
+ * Create transactions. One or many — the only difference is the length of the array.
+ * A row that fails validation is reported in `failed` rather than sinking the batch.
+ */
+async function createTransactions(userId, rows) {
+  const prepared = [];
+  const failed   = [];
+  await Promise.all(rows.map(async (t, i) => {
+    try   { prepared.push({ i, data: await prepareTransaction(userId, t), narration: t.narration }); }
+    catch (e) { failed.push({ index: i, message: e.message }); }
+  }));
+
+  prepared.sort((a, b) => a.i - b.i);   // insert in request order
+  const created = await txService.bulkCreate(userId, prepared.map(p => p.data));
+
+  // Learn how this user categorizes (non-blocking).
+  created.forEach((tx, n) => learnCategory(userId, tx, prepared[n].narration));
+
+  return { created, failed };
+}
+
 
 // GET /api/transactions
 router.get('/', async (req, res) => {
@@ -52,76 +107,12 @@ router.get('/', async (req, res) => {
 });
 
 // POST /api/transactions
-router.post('/', [
-  body('account').notEmpty().withMessage('Account is required'),
-  body('type').isIn(TRANSACTION_TYPES).withMessage('Invalid transaction type'),
-  body('amount').custom((value, { req }) => {
-    if (ASSET_TRANSACTION_TYPES.includes(req.body.type)) return true;
-    if (value === undefined || value === null || String(value).trim() === '')
-      throw new Error('Amount is required');
-    if (isNaN(Number(value)))
-      throw new Error('Amount must be a number');
-    return true;
-  }),
-  body('date').optional().isISO8601().withMessage('Invalid date format')
-], async (req, res) => {
+router.post('/', async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    const { created, failed } = await createTransactions(req.user._id, [req.body]);
+    if (!created.length) return res.status(400).json({ message: failed[0].message });
 
-    // Reject future-dated transactions — the time-series stores only run to today.
-    if (req.body.date && midnight(new Date(req.body.date)) > todayMs())
-      return res.status(400).json({ message: 'Transaction date cannot be in the future' });
-
-    const account = await Account.findOne({ _id: req.body.account, user: req.user._id });
-    if (!account) return res.status(404).json({ message: 'Account not found' });
-
-    const { type } = req.body;
-    if (ASSET_TRANSACTION_TYPES.includes(type) && account.isDebt)
-      return res.status(400).json({ message: 'Buy/Sell transactions are not available on debt accounts' });
-
-    if (type === 'transfer') {
-      if (!req.body.toAccount)
-        return res.status(400).json({ message: 'Transfer requires a destination account (toAccount)' });
-      if (req.body.toAccount === req.body.account)
-        return res.status(400).json({ message: 'Cannot transfer to the same account' });
-      const toAccount = await Account.findOne({ _id: req.body.toAccount, user: req.user._id });
-      if (!toAccount) return res.status(404).json({ message: 'Destination account not found' });
-    }
-
-    // Asset Transaction Amount — booked in INR at the trade date's FX rate.
-    let transactionData = { ...req.body, user: req.user._id };
-    try {
-      await txService.applyAssetPricing(transactionData);
-    } catch (e) {
-      return res.status(400).json({ message: e.message });
-    }
-
-    // Transaction Amount Checks
-    // const amount = parseFloat(transactionData.amount);
-    // if (type === 'buy' && transactionData.usesCashBalance) {
-    //   const cashBalance = await getAccountCashBalance(account, req.user);
-    //   if (amount > cashBalance)
-    //     return res.status(400).json({ message: `Insufficient cash balance. Available: ${cashBalance.toFixed(2)}` });
-    // }
-
-    // if (type === 'adjustment' && !account.isDebt) {
-    //   const cashBalance = await getAccountCashBalance(account, req.user);
-    //   if (cashBalance + amount < 0)
-    //     return res.status(400).json({ message: `Adjustment would result in negative cash balance. Current: ${cashBalance.toFixed(2)}` });
-    // }
-
-    const transaction = (await Transaction.create(transactionData));
-
-    // Update stores before responding so the client's refetch sees fresh data.
-    // A store failure is logged but does not undo the committed transaction.
-    try { await txService.onCreate(req.user._id, transaction); } catch (e) { console.error(e); }
-
-    // Learn how this user categorizes (non-blocking; uses the original narration
-    // sent from import when available).
-    learnCategory(req.user._id, transaction, req.body.narration);
-
-    const populated = await Transaction.findById(transaction._id)
+    const populated = await Transaction.findById(created[0]._id)
       .populate('account',   'name type')
       .populate('toAccount', 'name type');
 
@@ -143,6 +134,7 @@ router.put('/:id', async (req, res) => {
     if (!oldTx) return res.status(404).json({ message: 'Transaction not found' });
 
     // Recompute Transaction Amount for Asset Txn (re-books INR at the trade date's FX).
+    req.body.category = normalizeCategory(req.body.category, req.body.type);
     try {
       await txService.applyAssetPricing(req.body);
     } catch (e) {
@@ -184,20 +176,22 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// POST /api/transactions/bulk
-// Insert multiple transactions and rebuild affected stores in one batch pass.
-// Body: { transactions: [ { account, type, amount, date, ... }, ... ] }
+// POST /api/transactions/bulk — the import path. One store pass for the whole batch.
+// Body: { transactions: [ { account, type, amount, date, narration?, ... }, ... ] }
 router.post('/bulk', async (req, res) => {
   try {
     const { transactions } = req.body;
     if (!Array.isArray(transactions) || !transactions.length) {
       return res.status(400).json({ message: 'Transactions array is required' });
     }
-    const created = await txService.bulkCreate(req.user._id, transactions);
-    res.status(201).json({ count: created.length, transactions: created });
+
+    const { created, failed } = await createTransactions(req.user._id, transactions);
+    if (!created.length) return res.status(400).json({ message: failed[0].message, failed });
+
+    res.status(201).json({ count: created.length, transactions: created, failed });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: 'Server error' });
+    res.status(500).json({ message: err.message || 'Server error' });
   }
 });
 

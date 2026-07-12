@@ -4,7 +4,7 @@ import { importAPI } from '../../lib/api';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import TypePicker from '../forms/TypePicker';
 
-const ACCEPT = '.pdf,.csv,.tsv,.txt,.html,.htm,.png,.jpg,.jpeg,.webp';
+const ACCEPT = '.pdf,.xlsx,.xls,.ods,.csv,.tsv,.txt,.html,.htm,.png,.jpg,.jpeg,.webp';
 
 export default function StatementUpload({ accounts, defaultAccountId, onParsed }) {
   const [file, setFile]           = useState(null);
@@ -151,7 +151,7 @@ export default function StatementUpload({ accounts, defaultAccountId, onParsed }
             {dragOver ? 'Drop to upload' : 'Drop a statement, or click to browse'}
           </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginTop: 12 }}>
-            {['PDF', 'CSV', 'UPI HTML', 'Screenshot'].map(f => (
+            {['PDF', 'Excel', 'CSV', 'UPI HTML', 'Screenshot'].map(f => (
               <span key={f} className="badge badge-default">{f}</span>
             ))}
           </div>

@@ -21,6 +21,7 @@ const networthRoutes = require('./routes/networth');
 const marketRoutes = require('./routes/market');
 const categoryRoutes = require('./routes/categories');
 const importRoutes = require('./routes/import');
+const subscriptionRoutes = require('./routes/subscriptions');
 
 const app = express();
 
@@ -35,6 +36,19 @@ mongoose.connection.once('open', async () => {
   } catch (e) {
     console.error('Category seed failed:', e.message);
   }
+
+  // Mutual-fund caches, refreshed once a day: the AMFI scheme list (~37k, so search
+  // runs locally) and the latest NAV of every scheme we actually track (so valuing a
+  // holding needs no network either). Non-blocking — a user request must never wait
+  // on it, and every read falls back to whatever is already cached.
+  const mfService = require('./services/mfService');
+  const refreshMf = () => mfService.refreshDailyCaches()
+    .then(({ schemes, histories }) =>
+      console.log(`MF caches ready — ${schemes} schemes + NAVs indexed, ${histories} histories topped up`))
+    .catch(e => console.error('MF cache refresh failed:', e.message));
+
+  refreshMf();
+  setInterval(refreshMf, 24 * 60 * 60 * 1000).unref();
 });
 
 // Middleware
@@ -46,6 +60,7 @@ app.use(express.json());
 app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
+app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/networth', networthRoutes);
 app.use('/api/market', marketRoutes);

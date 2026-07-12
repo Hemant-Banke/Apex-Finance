@@ -13,7 +13,7 @@ const { DAY_MS } = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder } = require('../utils/tsHelpers');
 const { buildCashImpactMap, directionalAssetImpact } = require('../utils/transactionHelpers');
-const { resolveUnitPrice } = require('../utils/assetPricing');
+const { resolveUnitPrice, accruedPrice } = require('../utils/assetPricing');
 
 // ─── Pure TS builders ─────────────────────────────────────────────────────────
 
@@ -59,9 +59,21 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPr
   // all (extending the store across a weekend) would find no price and fall back to
   // book value — the holding would appear to snap back to cost every Saturday.
   const lastPrice = { ...seedPrices };
-  const bookPrice = {}; // last transaction pricePerUnit — cost basis for accrual / fallback
-  const basisMs   = {}; // day that cost basis was set — accrual runs from here
+  const bookPrice = {}; // last transaction pricePerUnit — book fallback for unquoted assets
+  const basisMs   = {}; // day that book price was set
   const meta      = {}; // { assetType, purity, rate } — drives purity scaling & accrual
+
+  /**
+   * Rate-bearing assets (an EPF balance, an FD) compound, so their basis is a POOL, not
+   * a price: `{ value, basisMs }` where the holding is worth `value × (1+r)^(elapsed)`.
+   * Each contribution accrues what is already there up to its own day, then adds itself.
+   *
+   * A single per-symbol cost basis cannot express this — it is overwritten by each new
+   * contribution, so a rebuild would accrue the WHOLE balance from the latest deposit
+   * and silently drop the years of growth on the earlier ones. (That made a full
+   * rebuild disagree with the incremental path by ₹3.8k on a 4-contribution EPF.)
+   */
+  const ratePool = {};  // { SYM: { value, basisMs } }
 
   // Index transactions by their settlement day for O(1) per-day lookup.
   const txsByDay = {};
@@ -92,6 +104,14 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPr
           basisMs[sym]   = dayMs;
         }
         meta[sym] = { assetType: tx.assetType, purity: tx.purity, rate: tx.rate };
+
+        // Rate asset: accrue the pool to today, then fold this contribution in.
+        if (tx.rate && inrUnitCost != null) {
+          const pool = (ratePool[sym] ??= { value: 0, basisMs: dayMs });
+          pool.value = accruedPrice(pool.value, tx.rate, pool.basisMs, dayMs)
+                     + directionalAssetImpact(tx.type) * Number(tx.units) * inrUnitCost;
+          pool.basisMs = dayMs;
+        }
       }
     }
 
@@ -104,10 +124,16 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPr
       const p = pricesBySymbol[sym]?.[dayMs];
       if (p != null) lastPrice[sym] = Number(p);
 
+      // For a rate asset the basis is its accrued pool, expressed per unit so the
+      // shared `resolveUnitPrice` still does the compounding: qty × (pool/qty)
+      // accrued from the pool's own day is exactly the accrued pool.
+      const pool = ratePool[sym];
+      const usePool = pool && qty;
+
       const resolved = resolveUnitPrice(meta[sym], {
         marketPrice: lastPrice[sym] ?? null,
-        basePrice:   bookPrice[sym] ?? null,
-        basisMs:     basisMs[sym],
+        basePrice:   usePool ? pool.value / qty : (bookPrice[sym] ?? null),
+        basisMs:     usePool ? pool.basisMs : basisMs[sym],
         atMs:        dayMs,
       });
 

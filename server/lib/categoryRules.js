@@ -73,6 +73,21 @@ function autoCategory(narration, type) {
 const MISC_CATEGORY = { expense: 'tp_other_exp/ts_misc_exp', income: 'tp_other_inc/ts_misc_inc' };
 const isMiscCategory = code => code === MISC_CATEGORY.expense || code === MISC_CATEGORY.income;
 
+/** The bare "Other" GROUPS. Landing on one of these is never a real classification. */
+const OTHER_PRIMARY = { expense: 'tp_other_exp', income: 'tp_other_inc' };
+
+/**
+ * A transaction must never be filed under a bare "Other" — that is a group, not a
+ * category, and it reads as though nothing was decided. Anything that lands there is
+ * pushed down to "Other · Miscellaneous", which is what it actually means.
+ *
+ * Applied on every write path (manual, bulk, import), so it cannot be routed around.
+ */
+function normalizeCategory(code, type) {
+  if (!code || (type !== 'expense' && type !== 'income')) return code;
+  return code === OTHER_PRIMARY[type] ? MISC_CATEGORY[type] : code;
+}
+
 // Payment-rail / boilerplate tokens that carry no merchant signal.
 const TOKEN_STOPWORDS = new Set([
   'upi','upiint','imps','neft','rtgs','nwd','ft','nach','ecs','autopay','mandate','ach','inb','mmt','cms',
@@ -96,4 +111,4 @@ function extractMerchantTokens(text) {
   )];
 }
 
-module.exports = { autoCategory, extractMerchantTokens, MISC_CATEGORY, isMiscCategory };
+module.exports = { autoCategory, extractMerchantTokens, MISC_CATEGORY, isMiscCategory, normalizeCategory };

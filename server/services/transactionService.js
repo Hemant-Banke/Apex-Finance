@@ -68,6 +68,16 @@ async function onCreate(userId, tx) {
   await dvService.updateForTxns(userId, [tx]);
 }
 
+/**
+ * Called after transactions have ALREADY been inserted by someone else (a subscription
+ * firing its back-dated occurrences). Same store merge as `bulkCreate`, without the
+ * insert — the rows exist, they just need to reach the stores.
+ */
+async function onCreateMany(userId, txns) {
+  if (!txns?.length) return;
+  await dvService.updateForTxns(userId, txns);
+}
+
 /** Called after a transaction is deleted from the DB. */
 async function onDelete(userId, tx) {
   const account = await Account.findById(tx.account).lean();
@@ -111,6 +121,7 @@ module.exports = {
   applyAssetPricing,
   findTransactions,
   onCreate,
+  onCreateMany,
   onDelete,
   onUpdate,
   bulkCreate,

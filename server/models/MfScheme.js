@@ -13,6 +13,13 @@ const mongoose = require('mongoose');
 const mfSchemeSchema = new mongoose.Schema({
   schemeCode:   { type: String, required: true, unique: true },
   name:         { type: String, required: true },
+  /**
+   * The name normalised for matching: lower-cased, punctuation stripped, and
+   * compound words merged ("small cap" → "smallcap"). Search runs substring regexes
+   * against THIS, so a user typing "bandhan small" still finds "BANDHAN SMALL CAP
+   * FUND" and "quant smallcap" finds "quant Small Cap Fund".
+   */
+  nameNorm:     { type: String, index: true },
   fundHouse:    { type: String },
   category:     { type: String },
   isinGrowth:   { type: String, index: true, sparse: true },

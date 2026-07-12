@@ -57,7 +57,7 @@ function cleanNarration(raw) {
   return s;
 }
 
-function buildTx({ date, narration, amount, type, source, assetSymbol, assetName, assetType, units, pricePerUnit }) {
+function buildTx({ date, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit }) {
   const isAsset = type === 'buy' || type === 'sell';
   const u = units       != null ? Number(units)       : undefined;
   const p = pricePerUnit != null ? Number(pricePerUnit) : undefined;
@@ -73,6 +73,9 @@ function buildTx({ date, narration, amount, type, source, assetSymbol, assetName
     suggestedCategory: isAsset ? null : autoCategory(narration, type),
     notes: '',
     source,
+    // Only set when the statement covers several of the holder's accounts — the
+    // review form then lets the user keep just one account's rows.
+    accountRef: accountRef || undefined,
   };
 
   if (isAsset) {
@@ -105,6 +108,7 @@ function finalizeAiResult(parsed, source) {
       amount:       parseFloat(tx.amount) || 0,
       type:         tx.type || 'expense',
       source,
+      accountRef:   tx.accountRef,
       assetSymbol:  tx.assetSymbol,
       assetName:    tx.assetName,
       assetType:    tx.assetType,
@@ -376,8 +380,17 @@ function parseUPIHtml(html) {
       ? `UPI ${payeeName} ${payeeVpa}`
       : `UPI from ${payerName} ${payerVpa}`;
 
-    transactions.push(buildTx({ date: dateISO, narration, amount, type, source: 'upi' }));
+    // A UPI export is per-APP, not per-account: it covers every bank the user paid
+    // from. `Bank` is the account each transaction actually moved through.
+    transactions.push(buildTx({
+      date: dateISO, narration, amount, type, source: 'upi', accountRef: get('Bank'),
+    }));
   }
+
+  // Only a statement that genuinely spans SEVERAL accounts needs the label — with one
+  // bank, tagging every row with it just clutters the review.
+  if (new Set(transactions.map(t => t.accountRef)).size < 2)
+    transactions.forEach(t => { delete t.accountRef; });
 
   const parseUPIDate = str => {
     if (!str) return null;
@@ -405,7 +418,47 @@ async function parseImage(buffer, mimeType) {
   return finalizeAiResult(parsed, 'image');
 }
 
+// ─── Spreadsheets ─────────────────────────────────────────────────────────
+
+/**
+ * A spreadsheet is just a CSV wearing a jacket — flatten it to delimited text and hand
+ * it to the SAME pipeline (deterministic regex parser first, LLM only if that finds
+ * nothing). Nothing downstream needs to know the file was binary.
+ *
+ * EVERY sheet is emitted, not just the first: banks routinely put the statement on a
+ * second tab behind a cover sheet. Blank rows are dropped so the row-per-line parser
+ * is not fed empty padding, and dates are kept as text (`raw: false`) or Excel's serial
+ * numbers would arrive as `45678`.
+ */
+function parseSpreadsheet(buffer) {
+  const XLSX = require('xlsx');
+
+  const wb = XLSX.read(buffer, { type: 'buffer', cellDates: true, cellText: false });
+  if (!wb.SheetNames?.length) throw new Error('The spreadsheet has no sheets.');
+
+  const text = wb.SheetNames
+    .map(name => XLSX.utils.sheet_to_csv(wb.Sheets[name], {
+      blankrows: false,
+      dateNF: 'yyyy-mm-dd',
+      rawNumbers: false,
+    }))
+    .join('\n')
+    .split('\n')
+    // Drop rows that are nothing but separators (an empty spreadsheet row → ",,,,").
+    .filter(line => line.replace(/[,;\s]/g, '').length > 0)
+    .join('\n');
+
+  if (!text.trim()) throw new Error('The spreadsheet appears to be empty.');
+  return buildResultFromText(text, 'csv');
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────
+
+const SPREADSHEET_MIMES = [
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',   // .xlsx
+  'application/vnd.ms-excel',                                            // .xls
+  'application/vnd.oasis.opendocument.spreadsheet',                      // .ods
+];
 
 async function parseStatement({ buffer, mimetype, originalname, password }) {
   const ext = (originalname || '').split('.').pop().toLowerCase();
@@ -416,13 +469,16 @@ async function parseStatement({ buffer, mimetype, originalname, password }) {
   if (mimetype === 'text/html' || ['html', 'htm'].includes(ext)) {
     return parseUPIHtml(buffer.toString('utf-8'));
   }
+  if (SPREADSHEET_MIMES.includes(mimetype) || ['xlsx', 'xls', 'ods'].includes(ext)) {
+    return parseSpreadsheet(buffer);
+  }
   if (mimetype === 'text/csv' || mimetype === 'text/plain' || ['csv', 'tsv', 'txt'].includes(ext)) {
     return buildResultFromText(buffer.toString('utf-8'), 'csv');
   }
   if (['image/png','image/jpeg','image/webp'].includes(mimetype) || ['png','jpg','jpeg','webp'].includes(ext)) {
     return parseImage(buffer, mimetype || `image/${ext}`);
   }
-  throw new Error(`Unsupported file type: ${mimetype || ext}. Upload a PDF, CSV, HTML, or image file.`);
+  throw new Error(`Unsupported file type: ${mimetype || ext}. Upload a PDF, spreadsheet, CSV, HTML, or image file.`);
 }
 
 module.exports = { parseStatement };

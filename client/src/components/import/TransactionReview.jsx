@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { Check, ChevronLeft, Sparkles, ArrowRight, Pencil, RotateCcw, AlertCircle } from 'lucide-react';
+import { Check, ChevronLeft, Sparkles, ArrowRight, Pencil, Plus, RotateCcw, AlertCircle } from 'lucide-react';
 import { transactionsAPI } from '../../lib/api';
 import { formatCurrency, formatDate } from '../../lib/utils';
+import { useCategoryNames } from '../../lib/categoryNames';
 import CategoryPicker from '../forms/CategoryPicker';
 import DatePicker, { DateRangePicker } from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
@@ -58,10 +59,22 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
   const fullTo   = parsedDates[parsedDates.length - 1] || '';
   const [rangeFrom, setRangeFrom] = useState(fullFrom);
   const [rangeTo,   setRangeTo]   = useState(fullTo);
-  const inRange = r => (!rangeFrom || r.date >= rangeFrom) && (!rangeTo || r.date <= rangeTo);
 
-  const visibleRows  = rows.filter(inRange);
+  // A consolidated statement can list several of the holder's accounts. The parser
+  // labels each row with the account it was printed under; everything imported lands in
+  // the ONE account picked before parsing, so the user narrows the rows down to it.
+  const accountRefs = [...new Set(rows.map(r => r.accountRef).filter(Boolean))];
+  const [accountRef, setAccountRef] = useState(accountRefs[0] || '');
+  const multiAccount = accountRefs.length > 1;
+
+  // A row with no label is unattributed — always show it, whatever the filter.
+  const inScope = r =>
+    (!rangeFrom || r.date >= rangeFrom) && (!rangeTo || r.date <= rangeTo) &&
+    (!multiAccount || !r.accountRef || r.accountRef === accountRef);
+
+  const visibleRows  = rows.filter(inScope);
   const selected     = visibleRows.filter(r => r.selected);
+  const targetAccount = accounts.find(a => a._id === accountId);
 
   // In / Out = value entering or leaving the SYSTEM because of this statement.
   //
@@ -72,13 +85,52 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
   //   sell NOT settled in cash   → out  (the asset left and its proceeds went outside)
   //   buy / sell settled in cash → nothing (cash and asset just swap places INSIDE
   //                                      the system — the net position is unchanged)
+  //   transfer                   → nothing (cash moves between two of the user's own
+  //                                      accounts — it never crosses the boundary)
   const tradeValue = (r) => (Number(r.units) || 0) * (Number(r.pricePerUnit) || 0);
   const externalTrade = (r) => (r.usesCashBalance ? 0 : tradeValue(r));
 
   const totalIncome = selected.reduce((s, r) =>
-    s + (r.type === 'income' ? r.amount : r.type === 'buy' ? externalTrade(r) : 0), 0);
+    s + (r.type === 'income' ? Number(r.amount) || 0 : r.type === 'buy' ? externalTrade(r) : 0), 0);
   const totalExpense = selected.reduce((s, r) =>
-    s + (r.type === 'expense' ? r.amount : r.type === 'sell' ? externalTrade(r) : 0), 0);
+    s + (r.type === 'expense' ? Number(r.amount) || 0 : r.type === 'sell' ? externalTrade(r) : 0), 0);
+
+  // The statement's trades, and whether they settle against this account's cash.
+  // Derived from the rows rather than held separately, so a per-row toggle and this
+  // bulk switch can never disagree about what is actually set.
+  const assetRows         = visibleRows.filter(r => r.type === 'buy' || r.type === 'sell');
+  const assetRowCount     = assetRows.length;
+  const allAssetsSettled  = assetRowCount > 0 && assetRows.every(r => r.usesCashBalance);
+  const someAssetsSettled = assetRows.some(r => r.usesCashBalance);
+
+  const setAllAssetsSettled = (on) => setRows(rs => rs.map(r =>
+    (r.type === 'buy' || r.type === 'sell') ? { ...r, usesCashBalance: !!on } : r));
+
+  /**
+   * Add a cash row by hand. Statements miss things — a cash payment the bank never
+   * printed — and it is far easier to add it here, alongside everything else, than to
+   * import and then go hunting for the transaction form.
+   */
+  function addRow() {
+    setRows(rs => [
+      {
+        id: `manual-${Date.now()}`,
+        selected: true,
+        type: 'expense',
+        amount: '',
+        category: '',
+        date: rangeTo || today,
+        notes: '',
+        description: '',
+        narration: '',
+        toAccount: '',
+        accountRef: accountRef || undefined,   // so the account filter keeps it in view
+        usesCashBalance: false,
+        isManual: true,
+      },
+      ...rs,
+    ]);
+  }
 
   function patch(id, changes) {
     setRows(rs => rs.map(r => r.id === id ? { ...r, ...changes } : r));
@@ -90,13 +142,13 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
     }
   }
 
-  // Select/deselect only the currently-visible (in-range) rows.
+  // Select/deselect only the currently-visible rows.
   function toggleAll(val) {
-    setRows(rs => rs.map(r => inRange(r) ? { ...r, selected: val } : r));
+    setRows(rs => rs.map(r => inScope(r) ? { ...r, selected: val } : r));
   }
 
   async function handleImport() {
-    const toImport = rows.filter(r => r.selected && inRange(r));
+    const toImport = rows.filter(r => r.selected && inScope(r));
     if (!toImport.length) { setError('Select at least one transaction'); return; }
 
     // Validate transfers have destination
@@ -114,52 +166,64 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
       return;
     }
 
-    setSubmitting(true);
-    setError('');
-    let count = 0;
-    const errors = [];
-
-    for (const row of toImport) {
-      try {
-        const payload = {
-          account: accountId,
-          type:    row.type,
-          date:    row.date,
-          notes:   row.notes || undefined,
-        };
-        if (row.type === 'buy' || row.type === 'sell') {
-          payload.units        = Number(row.units);
-          payload.pricePerUnit = Number(row.pricePerUnit);
-          payload.assetSymbol  = row.assetSymbol;
-          payload.assetName    = row.assetName;
-          payload.assetType    = row.assetType;
-          payload.usesCashBalance = !!row.usesCashBalance;
-          // A foreign-quoted asset's price is NATIVE — without this the server
-          // would book a USD figure as rupees.
-          if (row.currency && row.currency !== 'INR') payload.currency = row.currency;
-        } else {
-          payload.amount   = row.amount;
-          payload.category = row.category || undefined;
-          // Original bank narration — used server-side to learn this user's
-          // categorization habits (not persisted on the transaction).
-          payload.narration = row.narration || row.description || undefined;
-          if (row.type === 'transfer') payload.toAccount = row.toAccount;
-        }
-        await transactionsAPI.create(payload);
-        count++;
-      } catch (err) {
-        errors.push(err.response?.data?.message || `Row ${count + 1} failed`);
-      }
+    // A hand-added row starts blank, so it can reach here with no amount.
+    const badAmounts = toImport.filter(r =>
+      r.type !== 'buy' && r.type !== 'sell' && !(Number(r.amount) > 0));
+    if (badAmounts.length) {
+      setError(`${badAmounts.length} transaction(s) need an amount.`);
+      return;
     }
 
-    setSubmitting(false);
-    setImportedCount(count);
+    setSubmitting(true);
+    setError('');
 
-    if (errors.length) {
-      setError(`${count} imported, ${errors.length} failed: ${errors[0]}`);
-    } else {
-      setDone(true);
-      setTimeout(() => onDone?.(), 1800);
+    const payloads = toImport.map(row => {
+      const payload = {
+        account: accountId,
+        type:    row.type,
+        date:    row.date,
+        notes:   row.notes || undefined,
+      };
+      if (row.type === 'buy' || row.type === 'sell') {
+        payload.units        = Number(row.units);
+        payload.pricePerUnit = Number(row.pricePerUnit);
+        payload.assetSymbol  = row.assetSymbol;
+        payload.assetName    = row.assetName;
+        payload.assetType    = row.assetType;
+        payload.usesCashBalance = !!row.usesCashBalance;
+        // A foreign-quoted asset's price is NATIVE — without this the server
+        // would book a USD figure as rupees.
+        if (row.currency && row.currency !== 'INR') payload.currency = row.currency;
+      } else {
+        payload.amount   = Number(row.amount);
+        payload.category = row.category || undefined;
+        // Original bank narration — used server-side to learn this user's
+        // categorization habits (not persisted on the transaction).
+        payload.narration = row.narration || row.description || undefined;
+        if (row.type === 'transfer') payload.toAccount = row.toAccount;
+      }
+      return payload;
+    });
+
+    // ONE request. Sending these one at a time made the server re-price every symbol
+    // and re-aggregate every store per row — an N-row import cost N full store passes.
+    try {
+      const { data } = await transactionsAPI.bulkCreate(payloads);
+      const count  = data.count ?? 0;
+      const failed = data.failed || [];
+
+      setImportedCount(count);
+      if (failed.length) {
+        setError(`${count} imported, ${failed.length} failed: ${failed[0].message}`);
+      } else {
+        setDone(true);
+        setTimeout(() => onDone?.(), 1800);
+      }
+    } catch (err) {
+      setImportedCount(0);
+      setError(err.response?.data?.message || 'Import failed');
+    } finally {
+      setSubmitting(false);
     }
   }
 
@@ -230,6 +294,27 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
               </button>
             )}
           </div>
+
+          {/* A consolidated statement lists several accounts, but the import lands in the
+              one picked before parsing — so narrow the rows down to that account's. */}
+          {multiAccount && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 8 }}>
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
+                Covers {accountRefs.length} accounts — import
+              </span>
+              <div style={{ minWidth: 150, maxWidth: 220 }}>
+                <TypePicker
+                  options={accountRefs.map(ref => ({ value: ref, label: ref }))}
+                  value={accountRef}
+                  onChange={setAccountRef}
+                  searchable={accountRefs.length > 6}
+                />
+              </div>
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>
+                into {targetAccount?.name || 'this account'}
+              </span>
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', gap: 20, textAlign: 'right', flexShrink: 0 }}>
           <div>
@@ -252,9 +337,35 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
           indeterminate={!allSelected && !noneSelected}
           onChange={v => toggleAll(v)}
         />
-        <span className="text-xs" style={{ color: 'var(--color-text-muted)', flex: 1 }}>
+        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
           {selected.length} of {visibleRows.length} selected{isFiltered ? ` · ${rows.length - visibleRows.length} outside range` : ''}
         </span>
+
+        {/* Bulk switch for the statement's trades. A broker statement's buys are
+            normally funded from the very account being imported, so settling them all
+            against cash is one click rather than one per row. Applies to buys AND
+            sells: a buy deducts its cost, a sell adds its proceeds. */}
+        {assetRowCount > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+            <Checkbox
+              tone="plain"
+              checked={allAssetsSettled}
+              indeterminate={someAssetsSettled && !allAssetsSettled}
+              onChange={v => setAllAssetsSettled(v)}
+            />
+            <span
+              onClick={() => setAllAssetsSettled(!allAssetsSettled)}
+              className="text-xs"
+              style={{ color: 'var(--color-text-secondary)', cursor: 'pointer' }}
+              title="Buys deduct their cost from this account’s cash; sells add their proceeds."
+            >
+              Settle {assetRowCount} asset {assetRowCount === 1 ? 'trade' : 'trades'} with cash
+            </span>
+          </div>
+        )}
+
+        <span style={{ flex: 1 }} />
+
         {aiParsed && (
           <span
             title="Parsed by AI — check dates, amounts and categories before importing."
@@ -270,8 +381,15 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
             <Sparkles size={10} /> AI-generated
           </span>
         )}
+        {/* A statement misses things — a cash payment, a transfer the bank never
+            printed. Adding it here beats importing and then hunting for the form. */}
+        <button type="button" onClick={addRow}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+          <Plus size={12} /> Add transaction
+        </button>
+
         <button type="button" onClick={onBack}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4 }}>
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
           <ChevronLeft size={12} /> Upload different file
         </button>
       </div>
@@ -329,6 +447,8 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
 // ─── Individual row ────────────────────────────────────────────────────────
 
 function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
+  // A category CODE is an internal handle — resolve it to its real name.
+  const { label: categoryLabel } = useCategoryNames();
   const [expanded, setExpanded] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);   // Find-an-asset dialog
 
@@ -351,6 +471,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
   const needsReview =
     (row.type === 'transfer' && !row.toAccount) ? 'Needs account'
     : (isAsset && !(Number(row.units) > 0 && Number(row.pricePerUnit) > 0)) ? 'Needs price'
+    : (!isAsset && !(Number(row.amount) > 0)) ? 'Needs amount'
     : row.symbolUnresolved ? 'Unknown ticker'
     : row.symbolAmbiguous ? 'Check ticker'
     : null;
@@ -389,7 +510,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
             {isAsset && row.assetSymbol && <> · <span className="figure">{row.assetSymbol}</span></>}
             {isAsset
               ? ` · ${row.units || 0} units${row.pricePerUnit ? ` @ ${formatCurrency(row.pricePerUnit)}` : ''}`
-              : (row.category ? ` · ${formatCategoryDisplay(row.category)}` : '')}
+              : (row.category ? ` · ${categoryLabel(row.category)}` : '')}
           </p>
         </div>
 
@@ -409,13 +530,14 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
       {/* Expanded editor */}
       {expanded && (
         <div style={{ padding: '4px 16px 16px 22px', display: 'flex', flexDirection: 'column', gap: 12, background: 'var(--color-bg-input)', borderTop: '1px solid var(--color-border-subtle)' }}>
-          {/* Cash — type + date */}
+          {/* Cash — type, date and amount on one line. The amount is editable for every
+              row, not just hand-added ones: a statement's figure can be misread. */}
           {!isAsset && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, paddingTop: 12 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr 1fr', gap: 12, paddingTop: 12 }}>
               <div className="field">
                 <label className="label">Type</label>
                 {/* The pill row fills the field's remaining height, so it lines up
-                    with the DatePicker's input beside it whatever that measures. */}
+                    with the inputs beside it whatever they measure. */}
                 <div style={{ display: 'flex', gap: 4, flex: 1 }}>
                   {['income','expense','transfer'].map(t => {
                     const c = TYPE_PILL_COLOR[t];
@@ -439,6 +561,12 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
               <div className="field">
                 <label className="label">Date</label>
                 <DatePicker value={row.date} onChange={v => onChange({ date: v })} max={TODAY} />
+              </div>
+              <div className="field">
+                <label className="label">Amount</label>
+                <input type="number" step="any" min="0" value={row.amount ?? ''}
+                  onChange={e => onChange({ amount: e.target.value })}
+                  className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
               </div>
             </div>
           )}
@@ -529,7 +657,9 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
             </>
           )}
 
-          {/* Category / destination + Note — one row */}
+          {/* Category / destination + Note — one row. A transfer moves cash between two
+              of the user's own accounts, so it takes a destination instead of a
+              category (it is neither income nor expense). */}
           {!isAsset && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
               {row.type === 'transfer' ? (
@@ -596,14 +726,6 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
 }
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
-
-function formatCategoryDisplay(code) {
-  if (!code) return '';
-  return code.split('/').map(part => {
-    const clean = part.replace(/^t[sp]u?_/, '');
-    return clean.charAt(0).toUpperCase() + clean.slice(1).replace(/_/g, ' ');
-  }).join(' · ');
-}
 
 function Checkbox({ checked, indeterminate, onChange, tone = 'accent' }) {
   // 'accent' — the master select-all: gilt, filled when checked (the primary

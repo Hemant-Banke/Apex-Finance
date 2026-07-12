@@ -7,7 +7,7 @@ const llmService         = require('../lib/llmService');
 const categoryProfile    = require('../services/categoryProfileService');
 const { getUserCategoryTaxonomy } = require('../services/categoryService');
 const { resolveStatementAssets }  = require('../services/symbolResolver');
-const { MISC_CATEGORY }  = require('../lib/categoryRules');
+const { MISC_CATEGORY, normalizeCategory }  = require('../lib/categoryRules');
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dayName = d => { const x = new Date(d); return isNaN(x) ? '' : DOW[x.getUTCDay()]; };
@@ -21,16 +21,19 @@ const upload = multer({
       'text/html',
       'text/csv',
       'text/plain',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',  // .xlsx
+      'application/vnd.ms-excel',                                           // .xls
+      'application/vnd.oasis.opendocument.spreadsheet',                     // .ods
       'image/png',
       'image/jpeg',
       'image/jpg',
       'image/webp',
     ];
     if (allowed.includes(file.mimetype) ||
-        /\.(pdf|html?|csv|tsv|txt|png|jpe?g|webp)$/i.test(file.originalname)) {
+        /\.(pdf|html?|csv|tsv|txt|xlsx?|ods|png|jpe?g|webp)$/i.test(file.originalname)) {
       cb(null, true);
     } else {
-      cb(new Error('Unsupported file type. Please upload a PDF, CSV, HTML, or image file.'));
+      cb(new Error('Unsupported file type. Please upload a PDF, spreadsheet, CSV, HTML, or image file.'));
     }
   },
 });
@@ -83,9 +86,12 @@ async function applySmartCategories(userId, result) {
     } catch (err) { console.error('LLM categorization failed:', err.message); }
   }
 
-  // Layer 4 — Other → Miscellaneous fallback (works with or without an API key).
+  // Layer 4 — Other → Miscellaneous fallback (works with or without an API key), and
+  // push anything that merely landed on the bare "Other" group down to Miscellaneous.
   for (const t of cashRows) {
-    if (!t.suggestedCategory) t.suggestedCategory = MISC_CATEGORY[t.type];
+    t.suggestedCategory = t.suggestedCategory
+      ? normalizeCategory(t.suggestedCategory, t.type)
+      : MISC_CATEGORY[t.type];
   }
 }
 

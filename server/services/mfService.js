@@ -12,27 +12,34 @@
  * here on sight and can never send one to Yahoo by accident.
  *
  * Endpoints used:
- *   /mf/search?q=…   → every plan of a fund, each with its own scheme code
+ *   /mf              → the ENTIRE scheme list (~37k, 5.4 MB), mirrored into Mongo once
+ *                      a day. SEARCH RUNS AGAINST THAT MIRROR, never over the network.
  *   /mf/{code}       → that scheme's ENTIRE NAV history (~128 KB), cached whole
  *   /mf/{code}/latest→ today's NAV
  */
 
-// mfapi advertises an AAAA record that black-holes from some networks; undici tries
-// IPv6 first and stalls for seconds where curl falls back instantly. index.js sets
-// this process-wide before anything opens a socket; repeated here so scripts and
-// tests that require this service directly get the same behaviour.
+// mfapi's first connection from a long-lived process can stall for ~10s. Prefer IPv4
+// and enable Happy-Eyeballs fallback. index.js sets this process-wide before anything
+// opens a socket; repeated here so scripts requiring this service directly match.
+// (It is a mitigation, not the fix — the fix is that search never touches the network.)
 require('dns').setDefaultResultOrder('ipv4first');
 require('net').setDefaultAutoSelectFamily(true);
 
 const MfScheme = require('../models/MfScheme');
 const MfNav    = require('../models/MfNav');
 const { DAY_MS } = require('../utils/constants');
-const { midnight_from_ms, todayMs } = require('../utils/helpers');
+const { midnight, midnight_from_ms, todayMs } = require('../utils/helpers');
 
 const BASE = 'https://api.mfapi.in';
 
 const SYMBOL_PREFIX = 'AMFI:';
 const HISTORY_TTL_MS = 12 * 60 * 60 * 1000;  // NAVs are published once a day
+/**
+ * How old a cached latest-NAV may be before we go and refresh it. Funds publish on
+ * business days only, so a NAV from last Friday is perfectly current on a Sunday —
+ * hence days, not hours.
+ */
+const NAV_STALE_MS   = 4 * DAY_MS;
 const NAV_TOLERANCE  = 0.02;                 // a statement NAV this close is the same plan
 
 // ─── Symbols ─────────────────────────────────────────────────────────────────
@@ -77,7 +84,6 @@ const PLAN_WORDS = new Set([
  */
 const COMPOUNDS = /\b(mid|multi|small|large|flexi|micro|blue)\s+(cap|chip)\b/g;
 const collapse  = (s) => (s || '').toLowerCase().replace(COMPOUNDS, '$1$2');
-const expand    = (s) => (s || '').toLowerCase().replace(/\b(mid|multi|small|large|flexi|micro)(cap)\b/g, '$1 $2');
 
 const tokens = (s) => collapse(s).replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter(Boolean);
 
@@ -114,13 +120,19 @@ function _editDistance(a, b) {
 }
 
 /**
- * Token equality that survives OCR noise. Statement images are read by a vision
- * model, which misreads characters: "Motilal Oswal" came back as "Motilal Oswai".
- * An exact-match resolver rejects that outright, so a one-character slip in a
- * long-enough word is forgiven.
+ * Does a query token match a candidate's token? Directional, and forgiving in two
+ * specific ways:
+ *
+ *   PREFIX — the user is still typing. "small" must match "smallcap", or a search
+ *            for "bandhan small" ranks the Bandhan Small Cap fund below noise.
+ *   FUZZY  — a vision model misreads statement names ("Motilal Oswal" → "Oswai").
+ *            One character's slip in a long word is forgiven.
  */
-const _tokenEq = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && _editDistance(a, b) <= 1);
-const _hasToken = (list, t) => list.some(x => _tokenEq(x, t));
+function _matches(qTok, cTok) {
+  if (qTok === cTok) return true;
+  if (qTok.length >= 3 && cTok.startsWith(qTok)) return true;
+  return qTok.length >= 5 && cTok.length >= 5 && _editDistance(qTok, cTok) <= 1;
+}
 
 /**
  * Score a candidate scheme name against the wanted fund name.
@@ -133,101 +145,150 @@ const _hasToken = (list, t) => list.some(x => _tokenEq(x, t));
 function _score(qTokens, name) {
   const nt = idTokens(name);
   if (!qTokens.length) return 0;
-  const hit   = qTokens.filter(t => _hasToken(nt, t)).length;
-  const extra = nt.filter(t => !_hasToken(qTokens, t)).length;
+  const hit   = qTokens.filter(t => nt.some(c => _matches(t, c))).length;
+  const extra = nt.filter(c => !qTokens.some(t => _matches(t, c))).length;
   return hit / qTokens.length - 0.25 * extra;
 }
 
-/**
- * Search Indian mutual funds. Every plan comes back as its own scheme with its own
- * full name, so the user picks Direct vs Regular and Growth vs IDCW explicitly —
- * there is nothing left to disambiguate.
- *
- * mfapi matches literally, so we try spelling variants and pool the hits.
- */
 /** Ticker-shaped queries ("AAPL", "RELIANCE.NS", "BTC-USD") are never fund names. */
 const TICKER_QUERY = /^[A-Za-z0-9.\-=^]{1,12}$/;
 const looksLikeTicker = (q) => TICKER_QUERY.test(q) && (q === q.toUpperCase() || q.includes('.'));
 
-/** Short-lived query cache — a type-ahead repeats the same prefixes constantly. */
-const _searchCache = new Map();
-const SEARCH_TTL_MS = 5 * 60 * 1000;
+const _escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// ─── The local scheme index ──────────────────────────────────────────────────
+
+const INDEX_TTL_MS   = 24 * 60 * 60 * 1000;   // the scheme list changes slowly
+const INDEX_MIN_SIZE = 10000;                 // AMFI publishes ~37k schemes
+let _indexPromise = null;
+
+/**
+ * Mirror EVERY AMFI scheme — name, ISINs, and its latest NAV — into Mongo in a SINGLE
+ * call (`/mf/latest`, ~11 MB, ~37k schemes).
+ *
+ * This one request is the whole cache. Afterwards:
+ *   - search runs against the local index, never the network;
+ *   - any NAV on or after the scheme's `navDate` is served straight from `mfschemes`,
+ *     so valuing a holding, pricing today in the asset form, and NAV-matching an
+ *     imported statement all cost zero requests;
+ *   - only a genuinely HISTORIC date reaches for `/mf/{code}` (cached thereafter).
+ *
+ * It is what makes search work at all, not just what makes it fast: querying mfapi per
+ * keystroke was unreliable — its first connection from a long-lived process stalls for
+ * ~10s, blowing the request budget and returning ZERO funds, so "bandhan" found nothing
+ * while "bandhan small cap" found everything, seemingly at random.
+ */
+async function ensureSchemeIndex({ force = false } = {}) {
+  if (!force) {
+    const count = await MfScheme.estimatedDocumentCount();
+    if (count >= INDEX_MIN_SIZE) {
+      const newest = await MfScheme.findOne().sort({ updatedAt: -1 }).select('updatedAt').lean();
+      const age = newest ? Date.now() - new Date(newest.updatedAt).getTime() : Infinity;
+      if (age < INDEX_TTL_MS) return count;
+    }
+  }
+  if (_indexPromise) return _indexPromise;   // collapse concurrent builds
+
+  _indexPromise = (async () => {
+    const list = await _json('/mf/latest', 90000);
+    if (!Array.isArray(list) || !list.length) throw new Error('mfapi returned no schemes');
+
+    const ops = [];
+    for (const s of list) {
+      if (!s.schemeCode || !s.schemeName) continue;
+      const nav = parseFloat(s.nav);
+      const day = parseMfDate(s.date);
+      ops.push({
+        updateOne: {
+          filter: { schemeCode: String(s.schemeCode) },
+          update: { $set: {
+            name:         s.schemeName,
+            nameNorm:     normalizeName(s.schemeName),
+            fundHouse:    s.fundHouse || undefined,
+            category:     s.schemeCategory || undefined,
+            isinGrowth:   s.isinGrowth || undefined,
+            isinDivReinv: s.isinDivReinvestment || undefined,
+            ...(Number.isFinite(nav) && day != null
+              ? { nav, navDate: new Date(day) }
+              : {}),
+          } },
+          upsert: true,
+        },
+      });
+    }
+
+    for (let i = 0; i < ops.length; i += 5000) {
+      await MfScheme.bulkWrite(ops.slice(i, i + 5000), { ordered: false });
+    }
+    return ops.length;
+  })().finally(() => { _indexPromise = null; });
+
+  return _indexPromise;
+}
+
+/** Name → the form search matches against (see MfScheme.nameNorm). */
+const normalizeName = (s) => collapse(s).replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * Candidate schemes whose name contains every identifying token of the query.
+ *
+ * Substring matching against `nameNorm` is what makes partial typing work: "small"
+ * hits "smallcap", and the compound collapse means "small cap" and "smallcap" are
+ * the same string on both sides.
+ */
+async function _findCandidates(qTokens, cap = 200) {
+  if (!qTokens.length) return [];
+
+  const and = qTokens.map(t => ({ nameNorm: { $regex: _escapeRe(t) } }));
+  let docs = await MfScheme.find({ $and: and }).limit(cap).lean();
+  if (docs.length) return docs;
+
+  // Nothing matched every token — one of them is probably OCR damage ("Motilal
+  // Oswai"). Drop each in turn and pool what the rest find; the fuzzy scorer below
+  // then rejects anything that is not really the fund. Local, so this is cheap.
+  if (qTokens.length < 2) return [];
+
+  const seen = new Map();
+  for (let i = 0; i < qTokens.length; i++) {
+    const subset = qTokens.filter((_, j) => j !== i);
+    if (!subset.length) continue;
+    const rows = await MfScheme.find({
+      $and: subset.map(t => ({ nameNorm: { $regex: _escapeRe(t) } })),
+    }).limit(cap).lean();
+    for (const r of rows) if (!seen.has(r.schemeCode)) seen.set(r.schemeCode, r);
+  }
+  return [...seen.values()];
+}
+
+const _toQuote = (d) => ({
+  symbol:   toMfSymbol(d.schemeCode),
+  name:     d.name,
+  type:     'mutual_fund',
+  exchange: 'AMFI',
+  currency: 'INR',
+});
+
+/**
+ * Search Indian mutual funds. Every plan is its own fully-named scheme, so the user
+ * picks Direct vs Regular and Growth vs IDCW explicitly — nothing is left ambiguous.
+ * Runs against the local index: no network, no timeouts, no dropped results.
+ */
 async function searchSchemes(query, limit = 10) {
   const q = (query || '').trim();
   if (q.length < 3) return [];
-  // A ticker cannot be an AMFI scheme — don't spend a call finding that out.
-  if (looksLikeTicker(q)) return [];
+  if (looksLikeTicker(q)) return [];   // a ticker is never an AMFI scheme
 
-  const cached = _searchCache.get(q.toLowerCase());
-  if (cached && Date.now() - cached.at < SEARCH_TTL_MS) return cached.results.slice(0, limit);
-
-  // Type-ahead: a slow upstream must degrade, not hang. The fallback stages run one
-  // after another, so a per-call timeout is not enough — three slow stages would
-  // stack. Budget the WHOLE search instead: stages stop once it is spent, and we
-  // rank whatever candidates we already have.
-  const deadline  = Date.now() + 4000;
-  const remaining = () => Math.max(500, deadline - Date.now());
-  const spent     = () => Date.now() >= deadline;
-
-  const qIds = idTokens(q);
-  const core = qIds.join(' ');
-  const primary = [...new Set([q, collapse(q), expand(q), core, expand(core)])]
-    .filter(v => v.length >= 3);
-
-  const pooled = new Map();
-
-  const runVariants = async (variants) => {
-    if (spent()) return;
-    // In PARALLEL: a ladder of spelling variants walked serially costs a round-trip
-    // each, and a mangled name walks the whole ladder — that measured 15s for one
-    // statement. Latency is now one round-trip per stage, not per variant.
-    const results = await Promise.all(variants.map(v =>
-      _json(`/mf/search?q=${encodeURIComponent(v)}`, remaining()).catch(() => [])));
-    for (const hits of results) {
-      for (const h of (Array.isArray(hits) ? hits : [])) {
-        if (!pooled.has(h.schemeCode)) pooled.set(h.schemeCode, h);
-      }
-    }
-  };
-
-  // Stage 1: the name as written. Almost always enough.
-  await runVariants(primary.slice(0, 1));
-
-  // Stage 2: alternate spellings — only when the first came back thin ("Mid Cap"
-  // finding only the Large & Mid Cap fund, with the real "Midcap" one still unseen).
-  if (pooled.size < 8 && primary.length > 1) await runVariants(primary.slice(1));
-
-  // Stage 3: mfapi matches literally, so ONE misread character ("Motilal Oswai")
-  // returns nothing at all — not even a candidate to score fuzzily against. Only
-  // then, drop each token in turn so the remaining good ones can still find the fund.
-  // Both spellings go out, since the literal index wants "Multi Cap", not "Multicap".
-  if (!pooled.size && qIds.length >= 3) {
-    const dropped = [];
-    for (let i = 0; i < qIds.length; i++) {
-      const without = qIds.filter((_, j) => j !== i).join(' ');
-      dropped.push(expand(without), without);
-    }
-    await runVariants([...new Set(dropped)].filter(v => v.length >= 3));
-  }
-
-  if (!pooled.size) return [];
+  await ensureSchemeIndex();
 
   const qTokens = idTokens(q);
+  const docs    = await _findCandidates(qTokens);
+  if (!docs.length) return [];
 
-  const results = [...pooled.values()]
-    .map(h => ({ h, score: _score(qTokens, h.schemeName) }))
+  return docs
+    .map(d => ({ d, score: _score(qTokens, d.name) }))
     .sort((a, b) => b.score - a.score)
-    .map(({ h }) => ({
-      symbol:   toMfSymbol(h.schemeCode),
-      name:     h.schemeName,
-      type:     'mutual_fund',
-      exchange: 'AMFI',
-      currency: 'INR',
-    }));
-
-  _searchCache.set(q.toLowerCase(), { at: Date.now(), results });
-  return results.slice(0, limit);
+    .slice(0, limit)
+    .map(({ d }) => _toQuote(d));
 }
 
 // ─── NAV history ─────────────────────────────────────────────────────────────
@@ -305,19 +366,17 @@ async function getNavHistory(schemeCode, fromMs, toMs) {
 /**
  * NAV on a day, or the last one published before it (funds skip weekends/holidays).
  *
- * Asking for today — which is what the asset form does by default — is served by the
- * tiny /latest endpoint. Only a genuinely historic date pays for the full history
- * download, and then only once per scheme.
+ * **Anything on or after the scheme's published `navDate` is served from `mfschemes`
+ * with no network at all** — that covers the common cases (today's valuation, the
+ * asset form's default date), which is why the daily refresh keeps that field warm.
+ * Only a genuinely historic date reaches for the history, and that is cached too.
  */
 async function getNavOn(schemeCode, dayMs) {
   const day = midnight_from_ms(dayMs);
 
-  if (day >= midnight_from_ms(todayMs())) {
-    try {
-      const d   = await _json(`/mf/${schemeCode}/latest`, 10000);
-      const nav = parseFloat(d?.data?.[0]?.nav);
-      if (Number.isFinite(nav)) return nav;
-    } catch { /* fall through to the history */ }
+  const scheme = await MfScheme.findOne({ schemeCode }).select('nav navDate').lean();
+  if (scheme?.nav != null && scheme.navDate && day >= midnight(scheme.navDate)) {
+    return scheme.nav;
   }
 
   const navs = await _loadHistory(schemeCode);
@@ -325,21 +384,109 @@ async function getNavOn(schemeCode, dayMs) {
   return days.length ? navs[days[days.length - 1]] : null;
 }
 
-/** Latest published NAV per scheme → { [schemeCode]: nav }. */
+/**
+ * Latest published NAV per scheme → { [schemeCode]: nav }.
+ *
+ * Read from `mfschemes`. A scheme whose NAV is missing or stale is refreshed on the
+ * spot (and folded into its cached history), so a fund used for the first time works
+ * immediately rather than waiting for tomorrow's daily pass.
+ */
 async function getLatestNavs(schemeCodes = []) {
-  const out = {};
-  await Promise.all([...new Set(schemeCodes)].map(async (code) => {
-    try {
-      const d   = await _json(`/mf/${code}/latest`, 10000);
-      const nav = parseFloat(d?.data?.[0]?.nav);
-      if (Number.isFinite(nav)) { out[code] = nav; return; }
-    } catch { /* fall through to the cached series */ }
+  const codes = [...new Set(schemeCodes)].filter(Boolean);
+  if (!codes.length) return {};
 
-    const navs = await _loadHistory(code, { allowStale: true });
-    const days = Object.keys(navs).map(Number).sort((a, b) => a - b);
-    if (days.length) out[code] = navs[days[days.length - 1]];
-  }));
+  const docs   = await MfScheme.find({ schemeCode: { $in: codes } }).select('schemeCode nav navDate').lean();
+  const byCode = Object.fromEntries(docs.map(d => [d.schemeCode, d]));
+  const cutoff = todayMs() - NAV_STALE_MS;
+
+  const out = {};
+  const stale = [];
+  for (const code of codes) {
+    const d = byCode[code];
+    if (d?.nav != null && d.navDate && midnight(d.navDate) >= cutoff) out[code] = d.nav;
+    else stale.push(code);
+  }
+
+  if (stale.length) {
+    const fresh = await Promise.all(stale.map(code => refreshLatestNav(code)));
+    stale.forEach((code, i) => { if (fresh[i] != null) out[code] = fresh[i]; });
+  }
   return out;
+}
+
+/**
+ * Pull one scheme's newest NAV and write it to BOTH caches: `mfschemes` (so it can be
+ * served without a network hop) and its cached history (so the series stays current
+ * without re-downloading years of it).
+ *
+ * @returns {Promise<number|null>} the NAV, or null if it could not be fetched.
+ */
+async function refreshLatestNav(schemeCode) {
+  let nav = null;
+  let day = null;
+  try {
+    const d   = await _json(`/mf/${schemeCode}/latest`, 10000);
+    const row = d?.data?.[0];
+    nav = parseFloat(row?.nav);
+    day = parseMfDate(row?.date);
+  } catch { /* fall through */ }
+
+  if (!Number.isFinite(nav) || day == null) {
+    // Network trouble — serve whatever the cached history already knows.
+    const navs = await _loadHistory(schemeCode, { allowStale: true });
+    const days = Object.keys(navs).map(Number).sort((a, b) => a - b);
+    return days.length ? navs[days[days.length - 1]] : null;
+  }
+
+  await MfScheme.updateOne(
+    { schemeCode },
+    { $set: { nav, navDate: new Date(day) } },
+    { upsert: true },
+  );
+  // Extend the cached history by the one new day, rather than refetching the series.
+  await MfNav.updateOne(
+    { schemeCode, navs: { $exists: true } },
+    { $set: { [`navs.${day}`]: nav, latestDay: day } },
+  );
+
+  return nav;
+}
+
+// ─── Daily refresh ───────────────────────────────────────────────────────────
+
+/**
+ * The once-a-day pass. ONE network call: `/mf/latest` re-mirrors every scheme AND its
+ * newest NAV.
+ *
+ * The histories we hold (only for funds someone actually owns) are then topped up
+ * from that same payload — a day appended locally, rather than re-downloading years
+ * of a series to learn one number. History therefore stays ad-hoc: pulled in full the
+ * first time a scheme is used, and kept current from here on.
+ */
+async function refreshDailyCaches() {
+  const schemes = await ensureSchemeIndex({ force: true });
+
+  const tracked = await MfNav.find().select('schemeCode').lean();
+  if (!tracked.length) return { schemes, histories: 0 };
+
+  const codes  = tracked.map(t => t.schemeCode);
+  const latest = await MfScheme.find({ schemeCode: { $in: codes } })
+    .select('schemeCode nav navDate').lean();
+
+  const ops = [];
+  for (const s of latest) {
+    if (s.nav == null || !s.navDate) continue;
+    const day = midnight(s.navDate);
+    ops.push({
+      updateOne: {
+        filter: { schemeCode: s.schemeCode },
+        update: { $set: { [`navs.${day}`]: s.nav, latestDay: day } },
+      },
+    });
+  }
+  if (ops.length) await MfNav.bulkWrite(ops, { ordered: false });
+
+  return { schemes, histories: ops.length };
 }
 
 /** Cached scheme metadata → { [schemeCode]: doc }. Fetches any we have not seen. */
@@ -427,6 +574,9 @@ async function resolveScheme({ name, isin, nav, dateMs }) {
 
 module.exports = {
   SYMBOL_PREFIX,
+  ensureSchemeIndex,
+  refreshDailyCaches,
+  refreshLatestNav,
   isMfSymbol,
   toMfSymbol,
   schemeCodeOf,

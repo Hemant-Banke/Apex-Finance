@@ -397,10 +397,46 @@ async function fetchQuoteMeta(symbols = []) {
   return out;
 }
 
+/**
+ * The price of one asset on one day, in its NATIVE currency — what a recurring
+ * asset transaction (a SIP) executed at on its own date.
+ *
+ * Native, not INR, because that is what a transaction's `pricePerUnit` stores;
+ * `applyAssetPricing` converts to the INR `amount` from here.
+ *
+ * @returns {Promise<{price: number, currency: string}|null>}
+ */
+async function fetchPriceOnDate({ assetSymbol, assetType, purity }, dateMs) {
+  // Indian mutual fund → the day's NAV (INR).
+  if (mfService.isMfSymbol(assetSymbol)) {
+    const nav = await mfService.getNavOn(mfService.schemeCodeOf(assetSymbol), dateMs);
+    return nav == null ? null : { price: nav, currency: 'INR' };
+  }
+
+  // Physical metal → INR per gram at this purity.
+  if (isPurityAsset(assetType)) {
+    const metal = await fetchMetalPricePerGram(assetType, purity, dateMs);
+    return metal ? { price: metal.price, currency: 'INR' } : null;
+  }
+
+  // Listed → the close on (or just before) the day. `_fetchHistoricForSymbol` is the
+  // raw, UNCONVERTED series, which is exactly what we want here.
+  const series = await _fetchHistoricForSymbol(assetSymbol, assetType, dateMs - 10 * DAY_MS, dateMs);
+  const days   = Object.keys(series).map(Number).filter(d => d <= dateMs).sort((a, b) => a - b);
+  if (!days.length) return null;
+
+  const meta = await fetchQuoteMeta([assetSymbol]);
+  return {
+    price:    series[days[days.length - 1]],
+    currency: meta[assetSymbol]?.currency || '',
+  };
+}
+
 module.exports = {
   fetchHistoricPrices,
   fetchLatestPrices,
   fetchMetalPricePerGram,
   fetchFxRate,
   fetchQuoteMeta,
+  fetchPriceOnDate,
 };

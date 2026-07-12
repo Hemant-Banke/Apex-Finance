@@ -33,6 +33,9 @@ const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder }             = require('../utils/tsHelpers');
 const { buildAccountTxnsMap } = require('../utils/transactionHelpers');
 const { accruedPrice }        = require('../utils/assetPricing');
+// Subscriptions materialise into transactions at the start of every `ensureUpToToday`.
+// One-way dependency: subscriptionService must NOT require this module back.
+const subscriptionService     = require('./subscriptionService');
 
 
 // ─── Shared loaders ─────────────────────────────────────────────────────────
@@ -122,6 +125,32 @@ async function rebuildAll(userId) {
 // ─── Extend service ─────────────────────────────────────────────────────────
 
 /**
+ * Bring every store up to today, then realise anything a subscription owes.
+ *
+ * Three steps, and the order is the whole design:
+ *
+ *   1. Subscriptions realise into `Transaction` rows. Rows only — no store maths.
+ *   2. The stores extend to today, exactly as they always did. `extendStores` knows
+ *      nothing about subscriptions: rows it has not seen are not in the holdings
+ *      snapshot it calibrates from, so it cannot double-count them.
+ *   3. Those rows merge through `updateForTxns` — the SAME path every other
+ *      transaction takes. Cash impacts, asset valuation, holdings and net worth all
+ *      come free; none of it is reimplemented here.
+ *
+ * Step 3 must follow step 2, not precede it: `tsAdder` zero-fills days outside a
+ * series' range, so a delta reaching PAST the store's end would drop the existing
+ * balance on those days. Merging into an already-current store has no such gap.
+ */
+async function ensureUpToToday(userId) {
+  const due = await subscriptionService.materializeDue(userId, todayMs());
+
+  // Net worth is re-aggregated by whichever step runs last — never twice.
+  await extendStores(userId, { rebuildNetWorth: !due.length });
+
+  if (due.length) await updateForTxns(userId, due);
+}
+
+/**
  * Extend every store forward to today without replaying transaction history,
  * using the current cash balance and holdings as calibration.
  *
@@ -137,9 +166,10 @@ async function rebuildAll(userId) {
  * asset, which the shared start-day builder can't express — so the two series
  * are extended independently here.)
  */
-async function ensureUpToToday(userId) {
+async function extendStores(userId, { rebuildNetWorth = true } = {}) {
   const today = todayMs();
   const t1    = t1Ms();
+
   const nwDoc = await DailyNetWorth.findOne({ user: userId }).select('endDate').lean();
   if (nwDoc && midnight(nwDoc.endDate) >= today) return; // already current
 
@@ -248,7 +278,7 @@ async function ensureUpToToday(userId) {
     return upsertAccountBalance(aid, userId, newCashTS, newAssetTS, docStart, today);
   }));
 
-  await rebuildNW(userId);
+  if (rebuildNetWorth) await rebuildNW(userId);
 }
 
 
@@ -274,7 +304,13 @@ async function updateForTxns(userId, txns) {
 
     const docStartMs = midnight(doc.startDate);
     const cashEndMs  = midnight(doc.endDate);
-    const assetEndMs = docStartMs + Math.max(0, (doc.assetTS?.length || 0) - 1) * DAY_MS;
+    // An EMPTY asset series has no end — deriving one from the length would land on
+    // `docStartMs` (today, for an account whose only entry so far is its opening
+    // balance), dragging the merged range a day past T-1 and appending a spurious 0
+    // that reads as "the assets are worth nothing today".
+    const assetEndMs = doc.assetTS?.length
+      ? docStartMs + (doc.assetTS.length - 1) * DAY_MS
+      : t1Ms();
 
     const cash  = tsAdder(doc.cashTS,  store.cashTS,  docStartMs, store.startMs, cashEndMs,  store.endMs);
     const asset = tsAdder(doc.assetTS, store.assetTS, docStartMs, store.startMs, assetEndMs, t1Ms());
@@ -289,7 +325,53 @@ async function updateForTxns(userId, txns) {
 
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
+/** Repeated adds/subtracts leave float dust, so "zero" is a magnitude, not `=== 0`. */
+const _isZero = (v) => Math.abs(v || 0) < 1e-9;
+
+/** How many leading entries of a series are zero. */
+function _leadingZeros(ts = []) {
+  let i = 0;
+  while (i < ts.length && _isZero(ts[i])) i++;
+  return i;
+}
+
+/**
+ * Drop days on which the account did not exist yet.
+ *
+ * A back-dated transaction moves an account's `startDate` earlier, and the days before
+ * its first real movement carry zero cash AND zero assets — dead weight in every array,
+ * and a flat run of nothing at the left edge of every chart. Trim the run that BOTH
+ * series share and move `startDate` forward by the same number of days.
+ *
+ * Only the shared prefix goes: cash may legitimately be 0 while assets are already
+ * worth something (a fully-invested account), and vice versa. Trimming those days
+ * would silently discard real history.
+ */
+function trimLeadingZeros(cashTS = [], assetTS = [], startMs) {
+  // Nothing to align against — an account with no asset series keeps its cash days.
+  if (!cashTS.length || !assetTS.length) return { cashTS, assetTS, startMs };
+
+  // Never trim a series away entirely: each must keep at least one day.
+  const trim = Math.min(
+    _leadingZeros(cashTS),
+    _leadingZeros(assetTS),
+    cashTS.length - 1,
+    assetTS.length - 1,
+  );
+  if (trim <= 0) return { cashTS, assetTS, startMs };
+
+  return {
+    cashTS:  cashTS.slice(trim),
+    assetTS: assetTS.slice(trim),
+    startMs: startMs + trim * DAY_MS,
+  };
+}
+
 async function upsertAccountBalance(accountId, userId, cashTS, assetTS, startMs, endMs = todayMs()) {
+  // Every store write funnels through here — rebuild, extend, and delta merge alike —
+  // so trimming here covers create/edit/delete/rebuild without touching any of them.
+  ({ cashTS, assetTS, startMs } = trimLeadingZeros(cashTS, assetTS, startMs));
+
   const lastCashValue = cashTS[cashTS.length - 1] ?? 0;
   const assetAtT1     = assetTS[assetTS.length - 1] ?? 0;
 

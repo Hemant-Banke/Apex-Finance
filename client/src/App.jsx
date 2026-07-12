@@ -11,6 +11,7 @@ import Accounts from './pages/Accounts';
 import AccountDetail from './pages/AccountDetail';
 import Transactions from './pages/Transactions';
 import Analytics from './pages/Analytics';
+import Settings from './pages/Settings';
 
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
@@ -61,6 +62,11 @@ function App() {
           <Route path="/analytics" element={
             <ProtectedRoute>
               <AppShell><Analytics /></AppShell>
+            </ProtectedRoute>
+          } />
+          <Route path="/settings" element={
+            <ProtectedRoute>
+              <AppShell><Settings /></AppShell>
             </ProtectedRoute>
           } />
 

@@ -40,7 +40,7 @@ Return ONLY a JSON object (no markdown, no commentary):
   "period": { "from": "YYYY-MM-DD or null", "to": "YYYY-MM-DD or null" },
   "transactions": [
     // CASH movement (bank / UPI / card):
-    { "date": "YYYY-MM-DD", "narration": "original description verbatim", "amount": 1234.56, "type": "expense|income|transfer" },
+    { "date": "YYYY-MM-DD", "narration": "original description verbatim", "amount": 1234.56, "type": "expense|income|transfer", "accountRef": "only if the statement covers several accounts — see below" },
     // ASSET trade (broker / demat statement):
     { "date": "YYYY-MM-DD", "narration": "original description verbatim", "type": "buy|sell", "assetSymbol": "TICKER", "assetName": "Full instrument name", "assetType": "stock|etf|mutual_fund|bond|gold|crypto|other", "units": 10, "pricePerUnit": 250.5 }
   ]
@@ -66,6 +66,10 @@ ASSET / BROKER RULES:
 - "assetType": names containing "ETF" -> "etf"; "GOLD" -> "gold"; "MUTUAL"/"FUND"/"SCHEME"/"NAV" -> "mutual_fund"; "BOND"/"GILT" -> "bond"; otherwise "stock".
 - "pricePerUnit": the per-unit price/rate for that trade. For mutual funds this is the NAV (often printed inline, e.g. "164.34 (Nav 221.78)" -> units 164.34, pricePerUnit 221.78). Demat "transaction" rows often have NO price — in that case look for a separate HOLDINGS / valuation table in the same statement and use that instrument's per-unit Rate as the price. If no price exists anywhere, use null.
 - Do NOT set "amount" on buy/sell rows — it is computed from units x pricePerUnit.
+
+MULTIPLE ACCOUNTS:
+- Some statements are consolidated: they cover more than ONE account of the holder's (e.g. a savings account and a credit card, or two accounts printed in sections). ONLY in that case, set "accountRef" on every transaction to the account it belongs to, exactly as the statement labels it (e.g. "XXXX1234", "Savings — 5678", "Platinum Card"). Use the same string for every row of the same account.
+- If the statement covers a SINGLE account, omit "accountRef" entirely. Never invent one.
 
 GENERAL:
 - Convert any date format into ISO "YYYY-MM-DD".

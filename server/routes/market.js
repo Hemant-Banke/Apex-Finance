@@ -9,8 +9,52 @@ const mfService = require('../services/mfService');
 /** Yahoo's Morningstar-coded Indian mutual funds — replaced wholesale by AMFI. */
 const INDIAN_MF_SYMBOL = /^0P\w+\.(BO|NS)$/i;
 
-/** Queries that are asking for a mutual fund, so AMFI results should lead. */
-const FUND_QUERY = /\b(fund|mutual|mf|nav|sip|scheme|direct|regular|idcw|growth)\b/i;
+/** Type-ahead results, briefly. Users retype the same prefixes constantly. */
+const _yahooCache = new Map();
+const YAHOO_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Yahoo's symbol search, with ONE retry.
+ *
+ * A first connection out of this process intermittently stalls for seconds while the
+ * next is milliseconds — so a single tight-timeout attempt would hand the user an
+ * empty result list for a perfectly good query ("AAPL" returned nothing). Retrying
+ * once costs little and turns that into a hit.
+ */
+async function searchYahoo(q) {
+  const key = q.trim().toLowerCase();
+  const hit = _yahooCache.get(key);
+  if (hit && Date.now() - hit.at < YAHOO_TTL_MS) return hit.results;
+
+  const url = `https://query1.finance.yahoo.com/v1/finance/search`
+            + `?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
+
+  let data = null;
+  for (let attempt = 0; attempt < 2 && !data; attempt++) {
+    try {
+      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(3000) });
+      if (resp.ok) data = await resp.json();
+    } catch { /* stalled — try once more on a fresh connection */ }
+  }
+  if (!data) return [];
+
+  const results = (data.quotes || [])
+    .filter(x => x.symbol && x.quoteType !== 'INDEX')
+    // Indian mutual funds are served from AMFI, never Yahoo: Yahoo lists them as
+    // opaque Morningstar codes (0P…), reports every plan of a fund under one
+    // identical name, and mixes in foreign cross-listings. Drop them outright.
+    .filter(x => !INDIAN_MF_SYMBOL.test(x.symbol))
+    .map(x => ({
+      symbol:   x.symbol,
+      name:     resolveQuoteName(x),
+      type:     mapQuoteType(x.quoteType),
+      exchange: x.exchDisp || x.exchange || '',
+      currency: x.currency || '',
+    }));
+
+  _yahooCache.set(key, { at: Date.now(), results });
+  return results;
+}
 
 const router = express.Router();
 router.use(protect);
@@ -24,35 +68,39 @@ router.get('/search', async (req, res) => {
     // The two sources are independent — hit them CONCURRENTLY, or the user waits for
     // Yahoo and AMFI back to back. Neither is allowed to sink the other: a failing
     // source contributes nothing rather than failing the whole search.
-    const yahooSearch = (async () => {
-      const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
-      // Tight timeout: this is a type-ahead, and the route waits on both sources.
-      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(4000) });
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      return (data.quotes || [])
-        .filter(x => x.symbol && x.quoteType !== 'INDEX')
-        // Indian mutual funds are served from AMFI, never Yahoo: Yahoo lists them as
-        // opaque Morningstar codes (0P…), reports every plan of a fund under one
-        // identical name, and mixes in foreign cross-listings. Drop them outright.
-        .filter(x => !INDIAN_MF_SYMBOL.test(x.symbol))
-        .map(x => ({
-          symbol:   x.symbol,
-          name:     resolveQuoteName(x),
-          type:     mapQuoteType(x.quoteType),
-          exchange: x.exchDisp || x.exchange || '',
-          currency: x.currency || ''
-        }));
-    })().catch(() => []);
-
     const [quotes, funds] = await Promise.all([
-      yahooSearch,
+      searchYahoo(q).catch(() => []),
       mfService.searchSchemes(q, 8).catch(() => []),
     ]);
 
-    // Funds first when the query looks like a fund; the market list is long and a
-    // user typing "quant small cap fund" wants the scheme, not a namesake equity.
-    res.json(FUND_QUERY.test(q) ? [...funds, ...quotes] : [...quotes, ...funds]);
+    // Rank the two sources TOGETHER by how well each name actually matches, instead
+    // of always putting one list ahead of the other: "quant small" was surfacing a US
+    // "TIAA-CREF Quant Small-Cap" above the Indian quant Small Cap Fund purely because
+    // the query happened not to contain the word "fund".
+    const qLower  = q.trim().toLowerCase();
+    const qTokens = qLower.split(/[^a-z0-9]+/).filter(t => t.length > 1);
+    const relevance = (r) => {
+      if (!qTokens.length) return 0;
+      const symbol = (r.symbol || '').toLowerCase();
+      const name   = `${r.name} ${r.symbol}`.toLowerCase();
+
+      // Someone typing a ticker exactly means THAT instrument. Without this, "AAPL"
+      // ranked a Thai depositary receipt (AAPL19.BK) above Apple, because its name
+      // happens to begin with the query string.
+      if (symbol === qLower) return 10;
+
+      const hits = qTokens.filter(t => name.includes(t)).length;
+      return hits / qTokens.length
+        + (symbol.startsWith(qLower) ? 0.3 : 0)
+        + (name.startsWith(qTokens[0]) ? 0.15 : 0);
+    };
+
+    const merged = [...quotes, ...funds]
+      .map((r, i) => ({ r, i, s: relevance(r) }))
+      .sort((a, b) => (b.s - a.s) || (a.i - b.i))   // stable within equal relevance
+      .map(({ r }) => r);
+
+    res.json(merged);
   } catch (err) {
     console.error('Market search error:', err.message);
     res.status(500).json({ message: 'Market search unavailable' });

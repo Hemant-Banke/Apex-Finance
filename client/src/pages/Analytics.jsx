@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { dashboardAPI } from '../lib/api';
+import { getCategoryMap, describeCategory } from '../lib/categoryNames';
 import { formatCurrency, CHART_COLORS } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { useToast } from '../context/ToastContext';
@@ -31,20 +32,25 @@ export default function Analytics() {
   const load = async () => {
     setLoading(true);
     try {
-      const [b, c, d, h] = await Promise.all([
+      const [b, c, d, h, cats] = await Promise.all([
         dashboardAPI.getIncomeExpense(range),
         dashboardAPI.getAssetAllocation(),
         dashboardAPI.getExpenseCategories(range),
-        dashboardAPI.getHoldings()
+        dashboardAPI.getHoldings(),
+        getCategoryMap(),
       ]);
       setIe(b.data);
+      // Asset allocation groups by asset TYPE (a plain slug), so de-slugging is right.
       setAa(c.data.map(x => ({
         ...x,
-        name: x._id ? x._id.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Other'
+        name: x._id ? x._id.replace('_', ' ').replace(/\b\w/g, ch => ch.toUpperCase()) : 'Other',
       })));
+      // Expense categories group by category CODE. A code is an internal handle, not a
+      // label — prettifying it printed "Tp other exp/ts misc exp". Look up the real name.
       setEc(d.data.map(x => ({
         ...x,
-        name: x._id ? x._id.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Other'
+        name: x._id ? describeCategory(x._id, cats).label : 'Uncategorised',
+        emoji: x._id ? describeCategory(x._id, cats).emoji : '',
       })));
       setHoldings(h.data);
     } catch (e) { toast.error(e.response?.data?.message || 'Failed to load analytics'); }
@@ -144,7 +150,10 @@ export default function Analytics() {
               return (
                 <div key={cat._id}>
                   <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{cat.name}</span>
+                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)', display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                      {cat.emoji && <span>{cat.emoji}</span>}
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                    </span>
                     <span className="text-sm font-semibold tabular-nums" style={{ color: 'var(--color-text-primary)' }}>
                       {formatCurrency(cat.total)}
                     </span>

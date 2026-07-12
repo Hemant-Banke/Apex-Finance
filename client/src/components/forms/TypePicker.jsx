@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { ChevronDown, ChevronRight, ArrowLeft, Plus } from 'lucide-react';
 import Popover from '../ui/Popover';
+import EmojiPicker from './EmojiPicker';
 
 /**
  * TypePicker — one dropdown "type/option picker" for every place the app needs
@@ -22,13 +23,6 @@ import Popover from '../ui/Popover';
  * option `{ value, label, emoji? }` back so it can be selected immediately.
  */
 
-const DEFAULT_EMOJIS = [
-  '💰','💳','🏦','📈','📊','💹','🏠','🚗','🍔','✈️',
-  '🎭','📱','🛍️','💊','📚','🎮','☕','🛒','💻','🎁',
-  '❤️','🔔','🏥','💼','🏢','🎯','💪','👕','🧴','🎬',
-  '🎪','⛽','🚌','🚕','🛡️','💡','🔧','📋','🍽️','📖',
-];
-
 export default function TypePicker({
   value,
   onChange,
@@ -48,7 +42,6 @@ export default function TypePicker({
   onAdd = null,
   addPrimaryLabel = 'Add option',
   addChildLabel = 'Add sub-option',
-  emojiSuggestions = DEFAULT_EMOJIS,
 }) {
   const [isOpen, setIsOpen]       = useState(false);
   const [phase, setPhase]         = useState('primary'); // 'primary' | 'secondary'
@@ -225,21 +218,14 @@ export default function TypePicker({
             </div>
           ) : (
             <div style={{ borderTop: '1px solid var(--color-border)', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {/* Emoji comes from the shared picker — the field used to be free text,
+                  which happily accepted "asdf" as a category's icon. */}
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input type="text" value={newEmoji} onChange={e => setNewEmoji(e.target.value || '📋')}
-                  style={{ width: 42, height: 38, textAlign: 'center', fontSize: '1.2rem', background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-primary)', fontFamily: 'inherit', outline: 'none', flexShrink: 0 }} />
+                <EmojiPicker value={newEmoji} onChange={setNewEmoji} size={38} />
                 <input ref={nameInputRef} type="text" value={newName} onChange={e => setNewName(e.target.value)}
                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleAdd(); } }}
                   placeholder="Name"
                   style={{ flex: 1, height: 38, padding: '0 12px', background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-primary)', fontSize: '0.875rem', fontFamily: 'inherit', outline: 'none' }} />
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3 }}>
-                {emojiSuggestions.map(em => (
-                  <button key={em} type="button" onClick={() => setNewEmoji(em)}
-                    style={{ width: 28, height: 28, fontSize: '0.9rem', background: newEmoji === em ? 'var(--color-accent-muted)' : 'var(--color-bg-elevated)', border: newEmoji === em ? '1px solid var(--color-accent)' : '1px solid transparent', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {em}
-                  </button>
-                ))}
               </div>
               {addError && <p style={{ fontSize: '0.75rem', color: 'var(--color-danger)', margin: 0 }}>{addError}</p>}
               <div style={{ display: 'flex', gap: 6 }}>

@@ -13,6 +13,7 @@ const { getAccountBalance, getAccountAssetBalance }   = require('../services/acc
 const txService               = require('../services/transactionService');
 const dvService               = require('../services/dailyValueService');
 const { holdingsToArray }     = require('../services/holdingsService');
+const subService              = require('../services/subscriptionService');
 
 const router = express.Router();
 router.use(protect);
@@ -221,6 +222,9 @@ router.delete('/:id', async (req, res) => {
       Transaction.deleteMany({ account: account._id }),
       DailyAccountBalance.deleteOne({ account: account._id, user: req.user._id }),
       AccountHoldings.deleteOne({ account: account._id, user: req.user._id }),
+      // Recurring transactions bound to this account (either side of a transfer)
+      // would otherwise keep firing into an account that no longer exists.
+      subService.deleteForAccount(req.user._id, account._id),
     ]);
 
     // Re-aggregate net worth without the deleted account (non-blocking).

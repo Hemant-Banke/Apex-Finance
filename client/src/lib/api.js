@@ -82,6 +82,9 @@ export const accountsAPI = {
 export const transactionsAPI = {
   getAll: (params) => api.get('/transactions', { params }),
   create: (data) => api.post('/transactions', data),
+  // Import path. One request, and one store pass server-side — sending rows singly
+  // re-prices and re-aggregates every store per row.
+  bulkCreate: (transactions) => api.post('/transactions/bulk', { transactions }),
   update: (id, data) => api.put(`/transactions/${id}`, data),
   delete: (id) => api.delete(`/transactions/${id}`)
 };
@@ -93,6 +96,15 @@ export const dashboardAPI = {
   getAssetAllocation:  ()       => api.get('/dashboard/asset-allocation'),
   getIncomeExpense:    (months) => api.get('/dashboard/income-expense',    { params: { months } }),
   getExpenseCategories:(months) => api.get('/dashboard/expense-categories',{ params: { months } })
+};
+
+// Subscriptions — recurring transactions (SIPs, streaming, rent…). Each due
+// occurrence materialises into a real transaction server-side.
+export const subscriptionsAPI = {
+  getAll: ()            => api.get('/subscriptions'),
+  create: (data)        => api.post('/subscriptions', data),
+  setActive: (id, active) => api.patch(`/subscriptions/${id}`, { active }),
+  delete: (id)          => api.delete(`/subscriptions/${id}`),
 };
 
 // Market data (search + historical prices via Yahoo Finance proxy)
@@ -115,6 +127,9 @@ export const importAPI = {
 export const categoriesAPI = {
   getAll:  (type) => api.get('/categories', { params: type ? { type } : {} }),
   create:  (data) => api.post('/categories', data),
+  // Renames / re-emojis a custom category. The `code` never changes — transactions
+  // already filed under it reference it.
+  update:  (code, data) => api.patch(`/categories/${encodeURIComponent(code)}`, data),
   delete:  (code) => api.delete(`/categories/${encodeURIComponent(code)}`),
 };
 

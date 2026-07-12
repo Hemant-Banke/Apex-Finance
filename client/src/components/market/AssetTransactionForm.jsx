@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
-import { marketAPI, transactionsAPI } from '../../lib/api';
+import { useState, useEffect } from 'react';
+import { marketAPI, transactionsAPI, subscriptionsAPI } from '../../lib/api';
 import { formatCurrency, ASSET_TYPES } from '../../lib/utils';
 import { PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
 import DatePicker from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
 import { accountOptions } from '../../lib/accountPickerOptions';
+import RecurrenceFields, { RecurrenceToggle } from '../forms/RecurrenceFields';
+import { emptyRecurrence } from '../../lib/recurrence';
 import { ArrowRight, RotateCcw, Check, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
 
 function todayStr() {
@@ -57,11 +59,11 @@ export default function AssetTransactionForm({
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceError,   setPriceError]   = useState('');
   const [refetchNonce, setRefetchNonce] = useState(0); // bump to re-run auto-fetch
-  const didInitRef = useRef(false); // skip the mount fetch in edit mode
   const [accountId,    setAccountId]    = useState(txAccountId || defaultAccountId || nonDebtAccounts[0]?._id || '');
   const [notes,        setNotes]        = useState(isEdit ? (transaction.notes || '') : '');
   const [saving,       setSaving]       = useState(false);
   const [error,        setError]        = useState('');
+  const [recur,        setRecur]        = useState(emptyRecurrence);
 
   // Manual asset custom name & type (only relevant in create mode with manual security)
   const [customName, setCustomName] = useState('');
@@ -95,30 +97,62 @@ export default function AssetTransactionForm({
     }
   }, [effectiveType, showPurity, purity]);
 
+  // EPF/NPS is a BALANCE, not a holding of units: you know the rupees contributed, and
+  // there is no unit or price to speak of. Model it as `units = amount, price = 1`, so
+  // the rest of the engine (cost basis, rate accrual, valuation) needs no special case
+  // — the value is simply the amount, growing at the holding's rate.
+  const isBalanceAsset = effectiveType === 'epf_nps';
+
+  // An amount-invariant schedule fixes the ₹ outlay, not the quantity — so the units
+  // field becomes an amount field and the price is only informational.
+  const amountMode = !isEdit && recur.recurring && recur.invariant === 'amount';
+
+  /** The quantity field is really an amount field. */
+  const enterAmount = isBalanceAsset || amountMode;
+
+  // A balance asset has no price — its "unit" is one rupee.
+  useEffect(() => {
+    if (isBalanceAsset) setPrice('1');
+  }, [isBalanceAsset]);
+
   // The figure typed in the price field, in its native currency…
   const nativeTotal = units && price ? parseFloat(units) * parseFloat(price) : null;
   // …and what we actually book: always INR. A foreign trade without a rate can't
   // be converted, so we show nothing rather than an INR figure that is really USD.
-  const totalAmount = nativeTotal == null
-    ? null
-    : (isForeign ? (fxRate ? nativeTotal * fxRate : null) : nativeTotal);
+  const totalAmount = enterAmount
+    ? (units ? parseFloat(units) : null)
+    : nativeTotal == null
+      ? null
+      : (isForeign ? (fxRate ? nativeTotal * fxRate : null) : nativeTotal);
 
   const submitTone  = txType === 'buy' ? 'var(--color-success)' : 'var(--color-danger)';
 
-  // Auto-fetch the market price when the date changes (listed assets). In edit
-  // mode we preserve the stored price on the initial mount, then fetch on any
-  // later date change like create mode does.
+  // Auto-fetch the market price when the date changes (listed assets).
   // Physical metal has no market symbol but IS priceable (INR per gram, by type
   // and purity), so it auto-fetches like a listed asset despite being "manual".
   const canAutoPrice = !isManual || showPurity;
 
+  // In edit mode, the transaction ALREADY carries the price for its own date — that
+  // is the price it was actually booked at. Going back to the network for it would
+  // be pointless and could even return a different figure (a revised close, a
+  // different FX print), silently rewriting what the user recorded.
+  const originalDate  = isEdit ? (transaction.date?.split?.('T')[0] ?? null) : null;
+  const originalPrice = isEdit ? transaction.pricePerUnit : null;
+
   useEffect(() => {
     if (!canAutoPrice || !date) return;
     if (!showPurity && !security?.symbol) return;
-    if (!didInitRef.current) {
-      didInitRef.current = true;
-      if (isEdit) return; // keep the transaction's stored price on open
+
+    // Back on the transaction's own date (including on mount): restore what was
+    // stored. `refetchNonce` is the explicit "Refetch" button, which still overrides.
+    if (isEdit && date === originalDate && refetchNonce === 0) {
+      setPrice(String(originalPrice ?? ''));
+      setPriceSource('manual');
+      setPriceError('');
+      setPriceLoading(false);
+      return;
     }
+
     let cancelled = false;
     setPriceLoading(true);
     setPriceError('');
@@ -141,14 +175,18 @@ export default function AssetTransactionForm({
       .finally(() => { if (!cancelled) setPriceLoading(false); });
 
     return () => { cancelled = true; };
-  }, [date, security?.symbol, canAutoPrice, showPurity, effectiveType, purity, isEdit, refetchNonce]);
+  }, [date, security?.symbol, canAutoPrice, showPurity, effectiveType, purity, isEdit, originalDate, originalPrice, refetchNonce]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    if (!accountId)       { setError('Select an account'); return; }
-    if (!units || !price) { setError('Units and price are required'); return; }
-    if (isForeign && !fxRate) {
+    if (!accountId) { setError('Select an account'); return; }
+    if (enterAmount) {
+      if (!units) { setError(amountMode ? 'Enter the amount to invest each time' : 'Enter an amount'); return; }
+    } else if (!units || !price) {
+      setError('Units and price are required'); return;
+    }
+    if (!enterAmount && isForeign && !fxRate) {
       setError(`Exchange rate for ${currency} is unavailable — cannot convert this trade to INR.`);
       return;
     }
@@ -165,8 +203,10 @@ export default function AssetTransactionForm({
     try {
       const data = {
         type:            txType,
+        // A balance asset carries its rupee figure as the units, at ₹1 apiece — so
+        // `amount = units × price` still comes out as the amount contributed.
         units:           parseFloat(units),
-        pricePerUnit:    parseFloat(price),
+        pricePerUnit:    isBalanceAsset ? 1 : parseFloat(price),
         assetSymbol:     sym,
         assetName:       name,
         assetType:       effectiveType,
@@ -182,6 +222,26 @@ export default function AssetTransactionForm({
 
       if (isEdit) {
         await transactionsAPI.update(transaction._id, data);
+      } else if (recur.recurring) {
+        // A schedule, not a one-off: the date becomes the start, and the server fires
+        // every occurrence already due, pricing each on its own date. Exactly ONE side
+        // is fixed — the amount, or the units — and the other is derived, so the field
+        // that isn't the invariant must not be sent.
+        await subscriptionsAPI.create({
+          ...data,
+          account:   accountId,
+          startDate: date,
+          endDate:   recur.ongoing ? null : (recur.endDate || null),
+          frequency: recur.frequency,
+          // A balance asset has no units — the amount IS the invariant.
+          invariant: isBalanceAsset ? 'amount' : recur.invariant,
+          amount:    enterAmount ? parseFloat(units) : undefined,
+          units:     enterAmount ? undefined : parseFloat(units),
+          // A quotable asset is priced on each occurrence's own date. One nothing can
+          // quote (EPF/NPS at ₹1 a unit, an FD) carries its price on the schedule, or
+          // every occurrence would price to nothing and be skipped.
+          pricePerUnit: canAutoPrice ? undefined : (isBalanceAsset ? 1 : (parseFloat(price) || undefined)),
+        });
       } else {
         await transactionsAPI.create({ ...data, account: accountId });
       }
@@ -293,19 +353,44 @@ export default function AssetTransactionForm({
         </div>
       )}
 
-      {/* Units + Price — side by side to keep the form compact */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
+      {/* Units + Price — side by side to keep the form compact. A balance-style asset
+          (EPF/NPS) has no units at all: the user knows a rupee figure, so the price
+          column is dropped entirely and the amount spans the row. */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: isBalanceAsset ? '1fr' : '1fr 1fr',
+        gap: 12, alignItems: 'start',
+      }}>
       {/* Units */}
+      {/* The same field carries the quantity — OR the amount, when the asset is
+          balance-style, or the schedule is amount-invariant (a ₹5,000 SIP buys whatever
+          units that day's price allows, so asking for units would be nonsense). */}
       <div>
         <label className="label block" style={{ marginBottom: 6 }}>
-          {showPurity ? 'Weight (grams)' : 'Units / Quantity'}
+          {enterAmount
+            ? <>Amount <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>
+                {amountMode ? '(₹ each time)' : '(₹)'}
+              </span></>
+            : (showPurity ? 'Weight (grams)' : 'Units / Quantity')}
         </label>
         <input type="number" step="any" min="0.000001" value={units}
           onChange={e => setUnits(e.target.value)}
-          className="input-field" placeholder="0.00" required style={{ fontFamily: 'var(--font-mono)' }} />
+          className="input-field" required style={{ fontFamily: 'var(--font-mono)' }}
+          placeholder={enterAmount ? '5000' : '0.00'} />
+        {amountMode ? (
+          <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            Units are worked out from the price on each date.
+          </p>
+        ) : isBalanceAsset && (
+          <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            {txType === 'buy' ? 'The amount contributed.' : 'The amount withdrawn.'}
+            {showRate && rate !== '' && ' It then grows at the rate above.'}
+          </p>
+        )}
       </div>
 
-      {/* Price per unit */}
+      {/* Price per unit — omitted entirely for a balance-style asset, which has none. */}
+      {!isBalanceAsset && (
       <div>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, minHeight: 18 }}>
           <label className="label">
@@ -361,26 +446,62 @@ export default function AssetTransactionForm({
           </>
         )}
       </div>
+      )}
       </div>
 
-      {/* Settle against cash — compact single row */}
-      <button
-        type="button"
-        onClick={() => setUsesCashBalance(v => !v)}
-        title={txType === 'buy' ? 'Deduct the cost from this account’s cash balance' : 'Add the proceeds to this account’s cash balance'}
-        style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'inherit' }}
-      >
-        <span style={{
-          width: 18, height: 18, borderRadius: 4, flexShrink: 0,
-          border: `2px solid ${usesCashBalance ? 'var(--color-accent)' : 'var(--color-border-hover)'}`,
-          background: usesCashBalance ? 'var(--color-accent)' : 'transparent',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>
-          {usesCashBalance && <Check size={11} style={{ color: 'var(--color-bg-primary)', strokeWidth: 3 }} />}
-        </span>
-        <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 500 }}>Settle against account cash</span>
-        <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>({txType === 'buy' ? 'deduct cost' : 'add proceeds'})</span>
-      </button>
+      {/* Settle-against-cash and Repeat share one row — two toggles, one line. The
+          recurrence body expands underneath only once Repeat is ticked. */}
+      <div style={{ display: 'grid', gridTemplateColumns: isEdit ? '1fr' : '1fr 1fr', gap: 12 }}>
+        <button
+          type="button"
+          onClick={() => setUsesCashBalance(v => !v)}
+          title={txType === 'buy' ? 'Deduct the cost from this account’s cash balance' : 'Add the proceeds to this account’s cash balance'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, minWidth: 0,
+            padding: '11px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
+            fontFamily: 'inherit', textAlign: 'left',
+            border: `1px solid ${usesCashBalance ? 'var(--color-accent)' : 'var(--color-border)'}`,
+            background: usesCashBalance ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
+            transition: 'background 0.15s, border-color 0.15s',
+          }}
+        >
+          <span style={{
+            width: 15, height: 15, borderRadius: 4, flexShrink: 0,
+            border: `2px solid ${usesCashBalance ? 'var(--color-accent)' : 'var(--color-border-hover)'}`,
+            background: usesCashBalance ? 'var(--color-accent)' : 'transparent',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {usesCashBalance && <Check size={10} style={{ color: 'var(--color-bg-primary)', strokeWidth: 3 }} />}
+          </span>
+          <span style={{
+            fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 500,
+            minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            Settle against cash
+          </span>
+        </button>
+
+        {/* Not offered in edit mode: editing one transaction of a schedule must not
+            silently rewrite the schedule. */}
+        {!isEdit && <RecurrenceToggle value={recur} onChange={setRecur} isAsset compact />}
+      </div>
+
+      {/* Spell out what the toggle actually does — the consequence differs by side,
+          and "off" is the non-obvious case: the asset is tracked on its own, with the
+          money having moved in an account we are not recording here. */}
+      <p style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', marginTop: -6, lineHeight: 1.5 }}>
+        {usesCashBalance
+          ? (txType === 'buy'
+              ? <>The cost is <span style={{ color: 'var(--color-text-secondary)' }}>deducted from this account’s cash</span>.</>
+              : <>The proceeds are <span style={{ color: 'var(--color-text-secondary)' }}>added to this account’s cash</span>.</>)
+          : (txType === 'buy'
+              ? <>Cash is untouched — the holding is tracked on its own, as if paid from elsewhere.</>
+              : <>Cash is untouched — the holding leaves, but the proceeds are not recorded here.</>)}
+      </p>
+
+      {!isEdit && (
+        <RecurrenceFields value={recur} onChange={setRecur} isAsset fromDate={date} hideToggle showInvariant={!isBalanceAsset} />
+      )}
 
       {/* Notes */}
       <div className="field">

@@ -64,6 +64,34 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
+// PATCH /api/categories/:code — rename / re-emoji a user-defined category
+//
+// The `code` is NOT regenerated: transactions already filed under it reference it, and
+// changing it would orphan them. Only the label and the emoji move.
+// Built-in categories are shared across users and are not editable — the filter on
+// `user` is what enforces that (a default category has no `user`).
+router.patch('/:code', protect, async (req, res) => {
+  try {
+    const { name, emoji } = req.body;
+    const update = {};
+    if (typeof name === 'string' && name.trim()) update.name = name.trim();
+    if (typeof emoji === 'string' && emoji.trim()) update.emoji = emoji.trim();
+    if (!Object.keys(update).length) {
+      return res.status(400).json({ message: 'Nothing to update' });
+    }
+
+    const cat = await UserCategory.findOneAndUpdate(
+      { code: req.params.code, user: req.user._id },
+      { $set: update },
+      { new: true },
+    );
+    if (!cat) return res.status(404).json({ message: 'Category not found' });
+    res.json(cat);
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to update category' });
+  }
+});
+
 // DELETE /api/categories/:code — delete a user-defined category
 router.delete('/:code', protect, async (req, res) => {
   try {

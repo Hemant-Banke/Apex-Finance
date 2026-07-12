@@ -39,15 +39,17 @@ export default function Modal({
             <div style={{ minWidth: 0, flex: 1 }}>
               {eyebrow && <p className="eyebrow" style={{ marginBottom: 6 }}>{eyebrow}</p>}
               {/* Long instrument names (a fund plan runs to ~60 chars) wrap onto a
-                  second line rather than being truncated to an unreadable stub. The
-                  suffix pill is allowed to drop below them instead of squeezing. */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
+                  second line rather than being truncated to an unreadable stub — but
+                  the row itself must NOT wrap, or the type pill drops beneath the
+                  title and reads as part of the name. It stays on the first line,
+                  never shrinking; the title takes whatever width is left. */}
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0, flexWrap: 'nowrap' }}>
                 <h2 className="modal-title" style={{
-                  minWidth: 0,
+                  minWidth: 0, flex: 1,
                   display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                   overflow: 'hidden', overflowWrap: 'anywhere',
                 }}>{title}</h2>
-                {titleSuffix}
+                {titleSuffix && <span style={{ flexShrink: 0, marginTop: 3 }}>{titleSuffix}</span>}
               </div>
               {subtitle && <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{subtitle}</p>}
             </div>

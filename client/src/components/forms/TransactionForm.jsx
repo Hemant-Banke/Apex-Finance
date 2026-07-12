@@ -1,10 +1,12 @@
 import { useState } from 'react';
-import { transactionsAPI } from '../../lib/api';
+import { transactionsAPI, subscriptionsAPI } from '../../lib/api';
 import { formatCurrency, TRANSACTION_TYPES } from '../../lib/utils';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
 import TypePicker from './TypePicker';
 import DatePicker from './DatePicker';
+import RecurrenceFields from './RecurrenceFields';
+import { emptyRecurrence } from '../../lib/recurrence';
 import { ArrowRight, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, SlidersHorizontal } from 'lucide-react';
 
 const TODAY = new Date().toISOString().split('T')[0];
@@ -34,7 +36,8 @@ function initFromTransaction(tx) {
 }
 
 const EMPTY_FORM = {
-  type: 'income', amount: '', category: '', notes: '', toAccount: '',
+  // Expense, not income: it is by far the most common thing anyone records by hand.
+  type: 'expense', amount: '', category: '', notes: '', toAccount: '',
   date: new Date().toISOString().split('T')[0],
 };
 
@@ -53,6 +56,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
   const [form, setForm]     = useState(isEdit ? initFromTransaction(transaction) : EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [error, setError]   = useState('');
+  const [recur, setRecur]   = useState(emptyRecurrence);
 
   const set = patch => setForm(f => ({ ...f, ...patch }));
 
@@ -82,11 +86,22 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
 
       if (isEdit) {
         await transactionsAPI.update(transaction._id, data);
+      } else if (recur.recurring) {
+        // A schedule, not a one-off. Cash flows are always fixed-amount, so `amount`
+        // is the invariant and there is nothing to ask. The date becomes the start,
+        // and the server records every occurrence already due.
+        await subscriptionsAPI.create({
+          ...data,
+          startDate: form.date,
+          endDate:   recur.ongoing ? null : (recur.endDate || null),
+          frequency: recur.frequency,
+          invariant: 'amount',
+        });
       } else {
         await transactionsAPI.create(data);
       }
 
-      if (!isEdit) setForm(EMPTY_FORM);
+      if (!isEdit) { setForm(EMPTY_FORM); setRecur(emptyRecurrence()); }
       onSuccess?.();
     } catch (err) {
       setError(
@@ -191,6 +206,13 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
             className="input-field" placeholder="Optional" />
         </div>
       </div>
+
+      {/* Recurring — rent, salary, a streaming subscription. Not offered for an
+          adjustment (a one-off correction is never a schedule), nor in edit mode:
+          editing one transaction of a schedule must not rewrite the schedule. */}
+      {!isEdit && !isAdjustment && (
+        <RecurrenceFields value={recur} onChange={setRecur} fromDate={form.date} />
+      )}
 
       {error && <p className="text-xs" style={{ color: 'var(--color-danger)' }}>{error}</p>}
 
