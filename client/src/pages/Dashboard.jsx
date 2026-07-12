@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { dashboardAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
-import { formatCurrency, compactIfLarge, formatDate, getTransactionColor, getTransactionSign, getTransactionName } from '../lib/utils';
+import { compactIfLarge, formatDate } from '../lib/utils';
 import { TrendingUp, TrendingDown, ArrowUpRight, Wallet, BarChart3, ArrowRight } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
@@ -10,6 +10,8 @@ import PriceGrapher from '../components/charts/PriceGrapher';
 import ChartTooltip from '../components/charts/ChartTooltip';
 import AssetPricePanel from '../components/charts/AssetPricePanel';
 import Card from '../components/ui/Card';
+import Spinner from '../components/ui/Spinner';
+import TransactionRow from '../components/transactions/TransactionRow';
 import StatTile from '../components/ui/StatTile';
 import SectionHeader from '../components/ui/SectionHeader';
 import Divider from '../components/ui/Divider';
@@ -38,11 +40,7 @@ export default function Dashboard() {
     finally { setLoading(false); }
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center" style={{ height: '60vh' }}>
-      <div className="spinner" />
-    </div>
-  );
+  if (loading) return <Spinner />;
 
   const savings = (summary?.monthlyIncome || 0) - (summary?.monthlyExpense || 0);
 
@@ -138,20 +136,11 @@ export default function Dashboard() {
           {summary?.recentTransactions?.length > 0 ? (
             <div style={{ paddingTop: 12 }}>
               {summary.recentTransactions.slice(0, 6).map(tx => (
-                <div key={tx._id} className="data-row" style={{ padding: '12px 24px' }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>
-                      {getTransactionName(tx)}
-                    </p>
-                    <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      {tx.account?.name} · {formatDate(tx.date)}
-                    </p>
-                  </div>
-                  <span className={`figure text-sm ${getTransactionColor(tx.type)}`}
-                    style={{ marginLeft: 16, fontWeight: 500 }}>
-                    {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
-                  </span>
-                </div>
+                <TransactionRow
+                  key={tx._id}
+                  tx={tx}
+                  subtitle={<>{tx.account?.name} · {formatDate(tx.date)}</>}
+                />
               ))}
             </div>
           ) : (

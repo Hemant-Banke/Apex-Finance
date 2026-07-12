@@ -12,6 +12,7 @@ const { flipTx }    = require('../utils/transactionHelpers');
 const { fetchFxRate } = require('./marketDataService');
 const { midnight, todayMs } = require('../utils/helpers');
 const { normalizeCurrency } = require('../utils/currency');
+const { badRequest }        = require('../utils/httpError');
 const { ASSET_TRANSACTION_TYPES } = require('../utils/constants');
 
 /**
@@ -39,24 +40,14 @@ async function applyAssetPricing(data) {
     return data;
   }
 
-  const dateMs = data.date ? midnight(new Date(data.date)) : todayMs();
+  const dateMs = data.date ? midnight(data.date) : todayMs();
   const fxRate = await fetchFxRate(currency, dateMs);
-  if (!fxRate) throw new Error(`Exchange rate for ${currency} is unavailable — cannot book this trade`);
+  if (!fxRate) throw badRequest(`Exchange rate for ${currency} is unavailable — cannot book this trade`);
 
   data.currency = currency;
   data.fxRate   = fxRate;
   data.amount   = units * price * fxRate;
   return data;
-}
-
-/**
- * Find a user's transactions within a date window (inclusive), sorted ascending.
- */
-async function findTransactions(userId, startDate = '2000-01-01', endDate = '2100-01-01') {
-  return Transaction.find({
-    user: userId,
-    date: { $gte: new Date(startDate), $lte: new Date(endDate) },
-  }).sort({ date: 1 }).lean();
 }
 
 // ─── Single-transaction lifecycle ──────────────────────────────────────────────
@@ -119,7 +110,6 @@ async function bulkDelete(userId, txIds) {
 
 module.exports = {
   applyAssetPricing,
-  findTransactions,
   onCreate,
   onCreateMany,
   onDelete,

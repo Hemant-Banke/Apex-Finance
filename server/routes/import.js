@@ -2,6 +2,8 @@ const express = require('express');
 const multer  = require('multer');
 const router  = express.Router();
 const { protect }        = require('../middleware/auth');
+const { asyncHandler }   = require('../middleware/asyncHandler');
+const { HttpError, badRequest } = require('../utils/httpError');
 const { parseStatement } = require('../lib/statementParsers');
 const llmService         = require('../lib/llmService');
 const categoryProfile    = require('../services/categoryProfileService');
@@ -97,41 +99,41 @@ async function applySmartCategories(userId, result) {
 
 // POST /api/import/parse
 // Body: multipart — file + optional password field
-router.post('/parse', protect, upload.single('file'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+router.post('/parse', protect, upload.single('file'), asyncHandler(async (req, res) => {
+  if (!req.file) throw badRequest('No file uploaded');
 
+  let result;
   try {
-    const result = await parseStatement({
+    result = await parseStatement({
       buffer:       req.file.buffer,
       mimetype:     req.file.mimetype,
       originalname: req.file.originalname,
       password:     req.body.password || null,
     });
-
-    // Turn each asset row's name/ticker into a real market symbol before review,
-    // so the user confirms something that will actually price.
-    try {
-      await resolveStatementAssets(result.transactions);
-    } catch (e) {
-      console.error('Symbol resolution failed:', e.message);
-    }
-
-    await applySmartCategories(req.user._id, result);
-
-    res.json(result);
   } catch (err) {
+    // A locked PDF is not a failure — it is the client's cue to ask for the password
+    // and retry, so the flags ride along on the response.
     if (err.needsPassword) {
-      return res.status(422).json({
-        message: err.wrongPassword
-          ? 'Incorrect password. Please try again.'
-          : 'This PDF is password-protected. Enter the password to unlock it.',
-        needsPassword: true,
-        wrongPassword: !!err.wrongPassword,
-      });
+      throw new HttpError(422, err.wrongPassword
+        ? 'Incorrect password. Please try again.'
+        : 'This PDF is password-protected. Enter the password to unlock it.',
+        { needsPassword: true, wrongPassword: !!err.wrongPassword });
     }
-    console.error('Import parse error:', err.message);
-    res.status(400).json({ message: err.message || 'Failed to parse statement' });
+    throw badRequest(err.message || 'Failed to parse statement');
   }
-});
+
+  // Turn each asset row's name/ticker into a real market symbol before review, so the
+  // user confirms something that will actually price. Best-effort: an unresolved row is
+  // flagged for review rather than sinking the import.
+  try {
+    await resolveStatementAssets(result.transactions);
+  } catch (e) {
+    console.error('Symbol resolution failed:', e.message);
+  }
+
+  await applySmartCategories(req.user._id, result);
+
+  res.json(result);
+}));
 
 module.exports = router;

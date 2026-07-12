@@ -169,7 +169,6 @@ async function upsertHolding(accountId, userId, holdings) {
 }
 
 module.exports = {
-  getHoldingsMap,
   holdingsToArray,
   updateHoldingsMap,
   rebuildAllHoldingsFromMap,

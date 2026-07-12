@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import { transactionsAPI, accountsAPI } from '../lib/api';
-import {
-  formatCurrency, formatDate, getTransactionColor, getTransactionSign, getTransactionName, TRANSACTION_TYPES
-} from '../lib/utils';
+import { formatCurrency, formatDate } from '../lib/utils';
+import { TRANSACTION_TYPES } from '../lib/constants';
+import Spinner from '../components/ui/Spinner';
+import TransactionRow from '../components/transactions/TransactionRow';
 import Modal from '../components/ui/Modal';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
-import { Filter, ArrowLeftRight, X, Pencil, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
+import { Filter, ArrowLeftRight, ChevronLeft, ChevronRight, Upload } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import ImportModal from '../components/import/ImportModal';
 import AssetIcon from '../components/market/AssetIcon';
@@ -99,41 +100,25 @@ export default function Transactions() {
 
       {/* List */}
       {loading ? (
-        <div className="flex items-center justify-center" style={{ padding: '80px 0' }}><div className="spinner" /></div>
+        <Spinner height={160} />
       ) : txns.length > 0 ? (
         <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
           {txns.map((tx, i) => (
-            <div key={tx._id} className="data-row group"
-              style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none' }}>
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>
-                  {getTransactionName(tx)}
-                </p>
-                <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3 }}>
-                  {tx.account?.name} · {formatDate(tx.date)}
-                  {tx.assetSymbol && ` · ${tx.assetSymbol} · ${tx.units} units`}
-                </p>
-              </div>
-              <span className="badge badge-default" style={{ marginRight: 12 }}>
-                {tx.type}
-              </span>
-              <span className={`figure text-sm ${getTransactionColor(tx.type)}`} style={{ fontWeight: 600 }}>
-                {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
-              </span>
-              <button onClick={() => setEditTx(tx)}
-                className="opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ marginLeft: 8, color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-                <Pencil size={13} />
-              </button>
-              <button onClick={() => {
-                if (localStorage.getItem(SKIP_DELETE_KEY) === 'true') { del(tx._id); }
-                else setDeleteTx(tx);
+            <TransactionRow
+              key={tx._id}
+              tx={tx}
+              divided={i > 0}
+              badge
+              subtitle={<>
+                {tx.account?.name} · {formatDate(tx.date)}
+                {tx.assetSymbol && ` · ${tx.assetSymbol} · ${tx.units} units`}
+              </>}
+              onEdit={setEditTx}
+              onDelete={(t) => {
+                if (localStorage.getItem(SKIP_DELETE_KEY) === 'true') del(t._id);
+                else setDeleteTx(t);
               }}
-                className="opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ marginLeft: 4, color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-                <X size={13} />
-              </button>
-            </div>
+            />
           ))}
 
           {/* Pagination */}

@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { accountsAPI, transactionsAPI } from '../lib/api';
-import {
-  formatCurrency, formatNativeCurrency, compactIfLarge, formatDate,
-  getTransactionColor, getTransactionSign, getTransactionName
-} from '../lib/utils';
+import { formatCurrency, formatNativeCurrency, compactIfLarge, formatDate } from '../lib/utils';
 import Modal from '../components/ui/Modal';
+import Spinner from '../components/ui/Spinner';
+import TransactionRow from '../components/transactions/TransactionRow';
 import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import MarketSearch from '../components/market/MarketSearch';
@@ -18,7 +17,7 @@ import Button from '../components/ui/Button';
 import AssetIcon from '../components/market/AssetIcon';
 import { assetTypeLabel } from '../lib/constants';
 import {
-  ArrowLeft, Plus, Pencil, X, TrendingUp, Shield, CreditCard,
+  ArrowLeft, Plus, Pencil, TrendingUp, Shield, CreditCard,
   Landmark, Wallet, Briefcase, Package, BarChart2, Upload
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
@@ -170,11 +169,7 @@ export default function AccountDetail() {
   const totalInvested = account?.holdings?.filter(h => h.qty > 0).reduce((s, h) => s + h.totalInvested, 0) || 0;
   const totalValue    = cashBalance + totalInvested;
 
-  if (loading) return (
-    <div className="flex items-center justify-center" style={{ height: '60vh' }}>
-      <div className="spinner" />
-    </div>
-  );
+  if (loading) return <Spinner />;
   if (!account) return (
     <div className="text-center" style={{ paddingTop: '20vh' }}>
       <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Account not found</p>
@@ -339,32 +334,17 @@ export default function AccountDetail() {
         {txns.length > 0 ? (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             {txns.map((tx, i) => (
-              <div key={tx._id} className="data-row group"
-                style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none' }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <p className="text-sm" style={{ color: 'var(--color-text-primary)' }}>
-                    {getTransactionName(tx)}
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {tx.type} · {formatDate(tx.date)}
-                    {tx.toAccount && ` → ${tx.toAccount.name}`}
-                  </p>
-                </div>
-                <span className={`figure text-sm ${getTransactionColor(tx.type)}`}
-                  style={{ marginLeft: 16, fontWeight: 600 }}>
-                  {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
-                </span>
-                <button onClick={() => openEdit(tx)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ marginLeft: 8, color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-                  <Pencil size={13} />
-                </button>
-                <button onClick={() => handleDeleteClick(tx)}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{ marginLeft: 2, color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', padding: 4 }}>
-                  <X size={13} />
-                </button>
-              </div>
+              <TransactionRow
+                key={tx._id}
+                tx={tx}
+                divided={i > 0}
+                subtitle={<>
+                  {tx.type} · {formatDate(tx.date)}
+                  {tx.toAccount && ` → ${tx.toAccount.name}`}
+                </>}
+                onEdit={openEdit}
+                onDelete={handleDeleteClick}
+              />
             ))}
           </div>
         ) : (

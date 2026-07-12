@@ -33,22 +33,9 @@ function distinctCurrencies(items = []) {
   return [...set];
 }
 
-/**
- * INR value of a native-currency amount.
- * A missing rate means "not convertible" — callers must not silently treat a
- * foreign figure as INR, so this returns null rather than the input.
- */
-function toInr(amount, fxRate = 1) {
-  if (amount == null) return null;
-  if (!fxRate) return null;
-  return amount * fxRate;
-}
-
 module.exports = {
-  BASE_CURRENCY,
   isBaseCurrency,
   fxSymbol,
   normalizeCurrency,
   distinctCurrencies,
-  toInr,
 };

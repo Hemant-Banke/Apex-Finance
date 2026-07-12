@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { subscriptionsAPI, categoriesAPI, accountsAPI } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/utils';
+import Spinner from '../components/ui/Spinner';
 import { useToast } from '../context/ToastContext';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -98,7 +99,7 @@ function SubscriptionsManager() {
     } catch (e) { toast.error(e.response?.data?.message || 'Failed to remove'); }
   };
 
-  if (loading) return <div className="flex items-center justify-center" style={{ height: 200 }}><div className="spinner" /></div>;
+  if (loading) return <Spinner height={200} />;
 
   if (!subs.length) return (
     <Card className="flex flex-col items-center justify-center" style={{ padding: '56px 24px' }}>
@@ -278,7 +279,7 @@ function CategoriesManager() {
     } catch (e) { toast.error(e.response?.data?.message || 'Failed to remove'); }
   };
 
-  if (loading) return <div className="flex items-center justify-center" style={{ height: 200 }}><div className="spinner" /></div>;
+  if (loading) return <Spinner height={200} />;
 
   const customCount = primary.filter(isCustom).length
     + Object.values(secondary).flat().filter(isCustom).length;

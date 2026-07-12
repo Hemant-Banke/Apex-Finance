@@ -2,7 +2,9 @@ const express = require('express');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
 
-const { protect }               = require('../middleware/auth');
+const { protect }                 = require('../middleware/auth');
+const { asyncHandler }            = require('../middleware/asyncHandler');
+const { badRequest, notFound }     = require('../utils/httpError');
 const { TRANSACTION_TYPES, ASSET_TRANSACTION_TYPES }     = require('../utils/constants');
 const { midnight, todayMs }     = require('../utils/helpers');
 const { normalizeCategory }     = require('../lib/categoryRules');
@@ -26,7 +28,7 @@ async function prepareTransaction(userId, body) {
   if (!TRANSACTION_TYPES.includes(body.type)) throw new Error('Invalid transaction type');
 
   // The time-series stores only run to today.
-  if (body.date && midnight(new Date(body.date)) > todayMs())
+  if (body.date && midnight(body.date) > todayMs())
     throw new Error('Transaction date cannot be in the future');
 
   const account = await Account.findOne({ _id: body.account, user: userId }).lean();
@@ -76,139 +78,103 @@ async function createTransactions(userId, rows) {
 
 
 // GET /api/transactions
-router.get('/', async (req, res) => {
-  try {
-    const { account, type, category, startDate, endDate, limit = 50, page = 1 } = req.query;
+router.get('/', asyncHandler(async (req, res) => {
+  const { account, type, category, startDate, endDate, limit = 50, page = 1 } = req.query;
 
-    const filter = { user: req.user._id };
-    if (account)   filter.account  = account;
-    if (type)      filter.type     = type;
-    if (category)  filter.category = category;
-    if (startDate || endDate) {
-      filter.date = {};
-      if (startDate) filter.date.$gte = new Date(startDate);
-      if (endDate)   filter.date.$lte = new Date(endDate);
-    }
-
-    const total = await Transaction.countDocuments(filter);
-    const transactions = await Transaction.find(filter)
-      .populate('account',   'name type')
-      .populate('toAccount', 'name type')
-      .sort({ date: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .lean();
-
-    res.json({ transactions, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
+  const filter = { user: req.user._id };
+  if (account)   filter.account  = account;
+  if (type)      filter.type     = type;
+  if (category)  filter.category = category;
+  if (startDate || endDate) {
+    filter.date = {};
+    if (startDate) filter.date.$gte = new Date(startDate);
+    if (endDate)   filter.date.$lte = new Date(endDate);
   }
-});
+
+  const total = await Transaction.countDocuments(filter);
+  const transactions = await Transaction.find(filter)
+    .populate('account',   'name type')
+    .populate('toAccount', 'name type')
+    .sort({ date: -1 })
+    .limit(parseInt(limit))
+    .skip((parseInt(page) - 1) * parseInt(limit))
+    .lean();
+
+  res.json({ transactions, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+}));
 
 // POST /api/transactions
-router.post('/', async (req, res) => {
-  try {
-    const { created, failed } = await createTransactions(req.user._id, [req.body]);
-    if (!created.length) return res.status(400).json({ message: failed[0].message });
+router.post('/', asyncHandler(async (req, res) => {
+  const { created, failed } = await createTransactions(req.user._id, [req.body]);
+  if (!created.length) throw badRequest(failed[0].message);
 
-    const populated = await Transaction.findById(created[0]._id)
-      .populate('account',   'name type')
-      .populate('toAccount', 'name type');
+  const populated = await Transaction.findById(created[0]._id)
+    .populate('account',   'name type')
+    .populate('toAccount', 'name type');
 
-    res.status(201).json(populated);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.status(201).json(populated);
+}));
 
 // PUT /api/transactions/:id
-router.put('/:id', async (req, res) => {
-  try {
-    if (req.body.date && midnight(new Date(req.body.date)) > todayMs())
-      return res.status(400).json({ message: 'Transaction date cannot be in the future' });
+router.put('/:id', asyncHandler(async (req, res) => {
+  if (req.body.date && midnight(req.body.date) > todayMs())
+    throw badRequest('Transaction date cannot be in the future');
 
-    // Fetch old state before update for net worth delta calculation
-    const oldTx = await Transaction.findOne({ _id: req.params.id, user: req.user._id }).lean();
-    if (!oldTx) return res.status(404).json({ message: 'Transaction not found' });
+  // The old state is needed to subtract its impact from the stores.
+  const oldTx = await Transaction.findOne({ _id: req.params.id, user: req.user._id }).lean();
+  if (!oldTx) throw notFound('Transaction not found');
 
-    // Recompute Transaction Amount for Asset Txn (re-books INR at the trade date's FX).
-    req.body.category = normalizeCategory(req.body.category, req.body.type);
-    try {
-      await txService.applyAssetPricing(req.body);
-    } catch (e) {
-      return res.status(400).json({ message: e.message });
-    }
+  // Re-book an asset trade's INR amount at the trade date's FX. A foreign trade with
+  // no rate available throws a 400 of its own rather than booking a USD figure as INR.
+  req.body.category = normalizeCategory(req.body.category, req.body.type);
+  await txService.applyAssetPricing(req.body);
 
-    const transaction = await Transaction.findOneAndUpdate(
-      { _id: req.params.id, user: req.user._id },
-      req.body,
-      { new: true, runValidators: true }
-    ).populate('account', 'name type').lean();
+  const transaction = await Transaction.findOneAndUpdate(
+    { _id: req.params.id, user: req.user._id },
+    req.body,
+    { new: true, runValidators: true }
+  ).populate('account', 'name type').lean();
 
-    // Update stores before responding so the client's refetch sees fresh data.
-    try { await txService.onUpdate(req.user._id, oldTx, req.body); } catch (e) { console.error(e); }
+  // Update the stores before responding, so the client's refetch sees fresh data.
+  await txService.onUpdate(req.user._id, oldTx, req.body).catch(console.error);
+  learnCategory(req.user._id, transaction, req.body.narration);
 
-    // Learn from a re-categorization (non-blocking).
-    learnCategory(req.user._id, transaction, req.body.narration);
-
-    res.json(transaction);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.json(transaction);
+}));
 
 // DELETE /api/transactions/:id
-router.delete('/:id', async (req, res) => {
-  try {
-    const transaction = await Transaction.findOneAndDelete({ _id: req.params.id, user: req.user._id }).lean();
-    if (!transaction) return res.status(404).json({ message: 'Transaction not found' });
+router.delete('/:id', asyncHandler(async (req, res) => {
+  const transaction = await Transaction.findOneAndDelete({ _id: req.params.id, user: req.user._id }).lean();
+  if (!transaction) throw notFound('Transaction not found');
 
-    // Update stores before responding so the client's refetch sees fresh data.
-    try { await txService.onDelete(req.user._id, transaction); } catch (e) { console.error(e); }
+  await txService.onDelete(req.user._id, transaction).catch(console.error);
 
-    res.json({ message: 'Transaction deleted' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.json({ message: 'Transaction deleted' });
+}));
 
 // POST /api/transactions/bulk — the import path. One store pass for the whole batch.
 // Body: { transactions: [ { account, type, amount, date, narration?, ... }, ... ] }
-router.post('/bulk', async (req, res) => {
-  try {
-    const { transactions } = req.body;
-    if (!Array.isArray(transactions) || !transactions.length) {
-      return res.status(400).json({ message: 'Transactions array is required' });
-    }
-
-    const { created, failed } = await createTransactions(req.user._id, transactions);
-    if (!created.length) return res.status(400).json({ message: failed[0].message, failed });
-
-    res.status(201).json({ count: created.length, transactions: created, failed });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: err.message || 'Server error' });
+router.post('/bulk', asyncHandler(async (req, res) => {
+  const { transactions } = req.body;
+  if (!Array.isArray(transactions) || !transactions.length) {
+    throw badRequest('Transactions array is required');
   }
-});
+
+  const { created, failed } = await createTransactions(req.user._id, transactions);
+  if (!created.length) throw badRequest(failed[0].message, { failed });
+
+  res.status(201).json({ count: created.length, transactions: created, failed });
+}));
 
 // DELETE /api/transactions/bulk
 // Body: { ids: [ "txId1", "txId2", ... ] }
-router.delete('/bulk', async (req, res) => {
-  try {
-    const { ids } = req.body;
-    if (!Array.isArray(ids) || !ids.length) {
-      return res.status(400).json({ message: 'Transaction Ids array is required' });
-    }
-    await txService.bulkDelete(req.user._id, ids);
-    res.json({ message: `${ids.length} transaction(s) deleted` });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
+router.delete('/bulk', asyncHandler(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) {
+    throw badRequest('Transaction Ids array is required');
   }
-});
+  await txService.bulkDelete(req.user._id, ids);
+  res.json({ message: `${ids.length} transaction(s) deleted` });
+}));
 
 module.exports = router;

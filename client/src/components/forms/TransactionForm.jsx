@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { transactionsAPI, subscriptionsAPI } from '../../lib/api';
-import { formatCurrency, TRANSACTION_TYPES } from '../../lib/utils';
+import { formatCurrency } from '../../lib/utils';
+import { TRANSACTION_TYPES } from '../../lib/constants';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
 import TypePicker from './TypePicker';

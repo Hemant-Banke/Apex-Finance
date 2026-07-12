@@ -28,7 +28,7 @@ require('net').setDefaultAutoSelectFamily(true);
 const MfScheme = require('../models/MfScheme');
 const MfNav    = require('../models/MfNav');
 const { DAY_MS } = require('../utils/constants');
-const { midnight, midnight_from_ms, todayMs } = require('../utils/helpers');
+const { midnight, todayMs } = require('../utils/helpers');
 
 const BASE = 'https://api.mfapi.in';
 
@@ -360,7 +360,7 @@ const _slice = (navs, from, to) => {
 /** Daily NAVs over [fromMs, toMs] → { [dayMs]: nav }, in INR. */
 async function getNavHistory(schemeCode, fromMs, toMs) {
   const navs = await _loadHistory(schemeCode);
-  return _slice(navs, midnight_from_ms(fromMs), midnight_from_ms(toMs));
+  return _slice(navs, midnight(fromMs), midnight(toMs));
 }
 
 /**
@@ -372,7 +372,7 @@ async function getNavHistory(schemeCode, fromMs, toMs) {
  * Only a genuinely historic date reaches for the history, and that is cached too.
  */
 async function getNavOn(schemeCode, dayMs) {
-  const day = midnight_from_ms(dayMs);
+  const day = midnight(dayMs);
 
   const scheme = await MfScheme.findOne({ schemeCode }).select('nav navDate').lean();
   if (scheme?.nav != null && scheme.navDate && day >= midnight(scheme.navDate)) {

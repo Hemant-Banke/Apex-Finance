@@ -63,7 +63,7 @@ function buildCashImpactMap(txns, aid) {
   for (const tx of txns) {
     const delta = accountCashImpact(tx, aid);
     if (delta !== 0) {
-      const k = midnight(new Date(tx.date));
+      const k = midnight(tx.date);
       cashImpacts[k] = (cashImpacts[k] || 0) + delta;
     }
   }
@@ -93,7 +93,7 @@ function buildAccountTxnsMap(txns) {
   for (const tx of txns) {
     const aid   = accountIdOf(tx.account);
     if (!aid) continue;
-    const dayMs = midnight(new Date(tx.date));
+    const dayMs = midnight(tx.date);
     const acct  = bucketFor(aid);
 
     if (ASSET_TRANSACTION_TYPES.includes(tx.type)) {

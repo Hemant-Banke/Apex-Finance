@@ -72,9 +72,6 @@ const isMarketAsset = (assetType) => MARKET_ASSET_TYPES.includes(assetType);
 /** True when the asset should carry an annual rate (coupon or expected return). */
 const isRateAsset = (assetType) => !isMarketAsset(assetType) && !isPurityAsset(assetType);
 
-/** What the rate means for this asset type — drives the form label. */
-const rateKind = (assetType) => (COUPON_ASSET_TYPES.includes(assetType) ? 'coupon' : 'expected');
-
 /** Fraction of pure metal for a purity key; 1 when unknown, so nothing is scaled away. */
 function purityFactor(assetType, purity) {
   const opt = (PURITY_OPTIONS[assetType] || []).find(o => o.value === purity);
@@ -131,19 +128,14 @@ function resolveUnitPrice(meta, { marketPrice = null, basePrice = null, basisMs,
   return null;
 }
 
+// The type lists, the troy-ounce constant and the premium multipliers are inputs to the
+// predicates and converters below — nothing outside this module reads them directly.
 module.exports = {
-  TROY_OZ_G,
   METAL_SPOT_SYMBOLS,
   FX_SYMBOL,
-  DOMESTIC_PREMIUM,
-  PURITY_ASSET_TYPES,
-  COUPON_ASSET_TYPES,
-  MARKET_ASSET_TYPES,
   PURITY_OPTIONS,
   isPurityAsset,
-  isMarketAsset,
   isRateAsset,
-  rateKind,
   purityFactor,
   metalInrPerGram,
   accruedPrice,

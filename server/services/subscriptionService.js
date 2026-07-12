@@ -29,6 +29,7 @@ const { occurrencesBetween }            = require('../utils/recurrence');
 const { midnight, todayMs }             = require('../utils/helpers');
 const { ASSET_TRANSACTION_TYPES }       = require('../utils/constants');
 const { normalizeCurrency }             = require('../utils/currency');
+const { badRequest, notFound }          = require('../utils/httpError');
 
 const isAsset = (type) => ASSET_TRANSACTION_TYPES.includes(type);
 
@@ -171,8 +172,8 @@ async function materializeDue(userId, uptoMs = todayMs()) {
  */
 async function createSubscription(userId, data) {
   const account = await Account.findOne({ _id: data.account, user: userId }).lean();
-  if (!account) throw new Error('Account not found');
-  if (isAsset(data.type) && account.isDebt) throw new Error('Buy/Sell transactions are not available on debt accounts');
+  if (!account) throw notFound('Account not found');
+  if (isAsset(data.type) && account.isDebt) throw badRequest('Buy/Sell transactions are not available on debt accounts');
 
   const doc = await Subscription.findOneAndUpdate(
     { user: userId },

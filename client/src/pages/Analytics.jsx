@@ -3,6 +3,7 @@ import { dashboardAPI } from '../lib/api';
 import { getCategoryMap, describeCategory } from '../lib/categoryNames';
 import { formatCurrency, CHART_COLORS } from '../lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import Spinner from '../components/ui/Spinner';
 import { useToast } from '../context/ToastContext';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import ChartTooltip from '../components/charts/ChartTooltip';
@@ -57,11 +58,7 @@ export default function Analytics() {
     finally { setLoading(false); }
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center" style={{ height: '60vh' }}>
-      <div className="spinner" />
-    </div>
-  );
+  if (loading) return <Spinner />;
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>

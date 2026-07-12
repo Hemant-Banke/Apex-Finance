@@ -1,86 +1,59 @@
 const express = require('express');
-const DailyNetWorth       = require('../models/DailyNetWorth');
-const AccountHoldings     = require('../models/AccountHoldings');
+const DailyNetWorth = require('../models/DailyNetWorth');
 
-const { protect }                   = require('../middleware/auth');
-const { DAY_MS }                    = require('../utils/constants');
-const { midnight, toDateStr, toDateStr_from_ms, todayStr } = require('../utils/helpers');
-const dvService  = require('../services/dailyValueService');
-const { getAllAccountsAssetBalance }         = require('../services/accountBalance');
+const { protect }             = require('../middleware/auth');
+const { asyncHandler }        = require('../middleware/asyncHandler');
+const { DAY_MS }              = require('../utils/constants');
+const { midnight, toDateStr, todayStr } = require('../utils/helpers');
+const { sliceStartIndex }     = require('../utils/tsHelpers');
+const dvService               = require('../services/dailyValueService');
+const { getAllAccountsAssetBalance } = require('../services/accountBalance');
 
 const router = express.Router();
 router.use(protect);
 
 /**
  * GET /api/networth/daily?days=N&fetchLatestBal=true
- * Returns [{ date, value }] from valuesTS (complete settled NW, ends at T-1).
- * If fetchLatestBal=true, appends one more entry for today:
- *   value = lastCashValue (T cash) + live asset prices across all holdings.
+ * Returns [{ date, value }] from valuesTS (settled net worth, ending at T-1).
+ * With fetchLatestBal, today is appended: T cash + live asset prices.
  */
-router.get('/daily', async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const doc    = await DailyNetWorth.findOne({ user: userId }).lean();
-    if (!doc || !doc.valuesTS?.length) return res.json([]);
+router.get('/daily', asyncHandler(async (req, res) => {
+  const doc = await DailyNetWorth.findOne({ user: req.user._id }).lean();
+  if (!doc?.valuesTS?.length) return res.json([]);
 
-    const docStartMs = midnight(doc.startDate);
-    let sliceStart   = 0;
+  const startMs = midnight(doc.startDate);
+  const from    = sliceStartIndex(startMs, midnight(doc.endDate), req.query.days);
 
-    if (req.query.days) {
-      const cutoffMs = midnight(doc.endDate) - (parseInt(req.query.days) - 1) * DAY_MS;
-      if (cutoffMs > docStartMs) {
-        sliceStart = Math.round((cutoffMs - docStartMs) / DAY_MS);
-      }
-    }
-
-    const result = [];
-    for (let i = Math.max(0, sliceStart); i < doc.valuesTS.length; i++) {
-      result.push({ date: toDateStr_from_ms(docStartMs + i * DAY_MS), value: doc.valuesTS[i] });
-    }
-
-    // Append today's value if fetchLatestBal
-    if (req.query.fetchLatestBal === 'true') {
-      const { value: liveAssetValue } = await getAllAccountsAssetBalance(req.user, true);
-
-      result.push({
-        date:  todayStr(),
-        value: (doc.lastCashValue || 0) + liveAssetValue,
-      });
-    }
-
-    res.json(result);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
+  const result = [];
+  for (let i = from; i < doc.valuesTS.length; i++) {
+    result.push({ date: toDateStr(startMs + i * DAY_MS), value: doc.valuesTS[i] });
   }
-});
+
+  if (req.query.fetchLatestBal === 'true') {
+    const { value: liveAssetValue } = await getAllAccountsAssetBalance(req.user, true);
+    result.push({ date: todayStr(), value: (doc.lastCashValue || 0) + liveAssetValue });
+  }
+
+  res.json(result);
+}));
 
 /**
  * POST /api/networth/ensure
- * Carry-forward all cash stores to today. Call on session start.
+ * Carry every store forward to today (and fire anything a subscription owes).
+ * Called on session start.
  */
-router.post('/ensure', async (req, res) => {
-  try {
-    await dvService.ensureUpToToday(req.user._id);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+router.post('/ensure', asyncHandler(async (req, res) => {
+  await dvService.ensureUpToToday(req.user._id);
+  res.json({ ok: true });
+}));
 
 /**
  * POST /api/networth/rebuild
- * Full rebuild of all cash stores + holdings from transaction history.
+ * Full rebuild of every store + holdings from transaction history.
  */
-router.post('/rebuild', async (req, res) => {
-  try {
-    await dvService.rebuildAll(req.user._id);
-    res.json({ message: 'All stores rebuilt' });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+router.post('/rebuild', asyncHandler(async (req, res) => {
+  await dvService.rebuildAll(req.user._id);
+  res.json({ message: 'All stores rebuilt' });
+}));
 
 module.exports = router;

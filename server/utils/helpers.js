@@ -1,46 +1,46 @@
-const { DAY_MS } = require('../utils/constants');
+const { DAY_MS } = require('./constants');
 
-/** UTC-midnight timestamp (integer) for any date-like value. */
+/**
+ * UTC-midnight timestamp for any date-like value: a Date, an ms number, or a date
+ * string. Every day index in the stores is one of these — the whole codebase keys
+ * days by UTC midnight, so this is the only way a day is derived.
+ */
 function midnight(date) {
-  const t = date.getTime();
+  const t = date instanceof Date ? date.getTime()
+          : typeof date === 'number' ? date
+          : new Date(date).getTime();
   return t - (t % DAY_MS);
 }
 
-function midnight_from_ms(t) {
-  return t - (t % DAY_MS);
-}
-
-/** YYYY-MM-DD string for API output. */
+/**
+ * YYYY-MM-DD for any date-like value. Read in UTC to match `midnight` — reading a
+ * UTC-midnight timestamp with local getters lands on the previous day west of
+ * Greenwich, which would shift every date the API emits.
+ */
 function toDateStr(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function toDateStr_from_ms(t) {
-  const date = new Date(t);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
+  const d = date instanceof Date ? date : new Date(date);
+  const year  = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day   = String(d.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
 
 /** UTC-midnight ms for today (T). */
-function todayMs() { return midnight(new Date()); }
-
-/** UTC-now ms for today (T). */
-function nowMs() { return new Date().getTime(); }
+const todayMs = () => midnight(new Date());
 
 /** UTC-midnight ms for yesterday (T-1, the last settled day). */
-function t1Ms() { return midnight(new Date()) - DAY_MS; }
+const t1Ms = () => todayMs() - DAY_MS;
 
-/** UTC-midnight string for today (T). */
-function todayStr() { return toDateStr_from_ms(todayMs()); }
+/** Now, in ms. */
+const nowMs = () => Date.now();
 
-/** UTC-midnight string for yesterday (T-1, the last settled day). */
-function t1Str() { return toDateStr_from_ms(t1Ms()); }
+/** YYYY-MM-DD for today (T). */
+const todayStr = () => toDateStr(todayMs());
 
+/** YYYY-MM-DD for yesterday (T-1, the last settled day). */
+const t1Str = () => toDateStr(t1Ms());
+
+/** Yahoo's quoteType vocabulary → ours. */
 function mapQuoteType(quoteType) {
   const map = {
     EQUITY:         'stock',
@@ -50,7 +50,7 @@ function mapQuoteType(quoteType) {
     BOND:           'bond',
     FUTURE:         'commodity',
     CURRENCY:       'other',
-    INDEX:          'other'
+    INDEX:          'other',
   };
   return map[quoteType] || 'other';
 }
@@ -62,31 +62,29 @@ function mapQuoteType(quoteType) {
  * ("0P0001RO8V.BO") and the real fund name only in `longname`, so a plain
  * `shortname || longname` shows the user an opaque code.
  *
- * We still prefer `shortname` when it is a genuine name: for US funds it is the
- * only field carrying the share class (VFIAX / VFINX / VFFSX all share the
- * longname "Vanguard 500 Index Fund"). So `longname` is used only when
- * `shortname` is missing or merely repeats the symbol.
+ * We still prefer `shortname` when it is a genuine name: for US funds it is the only
+ * field carrying the share class (VFIAX / VFINX / VFFSX all share the longname
+ * "Vanguard 500 Index Fund"). So `longname` is used only when `shortname` is missing
+ * or merely repeats the symbol.
  */
 function resolveQuoteName({ symbol = '', shortname = '', longname = '' } = {}) {
-  const sym  = symbol.trim().toUpperCase();
-  // Compare against the bare ticker too — "0P0001RO8V" vs "0P0001RO8V.BO".
-  const base = sym.split('.')[0];
+  const sym   = symbol.trim().toUpperCase();
+  const base  = sym.split('.')[0];   // compare against the bare ticker too
   const short = shortname.trim();
+
   const isPlaceholder = !short
     || short.toUpperCase() === sym
     || short.toUpperCase() === base;
 
-  return (isPlaceholder ? (longname.trim() || symbol) : short);
+  return isPlaceholder ? (longname.trim() || symbol) : short;
 }
 
 module.exports = {
   midnight,
-  midnight_from_ms,
   toDateStr,
-  toDateStr_from_ms,
   todayMs,
-  nowMs,
   t1Ms,
+  nowMs,
   todayStr,
   t1Str,
   mapQuoteType,

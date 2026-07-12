@@ -1,12 +1,8 @@
 import { clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 
-// Domain type vocabularies live in one place; re-exported here for convenience
-// so existing `import { ACCOUNT_TYPES } from '../lib/utils'` call sites keep working.
-export {
-  ACCOUNT_TYPES, TRANSACTION_TYPES, ASSET_TYPES,
-  labelOf, accountTypeLabel, transactionTypeLabel, assetTypeLabel,
-} from './constants';
+// Formatting and display helpers. The domain type vocabularies (ACCOUNT_TYPES,
+// TRANSACTION_TYPES, …) live in ./constants — import them from there.
 
 export function cn(...inputs) {
   return twMerge(clsx(inputs));
@@ -95,35 +91,28 @@ export function getTransactionSign(type) {
   return '';
 }
 
-export function formatCategoryCode(code) {
-  if (!code || code === 'general') return '';
-  // Strip prefix (tp_, ts_, tpu_, tsu_) from the most specific part
-  const last = code.split('/').pop();
-  const clean = last.replace(/^t[sp]u?_/, '');
-  return clean.charAt(0).toUpperCase() + clean.slice(1).replace(/_/g, ' ');
-}
-
-export function getTransactionName(tx) {
-  const cap = s => s ? s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ') : '';
-  if (tx.type === 'income')  return `Income: ${formatCategoryCode(tx.category) || cap(tx.category)}`;
-  if (tx.type === 'expense') return `Expense: ${formatCategoryCode(tx.category) || cap(tx.category)}`;
-  if (tx.type === 'transfer')   return 'Transfer';
-  if (tx.type === 'adjustment') return 'Adjustment';
-  if (tx.type === 'buy')  return `Buy Asset: ${cap(tx.assetSymbol || tx.assetName || 'Unknown')}`;
-  if (tx.type === 'sell') return `Sell Asset: ${cap(tx.assetName || tx.assetSymbol || 'Unknown')}`;
-  return cap(tx.type);
-}
-
-export function getAccountIcon(type) {
-  const icons = {
-    bank: 'Landmark',
-    brokerage: 'TrendingUp',
-    retirement: 'Shield',
-    debt: 'CreditCard',
-    wallet: 'Wallet',
-    other: 'Briefcase'
-  };
-  return icons[type] || 'Briefcase';
+/**
+ * What a transaction is called in a list.
+ *
+ * A category CODE is an internal handle ("tp_other_exp/ts_misc_exp") — de-slugging it
+ * yields garbage ("Misc exp"), so the real name has to be looked up in the taxonomy.
+ * `describe` is `label` from `useCategoryNames()`; without it (or before the taxonomy
+ * loads) an income/expense falls back to its bare type, which is at least not wrong.
+ */
+export function getTransactionName(tx, describe) {
+  switch (tx.type) {
+    case 'income':
+    case 'expense': {
+      const kind  = tx.type === 'income' ? 'Income' : 'Expense';
+      const label = describe?.(tx.category);
+      return label ? `${kind}: ${label}` : kind;
+    }
+    case 'transfer':   return 'Transfer';
+    case 'adjustment': return 'Adjustment';
+    case 'buy':        return `Buy Asset: ${tx.assetName || tx.assetSymbol || 'Unknown'}`;
+    case 'sell':       return `Sell Asset: ${tx.assetName || tx.assetSymbol || 'Unknown'}`;
+    default:           return tx.type;
+  }
 }
 
 export const CHART_COLORS = [

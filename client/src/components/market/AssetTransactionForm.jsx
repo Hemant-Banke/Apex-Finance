@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { marketAPI, transactionsAPI, subscriptionsAPI } from '../../lib/api';
-import { formatCurrency, ASSET_TYPES } from '../../lib/utils';
-import { PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
+import { formatCurrency } from '../../lib/utils';
+import { ASSET_TYPES, PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
 import DatePicker from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
 import { accountOptions } from '../../lib/accountPickerOptions';

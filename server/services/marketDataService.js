@@ -9,7 +9,7 @@
  */
 
 const { DAY_MS, IST_OFFSET_MS, YF_HEADERS } = require('../utils/constants');
-const { midnight_from_ms, todayMs, toDateStr_from_ms } = require('../utils/helpers');
+const { midnight, todayMs, toDateStr } = require('../utils/helpers');
 const {
   METAL_SPOT_SYMBOLS, FX_SYMBOL, isPurityAsset, metalInrPerGram, purityFactor,
 } = require('../utils/assetPricing');
@@ -18,51 +18,71 @@ const {
 } = require('../utils/currency');
 const mfService = require('./mfService');
 
+/**
+ * Crypto trades round the clock, so its "daily close" is whatever the price was at
+ * midnight IST — UTC 18:30 of the previous day. Shifting the query window back by the
+ * IST offset is what lines Yahoo's bars up with our calendar days.
+ */
 function _adjustDateForYF(date, assetType) {
   return assetType === 'crypto' ? date - IST_OFFSET_MS : date;
 }
 
-function _revertDateFromYF(T, assetType){
-  return midnight_from_ms(T * 1000 + (assetType === 'crypto' ? IST_OFFSET_MS : 0));
+/**
+ * The one place Yahoo's chart endpoint is called.
+ *
+ * `/v7/finance/quote` and `/v10/quoteSummary` are crumb-gated (401), so v8/chart is
+ * the only way in — for a price series, a single close, or a live quote. Every caller
+ * goes through here rather than assembling the URL again.
+ *
+ * @returns {Promise<Object|null>} the chart `result` object, or null on any failure.
+ */
+async function fetchChart(symbol, params = {}, timeoutMs = 8000) {
+  try {
+    const query = new URLSearchParams({ interval: '1d', ...params });
+    const url   = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?${query}`;
+
+    const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(timeoutMs) });
+    if (!resp.ok) return null;
+
+    return (await resp.json())?.chart?.result?.[0] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** The daily closes of a chart result, keyed by the UTC-midnight ms of their day. */
+function closesByDay(result) {
+  const timestamps = result?.timestamp || [];
+  const closes     = result?.indicators?.quote?.[0]?.close || [];
+
+  const out = {};
+  timestamps.forEach((ts, i) => {
+    if (closes[i] != null) out[midnight(ts * 1000)] = _round2(closes[i]);
+  });
+  return out;
 }
 
 /**
- * Fetch daily close prices for one symbol.
- * Returns { [dayMs]: price } keyed by UTC-midnight ms so the values align with
- * the day indices used by buildAssetTS.
+ * Fetch daily close prices for one symbol, in its NATIVE currency.
+ * Returns { [dayMs]: price } keyed by UTC-midnight ms, so the values align with the
+ * day indices used by buildAssetTS.
  */
 async function _fetchHistoricForSymbol(assetSymbol, assetType, startMs, endMs) {
-  try {
-    const from = _adjustDateForYF(startMs, assetType);
-    const to   = _adjustDateForYF(endMs,   assetType);
+  const result = await fetchChart(assetSymbol, {
+    period1: Math.floor(_adjustDateForYF(startMs, assetType) / 1000),
+    period2: Math.floor((_adjustDateForYF(endMs, assetType) + DAY_MS) / 1000), // +1 day buffer
+  });
+  return closesByDay(result);
+}
 
-    const period1 = Math.floor(from / 1000);
-    const period2 = Math.floor((to + DAY_MS) / 1000); // +1 day buffer
-
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(assetSymbol)}`
-              + `?period1=${period1}&period2=${period2}&interval=1d`;
-
-    const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return {};
-
-    const data   = await resp.json();
-    const result = data?.chart?.result?.[0];
-    if (!result) return {};
-
-    const timestamps = result.timestamp || [];
-    const closes     = result.indicators?.quote?.[0]?.close || [];
-
-    // Key each close by the UTC-midnight ms of its calendar day. For crypto, the
-    // IST offset is added back so the shifted query maps onto the right day.
-    const raw = {};
-    timestamps.forEach((T, i) => {
-      if (closes[i] == null) return;
-      raw[_revertDateFromYF(T)] = Math.round(closes[i] * 100)/100;
-    });
-    return raw;
-  } catch {
-    return {};
+/** The last value in a day-keyed series on or before `dayMs`, with its day. */
+function lastOnOrBefore(series, dayMs) {
+  let best = null;
+  for (const k of Object.keys(series || {})) {
+    const day = Number(k);
+    if (day <= dayMs && (best === null || day > best)) best = day;
   }
+  return best === null ? null : { day: best, value: series[best] };
 }
 
 /**
@@ -306,19 +326,14 @@ async function fetchMetalPricePerGram(assetType, purity, dateMs) {
 
   if (dateMs >= today) {
     const price = (await fetchLatestPrices(item))['_METAL'];
-    if (price == null) return null;
-    return { price: Math.round(price * scale * 100) / 100, asof: toDateStr_from_ms(today) };
+    return price == null ? null : { price: _round2(price * scale), asof: toDateStr(today) };
   }
 
   const series = (await fetchHistoricPrices(item, dateMs - 7 * DAY_MS, dateMs))['_METAL'] || {};
-  const days   = Object.keys(series).map(Number).filter(d => d <= dateMs).sort((a, b) => a - b);
-  if (!days.length) return null;
+  const last   = lastOnOrBefore(series, dateMs);
+  if (!last) return null;
 
-  const day = days[days.length - 1];
-  return {
-    price: Math.round(series[day] * scale * 100) / 100,
-    asof:  toDateStr_from_ms(day),
-  };
+  return { price: _round2(last.value * scale), asof: toDateStr(last.day) };
 }
 
 /**
@@ -334,19 +349,15 @@ async function fetchMetalPricePerGram(assetType, purity, dateMs) {
 async function fetchFxRate(currency, dateMs) {
   if (isBaseCurrency(currency)) return 1;
 
-  const sym   = fxSymbol(currency);
-  const today = todayMs();
+  const sym  = fxSymbol(currency);
+  const item = [{ assetSymbol: sym, assetType: 'stock' }];
 
-  if (dateMs >= today) {
-    const live = await fetchLatestPrices([{ assetSymbol: sym, assetType: 'stock' }]);
-    return live[sym] ?? null;
+  if (dateMs >= todayMs()) {
+    return (await fetchLatestPrices(item))[sym] ?? null;
   }
 
-  const series = (await fetchHistoricPrices(
-    [{ assetSymbol: sym, assetType: 'stock' }], dateMs - 7 * DAY_MS, dateMs,
-  ))[sym] || {};
-  const days = Object.keys(series).map(Number).filter(d => d <= dateMs).sort((a, b) => a - b);
-  return days.length ? series[days[days.length - 1]] : null;
+  const series = (await fetchHistoricPrices(item, dateMs - 7 * DAY_MS, dateMs))[sym] || {};
+  return lastOnOrBefore(series, dateMs)?.value ?? null;
 }
 
 /**
@@ -381,16 +392,9 @@ async function fetchQuoteMeta(symbols = []) {
   if (!symbols.length) return out;
 
   const results = await Promise.all(symbols.map(async (sym) => {
-    try {
-      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`;
-      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(5000) });
-      if (!resp.ok) return null;
-      const meta = (await resp.json())?.chart?.result?.[0]?.meta;
-      if (meta?.regularMarketPrice == null) return null;
-      return { price: _round2(meta.regularMarketPrice), currency: meta.currency || '' };
-    } catch {
-      return null;
-    }
+    const meta = (await fetchChart(sym, { range: '1d' }, 5000))?.meta;
+    if (meta?.regularMarketPrice == null) return null;
+    return { price: _round2(meta.regularMarketPrice), currency: meta.currency || '' };
   }));
 
   symbols.forEach((sym, i) => { if (results[i]) out[sym] = results[i]; });
@@ -422,17 +426,19 @@ async function fetchPriceOnDate({ assetSymbol, assetType, purity }, dateMs) {
   // Listed → the close on (or just before) the day. `_fetchHistoricForSymbol` is the
   // raw, UNCONVERTED series, which is exactly what we want here.
   const series = await _fetchHistoricForSymbol(assetSymbol, assetType, dateMs - 10 * DAY_MS, dateMs);
-  const days   = Object.keys(series).map(Number).filter(d => d <= dateMs).sort((a, b) => a - b);
-  if (!days.length) return null;
+  const last   = lastOnOrBefore(series, dateMs);
+  if (!last) return null;
 
   const meta = await fetchQuoteMeta([assetSymbol]);
-  return {
-    price:    series[days[days.length - 1]],
-    currency: meta[assetSymbol]?.currency || '',
-  };
+  return { price: last.value, currency: meta[assetSymbol]?.currency || '' };
 }
 
 module.exports = {
+  // The one door to Yahoo, plus the helpers for reading what comes back — routes use
+  // these rather than assembling a chart URL of their own.
+  fetchChart,
+  closesByDay,
+  lastOnOrBefore,
   fetchHistoricPrices,
   fetchLatestPrices,
   fetchMetalPricePerGram,

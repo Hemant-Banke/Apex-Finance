@@ -9,7 +9,7 @@
  */
 
 const { DAY_MS } = require('./constants');
-const { midnight_from_ms } = require('./helpers');
+const { midnight } = require('./helpers');
 
 const FREQUENCIES = ['daily', 'weekly', 'fortnightly', 'monthly', 'quarterly', 'yearly'];
 
@@ -20,7 +20,7 @@ const daysInMonth = (year, month) => new Date(Date.UTC(year, month + 1, 0)).getU
  * The n-th occurrence of a schedule, as UTC-midnight ms. n = 0 is the start date.
  */
 function occurrenceAt(startMs, frequency, n) {
-  const start = new Date(midnight_from_ms(startMs));
+  const start = new Date(midnight(startMs));
 
   switch (frequency) {
     case 'daily':       return startMs + n * DAY_MS;
@@ -74,6 +74,5 @@ function occurrencesBetween(startMs, frequency, uptoMs, afterMs = null, endMs = 
 
 module.exports = {
   FREQUENCIES,
-  occurrenceAt,
   occurrencesBetween,
 };

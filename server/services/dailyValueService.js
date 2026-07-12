@@ -250,7 +250,7 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
             pricePerUnit: accruedPrice(
               h.avgPricePerUnit,
               h.rate,
-              midnight(new Date(h.lastTransactionDate || h.firstPurchaseDate || assetStart)),
+              midnight(h.lastTransactionDate || h.firstPurchaseDate || assetStart),
               assetStart,
             ),
             // Carry valuation metadata, or the extended days would lose purity

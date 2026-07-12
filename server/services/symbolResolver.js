@@ -193,7 +193,7 @@ async function resolveAsset({ symbol, name, assetType, pricePerUnit, date }) {
 }
 
 async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
-  const dateMs = date ? midnight(new Date(date)) : null;
+  const dateMs = date ? midnight(date) : null;
 
   // ── Mutual funds resolve against AMFI and NOWHERE ELSE.
   //

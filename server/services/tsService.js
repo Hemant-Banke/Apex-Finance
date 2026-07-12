@@ -78,7 +78,7 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPr
   // Index transactions by their settlement day for O(1) per-day lookup.
   const txsByDay = {};
   for (const tx of assetTxns) {
-    const k = midnight(new Date(tx.date));
+    const k = midnight(tx.date);
     (txsByDay[k] ??= []).push(tx);
   }
 
@@ -255,7 +255,6 @@ function buildTransactionsTS(byAccount, pricesBySymbol, accountsById = {}, initi
 }
 
 module.exports = {
-  buildCashTS,
   buildAssetTS,
   buildNetWorthTS,
   buildTransactionsTS,

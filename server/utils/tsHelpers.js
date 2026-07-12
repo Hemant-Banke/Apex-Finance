@@ -65,7 +65,24 @@ function tsConcat(ts1 = [], ts2 = [], startMs1, startMs2, endMs1, endMs2) {
   };
 }
 
+/**
+ * Index into a store's series at which a `?days=N` window begins.
+ *
+ * The window is the last N days *of the store*, counted back from its own endDate —
+ * not from today — so a store that has not been extended yet still returns N entries.
+ * 0 when the store is shorter than the window, or when no window was asked for.
+ */
+function sliceStartIndex(startMs, endMs, days) {
+  const n = parseInt(days, 10);
+  if (!n || n < 1) return 0;
+
+  const cutoffMs = endMs - (n - 1) * DAY_MS;
+  if (cutoffMs <= startMs) return 0;
+  return Math.round((cutoffMs - startMs) / DAY_MS);
+}
+
 module.exports = {
   tsAdder,
   tsConcat,
+  sliceStartIndex,
 };

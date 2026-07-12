@@ -7,13 +7,15 @@
  * which re-exports these) rather than hard-coding option lists in components.
  */
 
+// Icons for these live in lib/accountPickerOptions, which maps each type to a real
+// lucide component — a name string here would just be a second list to keep in step.
 export const ACCOUNT_TYPES = [
-  { value: 'bank',       label: 'Bank Account', icon: 'Landmark' },
-  { value: 'brokerage',  label: 'Brokerage',    icon: 'TrendingUp' },
-  { value: 'retirement', label: 'Retirement',   icon: 'Shield' },
-  { value: 'debt',       label: 'Debt / Loan',  icon: 'CreditCard' },
-  { value: 'wallet',     label: 'Wallet',       icon: 'Wallet' },
-  { value: 'other',      label: 'Other',        icon: 'Briefcase' },
+  { value: 'bank',       label: 'Bank Account' },
+  { value: 'brokerage',  label: 'Brokerage' },
+  { value: 'retirement', label: 'Retirement' },
+  { value: 'debt',       label: 'Debt / Loan' },
+  { value: 'wallet',     label: 'Wallet' },
+  { value: 'other',      label: 'Other' },
 ];
 
 export const TRANSACTION_TYPES = [

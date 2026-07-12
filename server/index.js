@@ -11,6 +11,7 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const connectDB = require('./config/db');
+const { errorHandler } = require('./middleware/asyncHandler');
 
 // Route imports
 const authRoutes = require('./routes/auth');
@@ -72,14 +73,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).json({
-    message: 'Something went wrong!',
-    error: process.env.NODE_ENV === 'development' ? err.message : undefined
-  });
-});
+// Terminal error handler. Routes are wrapped in `asyncHandler`, so a rejection from any
+// of them — or from a service that threw an HttpError — lands here.
+app.use(errorHandler);
 
 const PORT = process.env.PORT || 5000;
 

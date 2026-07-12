@@ -5,6 +5,7 @@ const DailyNetWorth = require('../models/DailyNetWorth');
 const DailyAccountBalance = require('../models/DailyAccountBalance');
 const AccountHoldings = require('../models/AccountHoldings');
 const { protect } = require('../middleware/auth');
+const { asyncHandler } = require('../middleware/asyncHandler');
 const { holdingsToArray } = require('../services/holdingsService');
 
 const router = express.Router();
@@ -13,194 +14,169 @@ router.use(protect);
 // @route   GET /api/dashboard/summary
 // Uses pre-computed stores (DailyAccountBalance, AccountHoldings, DailyNetWorth)
 // instead of re-aggregating transactions on every request.
-router.get('/summary', async (req, res) => {
-  try {
-    const userId = req.user._id;
+router.get('/summary', asyncHandler(async (req, res) => {
+  const userId = req.user._id;
 
-    const [accounts, dailyBalances, holdingsDocs, nwDoc] = await Promise.all([
-      Account.find({ user: userId }).lean(),
-      DailyAccountBalance.find({ user: userId }).select('account settledValue lastCashValue').lean(),
-      AccountHoldings.find({ user: userId }).lean(),
-      DailyNetWorth.findOne({ user: userId }).select('settledValue lastCashValue').lean(),
-    ]);
+  const [accounts, dailyBalances, holdingsDocs, nwDoc] = await Promise.all([
+    Account.find({ user: userId }).lean(),
+    DailyAccountBalance.find({ user: userId }).select('account settledValue lastCashValue').lean(),
+    AccountHoldings.find({ user: userId }).lean(),
+    DailyNetWorth.findOne({ user: userId }).select('settledValue lastCashValue').lean(),
+  ]);
 
-    // Settled balance per account from pre-computed store (T-1 cash + T-1 assets)
-    const settledByAccount = {};
-    dailyBalances.forEach(d => { settledByAccount[d.account.toString()] = d.settledValue || 0; });
+  // Settled balance per account from pre-computed store (T-1 cash + T-1 assets)
+  const settledByAccount = {};
+  dailyBalances.forEach(d => { settledByAccount[d.account.toString()] = d.settledValue || 0; });
 
-    // Debt balances are already stored negative, so liabilities is just their
-    // sum flipped for display (a positive "you owe" figure). Nothing is forced:
-    // an overpaid debt account reports a negative liability, which is the truth.
-    let totalAssets      = 0;
-    let totalLiabilities = 0;
-    accounts.forEach(acc => {
-      const id      = acc._id.toString();
-      const settled = settledByAccount[id] || 0;
-      if (acc.isDebt) {
-        totalLiabilities -= settled;
-      } else {
-        totalAssets += settled;
-      }
+  // Debt balances are already stored negative, so liabilities is just their
+  // sum flipped for display (a positive "you owe" figure). Nothing is forced:
+  // an overpaid debt account reports a negative liability, which is the truth.
+  let totalAssets      = 0;
+  let totalLiabilities = 0;
+  accounts.forEach(acc => {
+    const id      = acc._id.toString();
+    const settled = settledByAccount[id] || 0;
+    if (acc.isDebt) {
+      totalLiabilities -= settled;
+    } else {
+      totalAssets += settled;
+    }
+  });
+
+  // Holdings count — unique symbols with qty > 0 across all accounts
+  const symbolsSeen = new Set();
+  holdingsDocs.forEach(doc => {
+    (doc.holdings || []).forEach(h => {
+      if ((h.units || 0) > 0) symbolsSeen.add(h.assetSymbol);
     });
+  });
 
-    // Holdings count — unique symbols with qty > 0 across all accounts
-    const symbolsSeen = new Set();
-    holdingsDocs.forEach(doc => {
-      (doc.holdings || []).forEach(h => {
-        if ((h.units || 0) > 0) symbolsSeen.add(h.assetSymbol);
-      });
-    });
+  // Monthly income/expense still comes from transactions (these aren't cached elsewhere)
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
 
-    // Monthly income/expense still comes from transactions (these aren't cached elsewhere)
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+  const [monthlyFlow, recentTransactions] = await Promise.all([
+    Transaction.aggregate([
+      { $match: { user: userId, date: { $gte: startOfMonth }, type: { $in: ['income', 'expense'] } } },
+      { $group: { _id: '$type', total: { $sum: '$amount' } } }
+    ]),
+    Transaction.find({ user: userId })
+      .populate('account',   'name type')
+      .populate('toAccount', 'name type')
+      .sort({ date: -1 })
+      .limit(10)
+  ]);
 
-    const [monthlyFlow, recentTransactions] = await Promise.all([
-      Transaction.aggregate([
-        { $match: { user: userId, date: { $gte: startOfMonth }, type: { $in: ['income', 'expense'] } } },
-        { $group: { _id: '$type', total: { $sum: '$amount' } } }
-      ]),
-      Transaction.find({ user: userId })
-        .populate('account',   'name type')
-        .populate('toAccount', 'name type')
-        .sort({ date: -1 })
-        .limit(10)
-    ]);
+  const monthlyIncome  = monthlyFlow.find(f => f._id === 'income')?.total  || 0;
+  const monthlyExpense = monthlyFlow.find(f => f._id === 'expense')?.total || 0;
 
-    const monthlyIncome  = monthlyFlow.find(f => f._id === 'income')?.total  || 0;
-    const monthlyExpense = monthlyFlow.find(f => f._id === 'expense')?.total || 0;
-
-    res.json({
-      netWorth:         nwDoc?.settledValue ?? (totalAssets - totalLiabilities),
-      totalAssets,
-      totalLiabilities,
-      monthlyIncome,
-      monthlyExpense,
-      monthlySavings:   monthlyIncome - monthlyExpense,
-      accountCount:     accounts.length,
-      holdingsCount:    symbolsSeen.size,
-      recentTransactions
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.json({
+    netWorth:         nwDoc?.settledValue ?? (totalAssets - totalLiabilities),
+    totalAssets,
+    totalLiabilities,
+    monthlyIncome,
+    monthlyExpense,
+    monthlySavings:   monthlyIncome - monthlyExpense,
+    accountCount:     accounts.length,
+    holdingsCount:    symbolsSeen.size,
+    recentTransactions
+  });
+}));
 
 // @route   GET /api/dashboard/holdings
 // Returns all holdings for the user across all accounts, merged by symbol.
-router.get('/holdings', async (req, res) => {
-  try {
-    const holdingsDocs = await AccountHoldings.find({ user: req.user._id }).lean();
+router.get('/holdings', asyncHandler(async (req, res) => {
+  const holdingsDocs = await AccountHoldings.find({ user: req.user._id }).lean();
 
-    // Merge holdings of the same symbol across accounts (raw stored shape).
-    const merged = {};
-    holdingsDocs.forEach(doc => {
-      (doc.holdings || []).forEach(h => {
-        const sym = h.assetSymbol;
-        if (!sym) return;
-        if (!merged[sym]) {
-          merged[sym] = { assetSymbol: sym, assetName: h.assetName, assetType: h.assetType, units: 0, totalInvested: 0 };
-        }
-        merged[sym].units         += h.units         || 0;
-        merged[sym].totalInvested += h.totalInvested || 0;
-      });
+  // Merge holdings of the same symbol across accounts (raw stored shape).
+  const merged = {};
+  holdingsDocs.forEach(doc => {
+    (doc.holdings || []).forEach(h => {
+      const sym = h.assetSymbol;
+      if (!sym) return;
+      if (!merged[sym]) {
+        merged[sym] = { assetSymbol: sym, assetName: h.assetName, assetType: h.assetType, units: 0, totalInvested: 0 };
+      }
+      merged[sym].units         += h.units         || 0;
+      merged[sym].totalInvested += h.totalInvested || 0;
     });
+  });
 
-    // Blended AVCO after merge, then map to client shape.
-    Object.values(merged).forEach(h => {
-      h.avgPricePerUnit = h.units > 0 ? h.totalInvested / h.units : 0;
-    });
+  // Blended AVCO after merge, then map to client shape.
+  Object.values(merged).forEach(h => {
+    h.avgPricePerUnit = h.units > 0 ? h.totalInvested / h.units : 0;
+  });
 
-    const result = holdingsToArray(Object.values(merged)).filter(h => h.totalInvested > 0);
-    res.json(result);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  const result = holdingsToArray(Object.values(merged)).filter(h => h.totalInvested > 0);
+  res.json(result);
+}));
 
 // @route   GET /api/dashboard/asset-allocation
 // Returns holdings grouped by asset type from AccountHoldings (not transactions).
-router.get('/asset-allocation', async (req, res) => {
-  try {
-    const holdingsDocs = await AccountHoldings.find({ user: req.user._id }).lean();
+router.get('/asset-allocation', asyncHandler(async (req, res) => {
+  const holdingsDocs = await AccountHoldings.find({ user: req.user._id }).lean();
 
-    const byType = {};
-    holdingsDocs.forEach(doc => {
-      (doc.holdings || []).forEach(h => {
-        if ((h.totalInvested || 0) <= 0) return;
-        const t = h.assetType || 'other';
-        if (!byType[t]) byType[t] = { _id: t, totalInvested: 0, assets: new Set() };
-        byType[t].totalInvested += h.totalInvested;
-        byType[t].assets.add(h.assetSymbol);
-      });
+  const byType = {};
+  holdingsDocs.forEach(doc => {
+    (doc.holdings || []).forEach(h => {
+      if ((h.totalInvested || 0) <= 0) return;
+      const t = h.assetType || 'other';
+      if (!byType[t]) byType[t] = { _id: t, totalInvested: 0, assets: new Set() };
+      byType[t].totalInvested += h.totalInvested;
+      byType[t].assets.add(h.assetSymbol);
     });
+  });
 
-    const allocation = Object.values(byType).map(x => ({
-      _id:           x._id,
-      totalInvested: x.totalInvested,
-      assets:        Array.from(x.assets)
-    }));
+  const allocation = Object.values(byType).map(x => ({
+    _id:           x._id,
+    totalInvested: x.totalInvested,
+    assets:        Array.from(x.assets)
+  }));
 
-    res.json(allocation);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.json(allocation);
+}));
 
 // @route   GET /api/dashboard/income-expense
-router.get('/income-expense', async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { months = 6 } = req.query;
+router.get('/income-expense', asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { months = 6 } = req.query;
 
-    const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() - parseInt(months));
-    startDate.setDate(1);
-    startDate.setHours(0, 0, 0, 0);
+  const startDate = new Date();
+  startDate.setMonth(startDate.getMonth() - parseInt(months));
+  startDate.setDate(1);
+  startDate.setHours(0, 0, 0, 0);
 
-    const data = await Transaction.aggregate([
-      { $match: { user: userId, date: { $gte: startDate }, type: { $in: ['income', 'expense'] } } },
-      { $group: { _id: { year: { $year: '$date' }, month: { $month: '$date' }, type: '$type' }, total: { $sum: '$amount' } } },
-      { $sort: { '_id.year': 1, '_id.month': 1 } }
-    ]);
+  const data = await Transaction.aggregate([
+    { $match: { user: userId, date: { $gte: startDate }, type: { $in: ['income', 'expense'] } } },
+    { $group: { _id: { year: { $year: '$date' }, month: { $month: '$date' }, type: '$type' }, total: { $sum: '$amount' } } },
+    { $sort: { '_id.year': 1, '_id.month': 1 } }
+  ]);
 
-    const monthlyData = {};
-    data.forEach(entry => {
-      const key = `${entry._id.year}-${String(entry._id.month).padStart(2, '0')}`;
-      if (!monthlyData[key]) monthlyData[key] = { month: key, income: 0, expense: 0 };
-      monthlyData[key][entry._id.type] = entry.total;
-    });
+  const monthlyData = {};
+  data.forEach(entry => {
+    const key = `${entry._id.year}-${String(entry._id.month).padStart(2, '0')}`;
+    if (!monthlyData[key]) monthlyData[key] = { month: key, income: 0, expense: 0 };
+    monthlyData[key][entry._id.type] = entry.total;
+  });
 
-    res.json(Object.values(monthlyData));
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.json(Object.values(monthlyData));
+}));
 
 // @route   GET /api/dashboard/expense-categories
-router.get('/expense-categories', async (req, res) => {
-  try {
-    const userId = req.user._id;
-    const { months = 1 } = req.query;
-    const startDate = new Date();
-    startDate.setMonth(startDate.getMonth() - parseInt(months));
+router.get('/expense-categories', asyncHandler(async (req, res) => {
+  const userId = req.user._id;
+  const { months = 1 } = req.query;
+  const startDate = new Date();
+  startDate.setMonth(startDate.getMonth() - parseInt(months));
 
-    const categories = await Transaction.aggregate([
-      { $match: { user: userId, type: 'expense', date: { $gte: startDate } } },
-      { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
-      { $sort: { total: -1 } }
-    ]);
+  const categories = await Transaction.aggregate([
+    { $match: { user: userId, type: 'expense', date: { $gte: startDate } } },
+    { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    { $sort: { total: -1 } }
+  ]);
 
-    res.json(categories);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: 'Server error' });
-  }
-});
+  res.json(categories);
+}));
 
 module.exports = router;
