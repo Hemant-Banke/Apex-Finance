@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { transactionsAPI, subscriptionsAPI } from '../../lib/api';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, todayStr } from '../../lib/utils';
 import { TRANSACTION_TYPES } from '../../lib/constants';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
@@ -10,7 +10,7 @@ import RecurrenceFields from './RecurrenceFields';
 import { emptyRecurrence } from '../../lib/recurrence';
 import { ArrowRight, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, SlidersHorizontal } from 'lucide-react';
 
-const TODAY = new Date().toISOString().split('T')[0];
+const TODAY = todayStr();
 
 // Type vocabulary for the segmented control — colour + icon per cash type.
 const TYPE_META = {
@@ -39,7 +39,7 @@ function initFromTransaction(tx) {
 const EMPTY_FORM = {
   // Expense, not income: it is by far the most common thing anyone records by hand.
   type: 'expense', amount: '', category: '', notes: '', toAccount: '',
-  date: new Date().toISOString().split('T')[0],
+  date: TODAY,
 };
 
 /**

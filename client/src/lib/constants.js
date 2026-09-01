@@ -98,6 +98,24 @@ export const isMarketAsset = (t) => MARKET_ASSET_TYPES.includes(t);
 /** Unlisted assets carry an annual rate so they can be valued over time. */
 export const isRateAsset = (t) => !isMarketAsset(t) && !isPurityAsset(t);
 
+/**
+ * Does anything quote this holding, or does the user price it themselves?
+ *
+ * Asked of a holding the user already owns, where the question is whether re-opening it
+ * should auto-fetch a price. `isManualSymbol` cannot answer it: that reads the PREFIX of
+ * the catalogue seed a manual asset was created from, and a user-named one keeps no such
+ * prefix — "Mumbai Apartment" is stored as `MUMBAI-APARTMENT`, which matches nothing on
+ * that list. The TYPE is the honest signal, since it is what every valuation path already
+ * branches on. `commodity` is excluded because there is no manual commodity to confuse it
+ * with — the seeds are only ever gold, silver, fd, epf_nps, bond and other — and an
+ * `AMFI:` code is a fund, whatever else it says.
+ *
+ * Physical metal still says true here and is still auto-priced: it has no market symbol
+ * but IS quotable by type and purity, which the form handles separately.
+ */
+export const isSelfPricedHolding = ({ symbol = '', type } = {}) =>
+  !isMarketAsset(type) && type !== 'commodity' && !String(symbol).startsWith('AMFI:');
+
 /** Field label for the annual rate, by what it means for this asset type. */
 export const rateLabel = (t) =>
   COUPON_ASSET_TYPES.includes(t) ? 'Coupon rate (% p.a.)' : 'Expected return (% p.a.)';

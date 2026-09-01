@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import {
   AreaChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine, ReferenceArea, CartesianGrid, ComposedChart, Bar
+  ReferenceLine, ReferenceArea, CartesianGrid, ComposedChart, Bar,
+  usePlotArea, useYAxisScale
 } from 'recharts';
 import { TrendingUp, TrendingDown, Plus, Activity, CandlestickChart } from 'lucide-react';
 import { networthAPI, marketAPI } from '../../lib/api';
-import { formatCurrency, compactIfLarge, CHART_COLORS } from '../../lib/utils';
+import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS } from '../../lib/utils';
 import { BENCHMARK_INDICES } from '../../lib/constants';
 import ChartTooltip from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
@@ -175,6 +176,69 @@ const benchmarkLabel = (symbol) =>
 /** The Recharts dataKey a benchmark's rebased series is merged into. */
 const cmpKey = (symbol) => `cmp:${symbol}`;
 
+/** Vertical room a label needs before it collides with its neighbour. */
+const END_LABEL_GAP = 14;
+
+/**
+ * Each line's percentage, printed where the line ENDS.
+ *
+ * Comparing four series against a colour-chip legend means holding a colour in your
+ * head, finding it in the chart, and only then learning what it did. Labelling a line
+ * at its own terminus removes both steps: the answer is where your eye already is.
+ *
+ * One component for ALL the labels rather than a per-series `LabelList`, because they
+ * have to be placed as a set — two lines finishing a hair apart would print their
+ * percentages on top of each other, and a series can only ever see itself. Here they
+ * are sorted by height, pushed apart, then pulled back inside the plot.
+ *
+ * Geometry comes from Recharts 3's hooks (`usePlotArea` / `useYAxisScale`), and this
+ * renders as a plain child of the chart. Recharts 3 lets any element render inside a
+ * chart and has deprecated `Customized` for removal in 4.0; the v2 route — reading
+ * `yAxisMap` and `offset` off the props `Customized` handed down — no longer carries
+ * them at all, and would have failed silently as "no labels ever appear".
+ *
+ * Percentages come from the same `base` the tooltip and the benchmark rebasing use, so
+ * every figure on this chart is measured from one instant.
+ */
+function EndLabels({ series = [], base }) {
+  const plot  = usePlotArea();
+  const scale = useYAxisScale();
+  if (!plot || !scale || !base) return null;
+
+  const items = series
+    .map(s => ({ ...s, y: scale(s.value), pct: (s.value / base - 1) * 100 }))
+    .filter(s => Number.isFinite(s.y) && Number.isFinite(s.pct))
+    .sort((a, b) => a.y - b.y);
+  if (!items.length) return null;
+
+  // Push down through the stack, then correct back up so the last one still fits.
+  for (let i = 1; i < items.length; i++) {
+    items[i].y = Math.max(items[i].y, items[i - 1].y + END_LABEL_GAP);
+  }
+  const bottom = plot.y + plot.height;
+  for (let i = items.length - 1; i >= 0; i--) {
+    items[i].y = Math.min(items[i].y, bottom - (items.length - 1 - i) * END_LABEL_GAP);
+  }
+  for (let i = 0; i < items.length; i++) {
+    items[i].y = Math.max(items[i].y, plot.y + i * END_LABEL_GAP);
+  }
+
+  const x = plot.x + plot.width + 7;
+
+  return (
+    <g style={{ pointerEvents: 'none' }}>
+      {items.map(s => (
+        <text
+          key={s.key} x={x} y={s.y} dy={3.5} fill={s.color}
+          style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600, letterSpacing: '-0.02em' }}
+        >
+          {formatPct(s.pct, 1)}
+        </text>
+      ))}
+    </g>
+  );
+}
+
 // ── Candlestick shape factory ─────────────────────────────────────────────────
 
 /**
@@ -290,18 +354,34 @@ function useAnimatedValue(target, duration = 380) {
  * Floating summary for a drag-selected range, drawn inside the chart SVG at the
  * top-centre of the selection. Recharts injects `viewBox` (the selected band's
  * pixel box); `chartW` clamps it so the box never spills past the chart edge.
+ *
+ * When benchmarks are on the chart it measures ALL of them over the same window, not
+ * just the primary line. Dragging a range with three indices overlaid used to answer
+ * for exactly one of the four series drawn through it — the one question the comparison
+ * exists to ask ("did I beat it over THIS stretch?") was the one it would not answer.
+ *
+ * Each benchmark row carries its own return AND the gap: your return minus its own, in
+ * percentage POINTS. That is the figure being sought, and subtracting two percentages
+ * in your head while a chart moves under the cursor is not a reasonable thing to ask.
+ * `pp` is spelled out because a gap between two percentages is not itself a percentage.
  */
-function SelectionLabel({ viewBox, pct, abs, pos, formatValue, chartW }) {
+const SEL_ROW_H = 15;
+
+function SelectionLabel({ viewBox, pct, abs, pos, benchmarks = [], formatValue, chartW }) {
   if (!viewBox) return null;
   // A wide frame centred on the selection; the box inside sizes to its content
-  // (nowrap) so full, un-condensed numbers extend it instead of overflowing.
-  const FRAME_W = 260, FRAME_H = 56;
+  // (nowrap) so full, un-condensed numbers extend it instead of overflowing. It grows
+  // downward with the benchmark rows, so the frame has to grow with them too or the
+  // foreignObject clips the last line away.
+  const FRAME_W = 300;
+  const FRAME_H = 60 + (benchmarks.length ? 12 + benchmarks.length * SEL_ROW_H : 0);
   const centre  = viewBox.x + viewBox.width / 2 - FRAME_W / 2;
   const maxX    = (chartW || viewBox.x + viewBox.width) - FRAME_W - 4;
   const x       = Math.max(4, Math.min(centre, maxX));
   const y       = (viewBox.y ?? 0) + 6;
   const color   = pos ? '#22c55e' : '#ef4444';
   const sign    = pos ? '+' : '−';
+  const mono    = { fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)' };
 
   return (
     <foreignObject x={x} y={y} width={FRAME_W} height={FRAME_H} style={{ overflow: 'visible', pointerEvents: 'none' }}>
@@ -313,17 +393,40 @@ function SelectionLabel({ viewBox, pct, abs, pos, formatValue, chartW }) {
           borderRadius: 9, padding: '6px 11px', whiteSpace: 'nowrap',
           boxShadow: '0 8px 24px -10px rgba(0,0,0,0.7)',
         }}>
-          <p style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'rgba(255,255,255,0.4)', margin: '0 0 3px', fontFamily: 'var(--font-mono)' }}>
+          <p style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'rgba(255,255,255,0.4)', margin: '0 0 3px', ...mono }}>
             Period change
           </p>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>
+            <span style={{ fontSize: 15, fontWeight: 700, color, lineHeight: 1, ...mono }}>
               {sign}{Math.abs(pct).toFixed(2)}%
             </span>
-            <span style={{ fontSize: 12, fontWeight: 500, color, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', lineHeight: 1 }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color, lineHeight: 1, ...mono }}>
               {sign}{formatValue(Math.abs(abs))}
             </span>
           </div>
+
+          {benchmarks.length > 0 && (
+            <div style={{ marginTop: 7, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.09)' }}>
+              {benchmarks.map(b => {
+                const ahead = b.gap >= 0;
+                return (
+                  <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, height: SEL_ROW_H }}>
+                    <span style={{ width: 6, height: 6, borderRadius: 2, background: b.color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.62)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {b.label}
+                    </span>
+                    <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.62)', width: 58, textAlign: 'right', ...mono }}>
+                      {b.pct >= 0 ? '+' : '−'}{Math.abs(b.pct).toFixed(2)}%
+                    </span>
+                    {/* The answer: how far ahead of this index you finished the window. */}
+                    <span style={{ fontSize: 10.5, fontWeight: 600, color: ahead ? '#22c55e' : '#ef4444', width: 64, textAlign: 'right', ...mono }}>
+                      {ahead ? '+' : '−'}{Math.abs(b.gap).toFixed(2)} pp
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </div>
     </foreignObject>
@@ -521,9 +624,13 @@ export default function PriceGrapher({
   // number centred on 100, so it gets its own formatter rather than reusing
   // whatever the caller passes for rupee figures.
   const formatIndex  = (v) => (v == null ? '—' : v.toFixed(2));
+  // The value every growth percentage is measured from. Null/0 would make the ratio
+  // meaningless, so the tooltip simply omits the percentage in that case.
+  const growthBase   = displayData.find(d => d.value != null && d.value !== 0)?.value ?? null;
   const effFormatValue = growth ? formatIndex : formatValue;
   const effValueLabel  = growth ? 'Growth index' : valueLabel;
   const comparing = growth && Object.keys(compareRebased).length > 0;
+
 
   // Nulls (a growth series with no meaningful base) are dropped before min/max —
   // Math.max/min coerce `null` to 0, which would otherwise skew the Y domain.
@@ -547,6 +654,16 @@ export default function PriceGrapher({
   const aPct  = useAnimatedValue(pctChng);
 
   // Resolve the drag selection into ordered endpoints + change metrics.
+  //
+  // EVERY line on the chart is measured over the window, not just the primary one. The
+  // whole reason to put a benchmark on the chart is to ask "how did I do against it",
+  // and the answer was being given for exactly one of the lines drawn: the box said
+  // "+12.34%" while three other series ran through the same band, unmeasured. Each
+  // benchmark reports its own change AND the gap — the portfolio's return minus its own,
+  // in percentage POINTS, which is the number the comparison exists to produce.
+  //
+  // Rebasing does not affect any of this: a rebased series is the raw closes scaled by a
+  // constant, and a constant cancels in a ratio.
   const selection = useMemo(() => {
     if (selStart == null || selEnd == null) return null;
     const iA = displayData.findIndex(d => d.date === selStart);
@@ -557,8 +674,32 @@ export default function PriceGrapher({
     const endVal   = displayData[hi].value;
     const abs = endVal - startVal;
     const pct = startVal !== 0 ? (abs / Math.abs(startVal)) * 100 : 0;
-    return { x1: displayData[lo].date, x2: displayData[hi].date, abs, pct, pos: abs >= 0 };
-  }, [selStart, selEnd, displayData]);
+
+    // The nearest real quote inward from each edge. A market shut on the boundary day
+    // has no close there, and "no data" is not a return of zero — it just means this
+    // index's window starts a day later than yours, which is the honest reading.
+    const edge = (arr, from, to, step) => {
+      for (let i = from; step > 0 ? i <= to : i >= to; i += step) if (arr[i] != null) return arr[i];
+      return null;
+    };
+
+    const benchmarks = Object.keys(compareRebased).map(sym => {
+      const arr = compareRebased[sym];
+      const a = edge(arr, lo, hi, 1);
+      const b = edge(arr, hi, lo, -1);
+      if (a == null || b == null || a === 0) return null;
+      const bPct = (b / a - 1) * 100;
+      return {
+        key:   sym,
+        label: benchmarkLabel(sym),
+        color: benchmarkColor(sym),
+        pct:   bPct,
+        gap:   pct - bPct,
+      };
+    }).filter(Boolean);
+
+    return { x1: displayData[lo].date, x2: displayData[hi].date, abs, pct, pos: abs >= 0, benchmarks };
+  }, [selStart, selEnd, displayData, compareRebased]);
 
   // ── Line chart: Y domain + gradient stop at opening price ─────────────────
   const pad  = (maxVal - minVal) * 0.05 || Math.abs(maxVal) * 0.02 || 1;
@@ -597,6 +738,32 @@ export default function PriceGrapher({
   const Icon           = isPos ? TrendingUp : TrendingDown;
   const clr            = isFlat ? '#C9A96A' : isPos ? 'var(--color-success)' : 'var(--color-danger)';
   const activeEmpty    = chartMode === 'candle' ? ohlcData.length === 0 : data.length === 0;
+  // Each line's LAST real value, for the end-of-line labels. Read backwards rather
+  // than taking `chartData.at(-1)`: a benchmark whose market was shut on the final day
+  // is null there (the line is drawn with `connectNulls`), and labelling it "—" while
+  // its line clearly reaches the right edge would be a worse answer than its last
+  // actual close.
+  const endLabelSeries = useMemo(() => {
+    if (!comparing || !chartData.length) return [];
+
+    const lastOf = (key) => {
+      for (let i = chartData.length - 1; i >= 0; i--) {
+        const v = chartData[i][key];
+        if (v != null) return v;
+      }
+      return null;
+    };
+
+    // The primary takes the direction colour its own headline figure uses, not the
+    // line's gradient — a vertical green-to-red gradient poured into 5 characters of
+    // text is unreadable.
+    return [
+      { key: 'value', value: lastOf('value'), color: clr },
+      ...Object.keys(compareRebased).map(sym => ({
+        key: sym, value: lastOf(cmpKey(sym)), color: benchmarkColor(sym),
+      })),
+    ].filter(s => s.value != null);
+  }, [comparing, chartData, compareRebased, clr]);
 
   const wrapStyle = showCard ? {
     background: 'var(--color-bg-card)',
@@ -812,7 +979,7 @@ export default function PriceGrapher({
         <ResponsiveContainer width="100%" height={height}>
           <AreaChart
             data={chartData}
-            margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
+            margin={{ top: 4, right: comparing ? 58 : 16, bottom: 0, left: 0 }}
             onMouseDown={handleSelectDown}
             onMouseMove={handleSelectMove}
             onMouseUp={handleSelectUp}
@@ -871,7 +1038,16 @@ export default function PriceGrapher({
                 falls back to per-series names. */}
             {!selecting && !selection && (
               <Tooltip
-                content={<ChartTooltip formatValue={effFormatValue} valueLabel={comparing ? undefined : effValueLabel} />}
+                content={
+                  <ChartTooltip
+                    formatValue={effFormatValue}
+                    valueLabel={comparing ? undefined : effValueLabel}
+                    // Growth only. The anchor is the first VISIBLE point, which is also
+                    // what every benchmark overlay was rebased to — so the primary line
+                    // and its comparisons all report percentages from the same instant.
+                    percentBase={growth ? growthBase : undefined}
+                  />
+                }
                 cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
                 isAnimationActive={false}
                 wrapperStyle={{ transition: 'none', outline: 'none' }}
@@ -925,6 +1101,12 @@ export default function PriceGrapher({
               />
             ))}
 
+            {/* Each line's percentage, at the line's own end. Last child so it paints
+                over the series rather than under them. */}
+            {comparing && endLabelSeries.length > 0 && (
+              <EndLabels series={endLabelSeries} base={growthBase} />
+            )}
+
             {/* Drag-selected range — tinted band + change summary */}
             {selection && (
               <ReferenceArea
@@ -940,6 +1122,7 @@ export default function PriceGrapher({
                     pct={selection.pct}
                     abs={selection.abs}
                     pos={selection.pos}
+                    benchmarks={selection.benchmarks}
                     formatValue={effFormatValue}
                     chartW={chartAreaRef.current?.clientWidth || 0}
                   />

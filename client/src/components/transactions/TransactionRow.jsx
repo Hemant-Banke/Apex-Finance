@@ -17,9 +17,20 @@ import { useCategoryNames } from '../../lib/categoryNames';
  * point of view: a transfer is money in for the destination and money out for the
  * source, and the same row means both depending on where you are standing. Leave it
  * undefined in an account-agnostic list and the row shows no direction, as before.
+ *
+ * `reserveActions` keeps the action gutter even on a row that has no handlers. The
+ * buttons are `opacity-0` until hover but still OCCUPY their space, so a row without
+ * them let its amount slide ~50px further right than every other row in the list —
+ * which is exactly what happened to incoming transfers, the one row type here that is
+ * deliberately read-only. Set it on any list where some rows are actionable and some
+ * are not; a wholly read-only feed leaves it off and gives up no space.
  */
-export default function TransactionRow({ tx, subtitle, badge = false, incoming, onEdit, onDelete, divided = false }) {
+export default function TransactionRow({ tx, subtitle, badge = false, incoming, onEdit, onDelete, reserveActions = false, divided = false }) {
   const { label } = useCategoryNames();
+
+  // One action button's footprint (13px icon + 4px padding each side), so an empty
+  // slot measures exactly the same as a filled one.
+  const SLOT = { width: 21, height: 21, display: 'block' };
 
   const actionStyle = {
     color: 'var(--color-text-muted)',
@@ -55,23 +66,23 @@ export default function TransactionRow({ tx, subtitle, badge = false, incoming, 
         {getTransactionSign(tx.type, incoming)}{formatCurrency(tx.amount)}
       </span>
 
-      {onEdit && (
-        <button
-          onClick={() => onEdit(tx)}
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ ...actionStyle, marginLeft: 8 }}
-        >
-          <Pencil size={13} />
-        </button>
-      )}
-      {onDelete && (
-        <button
-          onClick={() => onDelete(tx)}
-          className="opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ ...actionStyle, marginLeft: 4 }}
-        >
-          <X size={13} />
-        </button>
+      {/* The action gutter. Rendered as one fixed-width slot so every amount in a
+          list stops at the same x, whether or not that row can be edited. */}
+      {(onEdit || onDelete || reserveActions) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8, flexShrink: 0 }}>
+          {onEdit
+            ? <button onClick={() => onEdit(tx)} title="Edit" aria-label="Edit transaction"
+                className="opacity-0 group-hover:opacity-100 transition-opacity" style={actionStyle}>
+                <Pencil size={13} />
+              </button>
+            : <span style={SLOT} aria-hidden />}
+          {onDelete
+            ? <button onClick={() => onDelete(tx)} title="Delete" aria-label="Delete transaction"
+                className="opacity-0 group-hover:opacity-100 transition-opacity" style={actionStyle}>
+                <X size={13} />
+              </button>
+            : <span style={SLOT} aria-hidden />}
+        </div>
       )}
     </div>
   );

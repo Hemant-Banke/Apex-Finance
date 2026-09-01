@@ -7,8 +7,9 @@ const AccountHoldings = require('../models/AccountHoldings');
 const { protect } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { holdingsToArray } = require('../services/holdingsService');
-const { getPortfolio, allocationByType } = require('../services/portfolioService');
-const { t1Str } = require('../utils/helpers');
+const { getPortfolio, getContribution, allocationByType } = require('../services/portfolioService');
+const { t1Str, t1Ms } = require('../utils/helpers');
+const { DAY_MS } = require('../utils/constants');
 
 const router = express.Router();
 router.use(protect);
@@ -169,6 +170,24 @@ router.get('/portfolio', asyncHandler(async (req, res) => {
   res.json({ holdings, totals, allocation: allocationByType(holdings) });
 }));
 
+// @route   GET /api/dashboard/contribution?days=N
+//
+// Who made the money over the last N days — each holding's gain, and its share of the
+// portfolio's return over that window in percentage points. `days` omitted (or 0) means
+// the whole history, where the same formula degenerates into lifetime total gain with
+// realised profits included, because a position closed inside the window still counts.
+//
+// This cannot be served from `/portfolio`: the AVCO cost basis carries no date, so every
+// figure derived from it is lifetime by construction. See `getContribution`.
+router.get('/contribution', asyncHandler(async (req, res) => {
+  const days = Math.max(0, Math.min(parseInt(req.query.days) || 0, 3650));
+  const to   = t1Ms();
+  res.json(await getContribution(req.user._id, {
+    fromMs: days ? to - days * DAY_MS : null,
+    toMs:   to,
+  }));
+}));
+
 // @route   GET /api/dashboard/holdings
 // The raw book at COST (no pricing, no network). `/portfolio` is what the UI wants for
 // anything about performance; this stays for callers that only need the instrument list.
@@ -179,9 +198,22 @@ router.get('/holdings', asyncHandler(async (req, res) => {
   holdingsDocs.forEach(doc => (doc.holdings || []).forEach(h => {
     const sym = h.assetSymbol;
     if (!sym) return;
-    merged[sym] ??= { assetSymbol: sym, assetName: h.assetName, assetType: h.assetType, units: 0, totalInvested: 0 };
+    merged[sym] ??= {
+      assetSymbol: sym, assetName: h.assetName, assetType: h.assetType,
+      units: 0, totalInvested: 0,
+      // How the asset is VALUED travels with it. The merge used to keep only the
+      // quantities, so this route's answer said a physical gold holding had no purity
+      // and a US stock no quote currency — facts about the instrument, identical in
+      // every account that holds it, and the difference between re-opening a position
+      // correctly and re-opening it as 22K rupees. First non-null wins; they cannot
+      // disagree across accounts, because they describe the same asset.
+      purity: null, rate: null, currency: null,
+    };
     merged[sym].units         += h.units         || 0;
     merged[sym].totalInvested += h.totalInvested || 0;
+    merged[sym].purity   ??= h.purity   ?? null;
+    merged[sym].rate     ??= h.rate     ?? null;
+    merged[sym].currency ??= h.currency ?? null;
   }));
 
   Object.values(merged).forEach(h => {
@@ -233,17 +265,71 @@ router.get('/income-expense', asyncHandler(async (req, res) => {
   res.json(out);
 }));
 
-// @route   GET /api/dashboard/expense-categories?months=N
-router.get('/expense-categories', asyncHandler(async (req, res) => {
+// @route   GET /api/dashboard/categories?type=expense|income&months=N
+//
+// Category totals for ONE direction of cashflow. Where the money goes is only half the
+// question — where it comes from is the other half, and the aggregation is identical, so
+// the direction is a parameter rather than a second route. (Was `/expense-categories`,
+// which could only ever answer the half.)
+//
+// TWO windows, in ONE pass: the one asked for, and the equal-length one immediately
+// before it. A category total on its own says how BIG something is and nothing about
+// which way it is going — "₹42,000 on eating out" is only actionable next to what the
+// same six months cost last time. Grouping by { category, month } gets both out of a
+// single aggregation, and the month buckets double as the category's own series.
+router.get('/categories', asyncHandler(async (req, res) => {
   const months = Math.max(1, Math.min(parseInt(req.query.months) || 1, 60));
+  const type   = req.query.type === 'income' ? 'income' : 'expense';
 
-  const categories = await Transaction.aggregate([
-    { $match: { user: req.user._id, type: 'expense', date: { $gte: startOfMonthsAgo(months - 1) } } },
-    { $group: { _id: '$category', total: { $sum: '$amount' }, count: { $sum: 1 } } },
-    { $sort: { total: -1 } },
+  const rows = await Transaction.aggregate([
+    // Reaching back 2N months costs the same index scan; the previous window is simply
+    // the buckets that fall outside the current one.
+    { $match: { user: req.user._id, type, date: { $gte: startOfMonthsAgo(months * 2 - 1) } } },
+    { $group: {
+      _id: { c: '$category', m: { $dateToString: { format: '%Y-%m', date: '$date' } } },
+      total: { $sum: '$amount' },
+      count: { $sum: 1 },
+    } },
   ]);
 
-  res.json(categories);
+  // The month keys of the CURRENT window, oldest first. A month the category was left
+  // alone must still carry a zero, or its series silently closes the gap and a habit
+  // picked up last month looks like one held all year.
+  const keys = [];
+  for (let i = months - 1; i >= 0; i--) {
+    const d = startOfMonthsAgo(i);
+    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+  }
+  const at = new Map(keys.map((k, i) => [k, i]));
+
+  const byCategory = new Map();
+  for (const r of rows) {
+    const code = r._id.c ?? null;              // an uncategorised row groups under null
+    let entry = byCategory.get(code);
+    if (!entry) {
+      entry = { _id: code, total: 0, count: 0, prev: 0, series: new Array(months).fill(0) };
+      byCategory.set(code, entry);
+    }
+
+    // Compare the key, don't just miss the map: a month is "previous" only when it is
+    // BEFORE the window. A future-dated transaction also misses, and counting it as
+    // last period's spending would be worse than the chart above, which drops it.
+    const i = at.get(r._id.m);
+    if (i !== undefined) {
+      entry.total += r.total;
+      entry.count += r.count;
+      entry.series[i] += r.total;
+    } else if (r._id.m < keys[0]) {
+      entry.prev += r.total;
+    }
+  }
+
+  // A category that appears ONLY in the previous window has nothing to rank in this one.
+  // It is still not silence — the total it used to carry is gone from the window total,
+  // which is the honest way that reads.
+  res.json([...byCategory.values()]
+    .filter(c => c.total > 0)
+    .sort((a, b) => b.total - a.total));
 }));
 
 module.exports = router;

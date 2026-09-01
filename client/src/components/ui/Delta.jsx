@@ -11,14 +11,22 @@ import { formatSigned, formatPct, pnlColor, compactIfLarge } from '../../lib/uti
  * when the base is zero or negative, because "up 150%" from −₹1,000 to +₹500 is not a
  * fact about anything.
  *
+ * `invert` separates the two jobs the chip was quietly doing at once. The ARROW states
+ * the direction — up is up, always — and the COLOUR states whether that is good news.
+ * On a balance those agree and nothing needs saying. On SPENDING they do not: a category
+ * up 40% is unambiguously up and unambiguously not a gain, and painting it green because
+ * the number rose is the chart telling a cheerful lie. So `invert` flips the colour only,
+ * never the arrow or the sign.
+ *
  * Props:
  *   value  — the absolute change (drives colour + arrow)
  *   pct    — optional percentage change
  *   amount — false to show the percentage only
+ *   invert — colour a RISE as bad and a fall as good (spending, liabilities)
  *   size   — 'sm' | 'md'
  */
-export default function Delta({ value = 0, pct = null, amount = true, compact = false, size = 'sm' }) {
-  const color = pnlColor(value);
+export default function Delta({ value = 0, pct = null, amount = true, compact = false, invert = false, size = 'sm' }) {
+  const color = pnlColor(invert ? -value : value);
   const Arrow = value > 0 ? ArrowUpRight : value < 0 ? ArrowDownRight : Minus;
   const px    = size === 'md' ? '0.875rem' : '0.75rem';
 

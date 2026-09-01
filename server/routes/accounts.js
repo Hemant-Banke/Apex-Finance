@@ -12,7 +12,7 @@ const { notFound }                      = require('../utils/httpError');
 const { DAY_MS, ACCOUNT_TYPES }         = require('../utils/constants');
 const { midnight, toDateStr, todayStr } = require('../utils/helpers');
 const { sliceStartIndex }               = require('../utils/tsHelpers');
-const { getAccountBalance, getAccountAssetBalance } = require('../services/accountBalance');
+const { getAccountBalance, getAccountAssetBalance, accountSparkline } = require('../services/accountBalance');
 const txService           = require('../services/transactionService');
 const dvService           = require('../services/dailyValueService');
 const { holdingsToArray } = require('../services/holdingsService');
@@ -29,14 +29,29 @@ async function findAccount(req) {
 }
 
 // @route   GET /api/accounts
+//
+// Every account's store document is loaded ONCE here and handed to `getAccountBalance`,
+// which would otherwise fetch each one itself — an N+1 that was already being paid, and
+// paid for two numbers per document. Having the doc in hand also makes the list's
+// sparkline free: the shape is in the same array the balance was read off.
 router.get('/', asyncHandler(async (req, res) => {
   const accounts       = await Account.find({ user: req.user._id }).sort({ createdAt: -1 }).lean();
   const fetchLatestBal = req.query.fetchLatestBal === 'true';
 
-  res.json(await Promise.all(accounts.map(async account => ({
-    ...account,
-    ...(await getAccountBalance(account, req.user, fetchLatestBal)),
-  }))));
+  const storeDocs = await DailyAccountBalance.find({
+    user: req.user._id,
+    account: { $in: accounts.map(a => a._id) },
+  }).lean();
+  const storeByAccount = new Map(storeDocs.map(d => [d.account.toString(), d]));
+
+  res.json(await Promise.all(accounts.map(async account => {
+    const doc = storeByAccount.get(account._id.toString()) ?? null;
+    return {
+      ...account,
+      ...(await getAccountBalance(account, req.user, fetchLatestBal, doc)),
+      spark: accountSparkline(doc),
+    };
+  })));
 }));
 
 // @route   GET /api/accounts/:id

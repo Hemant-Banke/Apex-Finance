@@ -607,6 +607,27 @@ select.input-field {
 .stagger > *:nth-child(5) { animation-delay: 250ms; }
 .stagger > *:nth-child(6) { animation-delay: 300ms; }
 
+/* Back — the arrow slides toward the edge it takes you to. Hover state lives here
+   because a chip inside a link cannot express :hover from an inline style. */
+.backlink:hover { color: var(--color-text-secondary); }
+.backlink:hover .backlink-chip {
+  border-color: var(--color-border-hover);
+  background: var(--color-bg-card-hover);
+}
+.backlink:hover .backlink-arrow { transform: translateX(-2px); }
+.backlink:focus-visible { outline: 2px solid var(--color-accent-dim); outline-offset: 3px; border-radius: 4px; }
+
+/* Sell — the second stage of the two-stage reveal. The row brings the button up as a
+   tinted outline; hovering the button itself fills it, so "there is an action here" and
+   "you are about to sell something" are visibly different states. Muted per the house
+   rule for tinted buttons rather than a saturated red fill. */
+.sell-button:hover,
+.sell-button:focus-visible {
+  background: color-mix(in srgb, var(--color-danger) 68%, #0B0D10) !important;
+  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent) !important;
+  color: var(--color-text-primary) !important;
+}
+
 /* ═══ DATA ROW ═══ */
 .data-row {
   display: flex;

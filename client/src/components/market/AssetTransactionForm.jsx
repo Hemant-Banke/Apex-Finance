@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { marketAPI, transactionsAPI, subscriptionsAPI } from '../../lib/api';
-import { formatCurrency, formatSigned, pnlColor } from '../../lib/utils';
+import { formatCurrency, formatSigned, pnlColor, todayStr } from '../../lib/utils';
 import { ASSET_TYPES, PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
 import DatePicker from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
@@ -8,10 +8,6 @@ import { accountOptions } from '../../lib/accountPickerOptions';
 import RecurrenceFields, { RecurrenceToggle } from '../forms/RecurrenceFields';
 import { emptyRecurrence } from '../../lib/recurrence';
 import { ArrowRight, RotateCcw, Check, ArrowDownLeft, ArrowUpRight } from 'lucide-react';
-
-function todayStr() {
-  return new Date().toISOString().split('T')[0];
-}
 
 /**
  * AssetTransactionForm
@@ -61,6 +57,12 @@ export default function AssetTransactionForm({
     : securityProp;
 
   const isManual       = !!security?.isManual;
+  // An instrument that is already on the user's books, reached from the search's own
+  // "In your portfolio" group. It is manual in the sense that nothing quotes it, but it
+  // is NOT new: asking for its name and type again is asking the user to reproduce a
+  // string exactly, and one character out ("Wedding gold") silently opens a SECOND
+  // asset and splits the position between them.
+  const isOwned        = !!security?.owned;
   const nonDebtAccounts = accounts.filter(a => !a.isDebt);
 
   // Resolve the account ID from a populated or raw transaction account field
@@ -102,9 +104,13 @@ export default function AssetTransactionForm({
   // Valuation metadata: purity for physical metal, annual rate for unlisted assets.
   // A holding already knows how it is valued — carry its purity/rate over so a sale
   // does not have to re-declare (or worse, silently drop) them.
-  const [purity, setPurity] = useState(isEdit ? (transaction.purity || '') : (holding?.purity || ''));
+  const [purity, setPurity] = useState(
+    isEdit ? (transaction.purity || '') : (holding?.purity || security?.purity || '')
+  );
   const [rate,   setRate]   = useState(
-    isEdit ? String(transaction.rate ?? '') : (holding?.rate != null ? String(holding.rate) : '')
+    isEdit ? String(transaction.rate ?? '')
+      : (holding?.rate != null ? String(holding.rate)
+        : security?.rate != null ? String(security.rate) : '')
   );
 
   // Foreign-quoted assets (US stocks, USD crypto): `price` is the NATIVE figure the
@@ -118,7 +124,9 @@ export default function AssetTransactionForm({
 
   // The effective type drives which metadata field applies. In create mode a
   // manual asset's type is user-selectable, so it can change under the form.
-  const effectiveType = isEdit ? security.type : (isManual ? assetType : security.type);
+  // An owned asset's type is settled — it is what every past transaction in it was
+  // booked as, and letting this form change it would re-type the position underneath.
+  const effectiveType = (isEdit || isOwned) ? security.type : (isManual ? assetType : security.type);
   const showPurity    = isPurityAsset(effectiveType);
   const showRate      = isRateAsset(effectiveType);
 
@@ -246,14 +254,14 @@ export default function AssetTransactionForm({
       setError(`Exchange rate for ${currency} is unavailable — cannot convert this trade to INR.`);
       return;
     }
-    if (!isEdit && isManual && !customName.trim()) { setError('Enter an asset name'); return; }
+    if (!isEdit && isManual && !isOwned && !customName.trim()) { setError('Enter an asset name'); return; }
 
-    const sym  = isEdit ? security.symbol
-               : isManual ? customName.trim().toUpperCase().replace(/\s+/g, '-')
-               : security.symbol;
-    const name = isEdit ? security.name
-               : isManual ? customName.trim()
-               : security.name;
+    // A name is typed only when the asset is being CREATED. Editing, selling and adding
+    // to something already owned all reuse the symbol it already has — which is what
+    // keeps every transaction in it aggregating to one position.
+    const named = !isEdit && !isOwned && isManual;
+    const sym  = named ? customName.trim().toUpperCase().replace(/\s+/g, '-') : security.symbol;
+    const name = named ? customName.trim() : security.name;
 
     setSaving(true);
     try {
@@ -314,8 +322,9 @@ export default function AssetTransactionForm({
   return (
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
 
-      {/* Manual asset: custom name + type on one row (create mode only) */}
-      {isManual && !isEdit && (
+      {/* Manual asset: custom name + type on one row (create mode only — an asset
+          picked out of your own holdings already has both) */}
+      {isManual && !isEdit && !isOwned && (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'start' }}>
           <div className="field">
             <label className="label">Asset Name</label>

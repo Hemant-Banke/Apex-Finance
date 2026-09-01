@@ -1,9 +1,13 @@
-const { DAY_MS } = require('./constants');
+const { DAY_MS, IST_OFFSET_MS } = require('./constants');
 
 /**
  * UTC-midnight timestamp for any date-like value: a Date, an ms number, or a date
  * string. Every day index in the stores is one of these — the whole codebase keys
  * days by UTC midnight, so this is the only way a day is derived.
+ *
+ * This truncates whatever instant it is GIVEN; it does not know about time zones. A
+ * transaction dated "2026-08-10" is the 10th, full stop. Only the question of which
+ * date is *today* is a zone question — see `todayMs`.
  */
 function midnight(date) {
   const t = date instanceof Date ? date.getTime()
@@ -25,10 +29,29 @@ function toDateStr(date) {
   return `${year}-${month}-${day}`;
 }
 
-/** UTC-midnight ms for today (T). */
-const todayMs = () => midnight(new Date());
+/**
+ * Today (T) — the IST calendar date, keyed as a UTC midnight.
+ *
+ * Two different things are going on here and they must not be confused:
+ *
+ *   - WHICH CALENDAR DATE is "today" is an IST question. This is a rupee app for an
+ *     Indian user, so the day turns over at 12:00 AM IST, not at 05:30 AM IST — which
+ *     is what `midnight(new Date())` meant, since it truncated the current instant in
+ *     UTC. For those five and a half hours the whole app believed it was yesterday:
+ *     the portfolio's day change went on reporting the previous session's move as if
+ *     it were today's, the stores refused to extend, and the transaction form rejected
+ *     today's date as being in the future.
+ *   - HOW a day is ENCODED is still UTC midnight, unchanged. Every store index, every
+ *     price key and every stored `startDate` is a UTC-midnight timestamp, and they
+ *     stay that way — shifting the encoding by 5h30m would leave day differences that
+ *     are no longer whole multiples of `DAY_MS` and silently corrupt every series.
+ *
+ * So: add the offset to the CLOCK, then truncate in UTC. 01:00 IST on the 2nd (which
+ * is 19:30 UTC on the 1st) becomes 01:00 UTC on the 2nd, and truncates to the 2nd.
+ */
+const todayMs = () => midnight(Date.now() + IST_OFFSET_MS);
 
-/** UTC-midnight ms for yesterday (T-1, the last settled day). */
+/** UTC-midnight ms for yesterday (T-1, the last settled day), IST reckoning. */
 const t1Ms = () => todayMs() - DAY_MS;
 
 /** Now, in ms. */

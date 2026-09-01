@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { transactionsAPI, accountsAPI } from '../lib/api';
 import { formatCurrency, compactIfLarge, formatDate, pnlColor } from '../lib/utils';
 import { TRANSACTION_TYPES } from '../lib/constants';
@@ -11,6 +12,8 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
 import { DateRangePicker } from '../components/forms/DatePicker';
+import TypePicker from '../components/forms/TypePicker';
+import { accountOptions } from '../lib/accountPickerOptions';
 import {
   Filter, ArrowLeftRight, ChevronLeft, ChevronRight, Upload, Search, X,
 } from 'lucide-react';
@@ -72,9 +75,15 @@ export default function Transactions() {
   const [total, setTotal] = useState(0);
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  // An account's page hands off to here for anything past its recent-activity list, so
+  // the account filter can arrive in the URL. The filter panel opens with it — a list
+  // that silently shows a subset is worse than no filter at all.
+  const [searchParams] = useSearchParams();
+  const urlAccount = searchParams.get('account') || '';
+
+  const [filters, setFilters] = useState({ ...EMPTY_FILTERS, account: urlAccount });
   const [searchBox, setSearchBox] = useState('');
-  const [showFilter, setShowFilter] = useState(false);
+  const [showFilter, setShowFilter] = useState(!!urlAccount);
   const [showImport, setShowImport] = useState(false);
   const [editTx, setEditTx] = useState(null);
   const [deleteTx, setDeleteTx] = useState(null);
@@ -185,21 +194,33 @@ export default function Transactions() {
       {/* Filter bar */}
       {showFilter && (
         <Card compact className="animate-in" style={{ display: 'flex', alignItems: 'end', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ minWidth: 160 }}>
+          {/* The app's own picker, not the browser's. These two were the last native
+              <select>s left: they ignore every design token, render the OS menu on top
+              of a dark surface, and cannot show the account-type icons or sublabels
+              every other account picker in the app shows. `clearable` is what carries
+              the old "All accounts" / "All types" option — clearing the filter and
+              picking a value are different gestures, and one row in the list was doing
+              both jobs. */}
+          <div style={{ minWidth: 190 }}>
             <label className="label block" style={{ marginBottom: 6 }}>Account</label>
-            <select value={filters.account} onChange={e => set({ account: e.target.value })}
-              className="input-field" style={{ fontSize: '0.8125rem' }}>
-              <option value="">All accounts</option>
-              {accounts.map(a => <option key={a._id} value={a._id}>{a.name}</option>)}
-            </select>
+            <TypePicker
+              options={accountOptions(accounts)}
+              value={filters.account}
+              onChange={v => set({ account: v })}
+              placeholder="All accounts"
+              searchable={accounts.length > 6}
+              clearable
+            />
           </div>
-          <div style={{ minWidth: 140 }}>
+          <div style={{ minWidth: 160 }}>
             <label className="label block" style={{ marginBottom: 6 }}>Type</label>
-            <select value={filters.type} onChange={e => set({ type: e.target.value })}
-              className="input-field" style={{ fontSize: '0.8125rem' }}>
-              <option value="">All types</option>
-              {TRANSACTION_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            <TypePicker
+              options={TRANSACTION_TYPES}
+              value={filters.type}
+              onChange={v => set({ type: v })}
+              placeholder="All types"
+              clearable
+            />
           </div>
           <div style={{ minWidth: 200 }}>
             <label className="label block" style={{ marginBottom: 6 }}>Date range</label>

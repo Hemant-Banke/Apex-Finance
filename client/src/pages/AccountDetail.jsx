@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import { accountsAPI, transactionsAPI } from '../lib/api';
-import { formatCurrency, formatNativeCurrency, formatDate, formatSigned, pnlColor } from '../lib/utils';
+import { formatCurrency, formatNativeCurrency, compactIfLarge, formatDate, formatSigned, pnlColor, CHART_COLORS } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import Spinner from '../components/ui/Spinner';
 import TransactionRow from '../components/transactions/TransactionRow';
@@ -9,22 +9,46 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import MarketSearch from '../components/market/MarketSearch';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
-import HoldingsDonut from '../components/charts/HoldingsDonut';
+import AllocationBar from '../components/portfolio/AllocationBar';
 import SellHoldingModal from '../components/portfolio/SellHoldingModal';
+import SellButton from '../components/portfolio/SellButton';
 import PriceGrapher from '../components/charts/PriceGrapher';
-import AssetPricePanel from '../components/charts/AssetPricePanel';
 import ImportModal from '../components/import/ImportModal';
 import Button from '../components/ui/Button';
 import AssetIcon from '../components/market/AssetIcon';
 import { assetTypeLabel } from '../lib/constants';
 import { toCreatePayload } from '../lib/undo';
+import Card from '../components/ui/Card';
+import SectionHeader from '../components/ui/SectionHeader';
+import BackLink from '../components/ui/BackLink';
 import {
-  ArrowLeft, Plus, Pencil, TrendingUp, Shield, CreditCard,
-  Landmark, Wallet, Briefcase, Package, BarChart2, Upload
+  Plus, Pencil, TrendingUp, Shield, CreditCard,
+  Landmark, Wallet, Briefcase, BarChart2, Upload
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
+
+/**
+ * How many rows the activity list shows, and grows by.
+ *
+ * Six is about what fits without the section becoming the page. The rest are already
+ * loaded — this is a display cap, not a fetch boundary, so "show more" is instant.
+ */
+const TX_PAGE = 6;
+
+/**
+ * Activity filters, named for what the MONEY did rather than for the schema. Trades
+ * are one option because buying and selling are two halves of the same errand when you
+ * are scanning for "what did I do with my investments here".
+ */
+const TX_FILTERS = [
+  { key: 'all',      label: 'All',       match: () => true },
+  { key: 'in',       label: 'In',        match: t => t.type === 'income' },
+  { key: 'out',      label: 'Out',       match: t => t.type === 'expense' },
+  { key: 'transfer', label: 'Transfers', match: t => t.type === 'transfer' },
+  { key: 'trades',   label: 'Trades',    match: t => t.type === 'buy' || t.type === 'sell' },
+];
 
 // Small pill showing an asset's type in a modal header.
 function AssetTypePill({ type }) {
@@ -53,6 +77,24 @@ function AssetTicker({ symbol, exchange }) {
   );
 }
 
+/**
+ * A supporting figure in the masthead — cash, assets.
+ *
+ * Deliberately smaller than the total it sits beside: these are its components, and
+ * three equal columns (what this replaced) said they were three equal facts.
+ */
+function Figure({ label, value, sub }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <p className="heading-sm" style={{ marginBottom: 8, letterSpacing: '0.12em' }}>{label}</p>
+      <p className="figure" style={{ fontSize: '1.1rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+        {value}
+      </p>
+      {sub && <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 6 }}>{sub}</p>}
+    </div>
+  );
+}
+
 const iconMap = {
   bank: Landmark, brokerage: TrendingUp, retirement: Shield,
   debt: CreditCard, wallet: Wallet, other: Briefcase
@@ -60,7 +102,6 @@ const iconMap = {
 
 export default function AccountDetail() {
   const { id } = useParams();
-  const navigate = useNavigate();
   const toast = useToast();
   const [account, setAccount]       = useState(null);
   const [txns, setTxns]             = useState([]);
@@ -76,6 +117,9 @@ export default function AccountDetail() {
   const [importOpen, setImportOpen]         = useState(false);
   // Sell-a-holding modal — the holding itself is the open flag.
   const [sellHolding, setSellHolding]       = useState(null);
+  // Activity list: which kind of movement, and how many rows are on show.
+  const [txFilter, setTxFilter]             = useState('all');
+  const [txShown,  setTxShown]              = useState(TX_PAGE);
   // Rename / edit-details modal
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [details, setDetails]         = useState({ name: '', description: '' });
@@ -194,11 +238,28 @@ export default function AccountDetail() {
   const totalInvested = account?.holdings?.filter(h => h.qty > 0).reduce((s, h) => s + h.totalInvested, 0) || 0;
   const assetPnl      = assetValue - totalInvested;
 
+  const filteredTxns = txns.filter(TX_FILTERS.find(f => f.key === txFilter)?.match ?? (() => true));
+
+  // Holdings ordered by capital, each carrying its share of the account's book. One
+  // array feeds both the allocation bar and the list, so the colour a holding wears in
+  // the bar is the colour on its row — two arrays would drift the moment either sorted
+  // differently. Shorts keep their place with a negative weight rather than vanishing;
+  // `AllocationBar` filters them out of the bar itself.
+  const allocation = (account?.holdings || [])
+    .map(h => ({
+      ...h,
+      value:  h.totalInvested,
+      weight: totalInvested ? (h.totalInvested / totalInvested) * 100 : 0,
+    }))
+    .sort((a, b) => b.value - a.value);
+
   if (loading) return <Spinner />;
   if (!account) return (
     <div className="text-center" style={{ paddingTop: '20vh' }}>
       <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Account not found</p>
-      <Link to="/accounts" className="text-sm mt-3 inline-block" style={{ color: 'var(--color-accent)' }}>← Back</Link>
+      <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
+        <BackLink to="/accounts">Back to accounts</BackLink>
+      </div>
     </div>
   );
 
@@ -209,99 +270,100 @@ export default function AccountDetail() {
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
 
-      {/* Back */}
-      <button onClick={() => navigate('/accounts')}
-        className="flex items-center gap-1.5 text-xs font-medium group"
-        style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', alignSelf: 'flex-start' }}>
-        <ArrowLeft size={14} className="group-hover:-translate-x-0.5 transition-transform" /> Back to accounts
-      </button>
+      <BackLink to="/accounts">Back to accounts</BackLink>
 
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-4">
-          <div style={{ width: 44, height: 44, borderRadius: 12, background: 'var(--color-bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Icon size={20} style={{ color: 'var(--color-text-secondary)' }} strokeWidth={1.5} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2 group">
-              <h1 className="heading-lg">{account.name}</h1>
-              <button onClick={openDetails} title="Rename account" aria-label="Rename account"
-                className="opacity-0 group-hover:!opacity-100 transition-opacity"
-                style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4 }}>
-                <Pencil size={14} />
-              </button>
+      {/* ── Masthead ──────────────────────────────────────────────────────────
+          Identity and balance were two stacked blocks: a header row, then a card of
+          three equal columns. Nothing on the page was bigger than anything else, so
+          the one figure the page exists to answer — what is in this account — read as
+          just another cell. They are one surface now, carrying the gilt top-rule the
+          system reserves for a headline, with the total set in the ledger numerals
+          (`display-number`) that were going unused here, and cash/assets demoted to
+          the supporting figures they are. */}
+      <Card gilt flush>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', padding: '22px 24px 20px' }}>
+          <div className="flex items-center gap-4" style={{ minWidth: 0 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: 'var(--color-bg-elevated)', boxShadow: 'var(--elev-ring)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Icon size={20} style={{ color: 'var(--color-text-secondary)' }} strokeWidth={1.5} />
             </div>
-            <p className="text-sm mt-1" style={{ color: 'var(--color-text-muted)' }}>
-              {account.type.charAt(0).toUpperCase() + account.type.slice(1)}
-              {account.description && ` · ${account.description}`}
-            </p>
+            <div style={{ minWidth: 0 }}>
+              <div className="flex items-center gap-2 group">
+                <h1 className="heading-lg" style={{ minWidth: 0 }}>{account.name}</h1>
+                <button onClick={openDetails} title="Rename account" aria-label="Rename account"
+                  className="opacity-0 group-hover:!opacity-100 transition-opacity"
+                  style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4, flexShrink: 0 }}>
+                  <Pencil size={14} />
+                </button>
+              </div>
+              <p className="text-sm" style={{ color: 'var(--color-text-muted)', marginTop: 3 }}>
+                {account.type.charAt(0).toUpperCase() + account.type.slice(1)}
+                {account.description && ` · ${account.description}`}
+              </p>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+            <Button variant="icon" icon={Upload} onClick={openImport} title="Import transactions" aria-label="Import transactions" />
+            {(() => {
+              const addTxn   = <Button key="txn" variant={isAssetAccount ? 'secondary' : 'gold'} icon={Plus} onClick={openModal}>Add transaction</Button>;
+              const addAsset = <Button key="asset" variant={isAssetAccount ? 'gold' : 'secondary'} icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>;
+              // Left → right: import (icon), then secondary, then the gold primary.
+              // Asset accounts make Add asset primary; cash accounts make Add transaction primary.
+              // Debt accounts hold no assets, so only Add transaction.
+              if (account.isDebt) return addTxn;
+              return isAssetAccount ? [addTxn, addAsset] : [addAsset, addTxn];
+            })()}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <Button variant="icon" icon={Upload} onClick={openImport} title="Import transactions" aria-label="Import transactions" />
-          {(() => {
-            const addTxn   = <Button key="txn" variant={isAssetAccount ? 'secondary' : 'gold'} icon={Plus} onClick={openModal}>Add transaction</Button>;
-            const addAsset = <Button key="asset" variant={isAssetAccount ? 'gold' : 'secondary'} icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>;
-            // Left → right: import (icon), then secondary, then the gold primary.
-            // Asset accounts make Add asset primary; cash accounts make Add transaction primary.
-            // Debt accounts hold no assets, so only Add transaction.
-            if (account.isDebt) return addTxn;
-            return isAssetAccount ? [addTxn, addAsset] : [addAsset, addTxn];
-          })()}
-        </div>
-      </div>
 
-      {/* Balance —  in FULL, to the rupee.
-          Everywhere else in the app a figure is a comparison ("₹12.5L in assets" beside
-          "₹3.2L cash") and rounding to two significant figures helps the eye. Here it is
-          the answer to "how much is in this account", read against a bank app that
-          prints every digit. "₹12.53L" cannot be reconciled with ₹12,52,840, and a
-          balance you cannot reconcile is a balance you do not trust. */}
-      {account.isDebt ? (
-        <div className="card">
-          <p className="heading-sm mb-3">Outstanding Balance</p>
-          {/* Printed as stored — a debt account's balance is already negative. */}
-          <p className="figure display-number" style={{
-            color: account.balance <= 0 ? 'var(--color-danger)' : 'var(--color-success)',
-          }}>
-            {formatCurrency(account.balance)}
-          </p>
-        </div>
-      ) : (
-        /* Assets are shown at MARKET value (the server's settled T-1 close) with the
-           cost basis and the gain beneath — the panel used to print the cost basis and
-           call it "Total Value", which is the one thing it is not. */
-        <div className="card" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0 }}>
-          <div style={{ paddingRight: 24, borderRight: '1px solid var(--color-border-subtle)' }}>
-            <p className="label" style={{ marginBottom: 8 }}>Cash</p>
-            <p className="figure" style={{ fontSize: 'clamp(1.05rem, 2.1vw, 1.35rem)', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              {formatCurrency(cashBalance)}
+        {/* The figure, in FULL rupees. Everywhere else a number is a comparison and
+            `compactIfLarge` helps the eye; here it is read against a bank app that
+            prints every digit, and ₹12.53L cannot be reconciled with ₹12,52,840. */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
+          gap: 32, flexWrap: 'wrap', padding: '20px 24px 22px',
+          borderTop: '1px solid var(--color-border-subtle)',
+          background: 'var(--color-bg-secondary)',
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <p className="heading-sm" style={{ marginBottom: 10 }}>
+              {account.isDebt ? 'Outstanding' : 'Total value'}
             </p>
-          </div>
-          <div style={{ padding: '0 24px', borderRight: '1px solid var(--color-border-subtle)' }}>
-            <p className="label" style={{ marginBottom: 8 }}>Assets</p>
-            <p className="figure" style={{ fontSize: 'clamp(1.05rem, 2.1vw, 1.35rem)', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              {formatCurrency(assetValue)}
+            <p className="display-number" style={{
+              fontSize: 'clamp(1.6rem, 4vw, 2rem)',
+              color: account.isDebt
+                ? (account.balance <= 0 ? 'var(--color-danger)' : 'var(--color-success)')
+                : 'var(--color-text-primary)',
+            }}>
+              {/* Printed as stored — a debt account's balance is already negative. */}
+              {formatCurrency(account.isDebt ? account.balance : totalValue)}
             </p>
-            {totalInvested > 0 && (
-              <p className="figure text-xs" style={{ marginTop: 6, color: 'var(--color-text-muted)' }}>
-                {formatCurrency(totalInvested)} invested
-                <span style={{ color: pnlColor(assetPnl), marginLeft: 8 }}>
-                  {formatSigned(assetPnl)}
-                </span>
+            {account.asof && (
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 8 }}>
+                as of {formatDate(account.asof)}
               </p>
             )}
           </div>
-          <div style={{ paddingLeft: 24 }}>
-            <p className="label" style={{ marginBottom: 8 }}>Total value</p>
-            {/* Full rupees are longer than the compact form was, so the three columns
-                give a little size back rather than letting a crore overflow. */}
-            <p className="figure" style={{ fontSize: 'clamp(1.05rem, 2.1vw, 1.35rem)', fontWeight: 500, color: 'var(--color-accent)' }}>
-              {formatCurrency(totalValue)}
-            </p>
-          </div>
+
+          {/* Components sit beside the total, not level with it — they add up TO it. */}
+          {!account.isDebt && (
+            <div style={{ display: 'flex', gap: 36, flexWrap: 'wrap' }}>
+              <Figure label="Cash" value={formatCurrency(cashBalance)} />
+              <Figure
+                label="Assets"
+                value={formatCurrency(assetValue)}
+                sub={totalInvested > 0 && (
+                  <>
+                    <span className="figure">{compactIfLarge(totalInvested)}</span> invested
+                    <span className="figure" style={{ color: pnlColor(assetPnl), marginLeft: 8 }}>
+                      {formatSigned(assetPnl, compactIfLarge)}
+                    </span>
+                  </>
+                )}
+              />
+            </div>
+          )}
         </div>
-      )}
+      </Card>
 
       {/* Account Balance History */}
       <PriceGrapher
@@ -325,83 +387,140 @@ export default function AccountDetail() {
         growthCapable={!account.isDebt}
       />
 
-      {/* Holdings Donut */}
-      {account.holdings?.length > 0 && (
-        <HoldingsDonut holdings={account.holdings} title="Holdings" />
-      )}
+      {/* ── Holdings ──────────────────────────────────────────────────────────
+          This was THREE stacked cards saying overlapping things: a donut whose legend
+          already listed every holding by name and value, a per-asset price-chart panel,
+          and a "Breakdown" list of the same holdings again. One card now.
 
-      {/* Asset Prices */}
-      {account.holdings?.length > 0 && !account.isDebt && (
-        <AssetPricePanel holdings={account.holdings} title="Asset Prices" height={260} />
-      )}
-
-      {/* Holdings */}
+          A bar rather than the donut, per the project's own rule — length beats angle
+          for comparing to a whole, and the donut earns its place only where the split
+          IS the subject. Here the holdings are the subject and the split is context. */}
       {account.holdings?.length > 0 && (
         <div>
-          <p className="heading-sm" style={{ marginBottom: 12 }}>Breakdown</p>
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            {account.holdings.map((h, i) => (
+          <SectionHeader
+            eyebrow="Holdings"
+            size="sm"
+            style={{ marginBottom: 14 }}
+            action={
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                {account.holdings.length} position{account.holdings.length === 1 ? '' : 's'}
+              </span>
+            }
+          />
+          <Card flush>
+            {allocation.length > 1 && (
+              <div style={{ padding: '20px 20px 18px', borderBottom: '1px solid var(--color-border-subtle)' }}>
+                <AllocationBar items={allocation} />
+              </div>
+            )}
+
+            {allocation.map((h, i) => (
               <div key={h.symbol} className="data-row group"
-                style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none' }}>
-                <div className="flex items-center gap-3">
-                  <Package size={15} style={{ color: 'var(--color-text-muted)' }} />
-                  <div>
-                    <p className="text-sm font-medium" style={{ color: 'var(--color-text-primary)' }}>{h.name}</p>
-                    <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      <span className="figure">{h.symbol}</span> · <span className="figure">{h.qty}</span> units · avg{' '}
-                      {/* Foreign holding: the average it was actually bought at, in its
-                          own currency. The INR cost sits on the right of the row. */}
-                      <span className="figure">
-                        {h.currency
-                          ? formatNativeCurrency(h.avgCostPerUnitNative, h.currency)
-                          : formatCurrency(h.avgCostPerUnit)}
-                      </span> · {h.type?.replace('_', ' ')}
+                style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none', gap: 16 }}>
+                {/* Identity. The real instrument mark, not the one grey parcel icon
+                    every holding used to wear — the list read as a spreadsheet
+                    precisely because nothing in it was recognisable at a glance. */}
+                <div className="flex items-center gap-3" style={{ minWidth: 0, flex: 1 }}>
+                  {/* The rail ties a row to its slice of the bar above. Past the
+                      palette the bar folds everything into one "Other" segment, so
+                      those rows get a neutral rail rather than claiming a colour that
+                      is no longer theirs — `% CHART_COLORS.length` would have handed
+                      the 9th holding the 1st holding's hue. */}
+                  <span style={{
+                    width: 4, alignSelf: 'stretch', borderRadius: 99, flexShrink: 0, opacity: 0.9,
+                    background: i < CHART_COLORS.length - 1
+                      ? CHART_COLORS[i]
+                      : 'var(--color-border-hover)',
+                  }} />
+                  <AssetIcon symbol={h.symbol} name={h.name} type={h.type} size={30} />
+                  <div style={{ minWidth: 0 }}>
+                    <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
+                      {h.name}
+                    </p>
+                    <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+                      <span className="figure">{h.symbol}</span> · {assetTypeLabel(h.type)}
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center" style={{ gap: 12, flexShrink: 0 }}>
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                    <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                      {formatCurrency(h.totalInvested)}
-                    </span>
-                    {h.currency && (
-                      <span className="figure" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
-                        {formatNativeCurrency(h.totalInvestedNative, h.currency)}
-                      </span>
-                    )}
-                  </span>
-                  {/* Selling used to mean opening Add asset, searching the market for
-                      something already on your own books, and remembering the quantity.
-                      It belongs on the holding. Revealed on hover, like every other row
-                      action in the app, so the list still reads as figures. */}
-                  <button
-                    onClick={() => setSellHolding(h)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    title={`Sell ${h.name}`}
-                    style={{
-                      background: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                      border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
-                      color: 'var(--color-danger)', fontSize: '0.6875rem', fontWeight: 600,
-                      padding: '4px 10px', flexShrink: 0,
-                    }}>
-                    Sell
-                  </button>
+
+                {/* The position: what you hold, and what it cost you a unit. */}
+                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 108 }}>
+                  <p className="figure text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                    {+h.qty.toFixed(4)}
+                  </p>
+                  <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    {/* A foreign holding shows the average the exchange actually
+                        charged; the rupee cost is the column to its right. */}
+                    @ {h.currency
+                      ? formatNativeCurrency(h.avgCostPerUnitNative, h.currency)
+                      : formatCurrency(h.avgCostPerUnit)}
+                  </p>
                 </div>
+
+                {/* Capital, and its share of this account's book. */}
+                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 104 }}>
+                  <p className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                    {formatCurrency(h.totalInvested)}
+                  </p>
+                  <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    {h.weight.toFixed(1)}%
+                  </p>
+                </div>
+
+                {/* Selling used to mean opening Add asset and searching the market for
+                    something already on your own books. It belongs on the holding. */}
+                <SellButton onClick={() => setSellHolding(h)} title={`Sell ${h.name}`} />
               </div>
             ))}
-          </div>
+          </Card>
+          {/* Say which basis these are on. The header above prices the account at
+              market; these rows are what was paid, and the two figures sitting on one
+              page without a word between them is how someone reads a loss into a
+              holding that is fine. */}
+          <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 10 }}>
+            Positions are shown at cost. The account's market value and gain are above.
+          </p>
         </div>
       )}
 
-      {/* Transactions */}
+      {/* ── Activity ──────────────────────────────────────────────────────────
+          The whole ledger used to print here — up to a hundred rows below every other
+          section, so the page had no end and the recent activity you actually came for
+          was the first six of an endless scroll. Now: the recent few, a filter for the
+          kind of movement you are looking for, and more on request. */}
       <div>
-        <p className="heading-sm" style={{ marginBottom: 12 }}>Transactions ({txns.length})</p>
-        {txns.length > 0 ? (
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            {txns.map((tx, i) => {
-              // The statement now carries transfers INTO this account as well as out of
+        <SectionHeader
+          eyebrow="Activity"
+          size="sm"
+          style={{ marginBottom: 14 }}
+          action={
+            <div className="flex items-center" style={{ gap: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <div className="pill-group">
+                {TX_FILTERS.map(f => (
+                  <button key={f.key} type="button"
+                    onClick={() => { setTxFilter(f.key); setTxShown(TX_PAGE); }}
+                    className={`pill-item ${txFilter === f.key ? 'active' : ''}`}>
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              {/* Only the most recent hundred are loaded here. Anything older lives on
+                  the Transactions page, which already has date ranges, search and
+                  paging — so this hands off rather than rebuilding them. */}
+              <Link to={`/transactions?account=${id}`}
+                className="text-xs font-medium"
+                style={{ color: 'var(--color-accent)', whiteSpace: 'nowrap' }}>
+                View all →
+              </Link>
+            </div>
+          }
+        />
+
+        {filteredTxns.length > 0 ? (
+          <Card flush>
+            {filteredTxns.slice(0, txShown).map((tx, i) => {
+              // The statement carries transfers INTO this account as well as out of
               // it, and the two read as opposites from here: one credits, one debits.
-              // Everything else in the list belongs to this account outright.
               const incoming = tx.type === 'transfer'
                 ? (tx.toAccount?._id || tx.toAccount) === id
                 : undefined;
@@ -412,6 +531,9 @@ export default function AccountDetail() {
                   tx={tx}
                   divided={i > 0}
                   incoming={incoming}
+                  // Some rows here are read-only, so every row keeps the action gutter
+                  // — without it their amounts stopped at a different x.
+                  reserveActions
                   subtitle={<>
                     {tx.type} · {formatDate(tx.date)}
                     {counterparty?.name && ` ${incoming ? '←' : '→'} ${counterparty.name}`}
@@ -425,11 +547,30 @@ export default function AccountDetail() {
                 />
               );
             })}
-          </div>
+
+            {filteredTxns.length > txShown && (
+              <button type="button"
+                onClick={() => setTxShown(n => n + TX_PAGE)}
+                style={{
+                  width: '100%', padding: '12px 24px', cursor: 'pointer', fontFamily: 'inherit',
+                  background: 'none', border: 'none', borderTop: '1px solid var(--color-border-subtle)',
+                  color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600,
+                }}>
+                Show {Math.min(TX_PAGE, filteredTxns.length - txShown)} more
+                <span style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>
+                  {' '}· {filteredTxns.length - txShown} older
+                </span>
+              </button>
+            )}
+          </Card>
         ) : (
-          <div className="card flex items-center justify-center" style={{ padding: '48px 24px' }}>
-            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No transactions in this account</p>
-          </div>
+          <Card className="flex items-center justify-center" style={{ padding: '40px 24px' }}>
+            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              {txFilter === 'all'
+                ? 'No transactions in this account yet'
+                : `No ${TX_FILTERS.find(f => f.key === txFilter)?.label.toLowerCase()} here`}
+            </p>
+          </Card>
         )}
       </div>
 
@@ -537,8 +678,15 @@ export default function AccountDetail() {
         eyebrow={selectedSecurity ? 'Record trade' : 'Add asset'}
         title={selectedSecurity ? selectedSecurity.name : 'Find an asset'}
         subtitle={selectedSecurity
-          ? (selectedSecurity.isManual ? undefined : <AssetTicker symbol={selectedSecurity.symbol} exchange={selectedSecurity.exchange} />)
-          : 'Search stocks, ETFs, crypto, funds — or add a manual holding.'}
+          // Picked out of your own book: say what you already hold, so "add more to it"
+          // confirms itself before a figure is typed. Across ALL accounts, and it says
+          // so — this dialog can file the trade against any of them.
+          ? (selectedSecurity.owned
+              ? <span><span className="figure">{+Number(selectedSecurity.qty || 0).toFixed(4)}</span> held across your accounts
+                  {!selectedSecurity.isManual && <> · <AssetTicker symbol={selectedSecurity.symbol} exchange={selectedSecurity.exchange} /></>}
+                </span>
+              : selectedSecurity.isManual ? undefined : <AssetTicker symbol={selectedSecurity.symbol} exchange={selectedSecurity.exchange} />)
+          : 'Search your holdings, or add anything from the market.'}
         titleSuffix={selectedSecurity ? <AssetTypePill type={selectedSecurity.type} /> : undefined}
         titlePrefix={selectedSecurity ? <AssetIcon symbol={selectedSecurity.symbol} name={selectedSecurity.name} type={selectedSecurity.type} size={40} /> : undefined}
         wide>

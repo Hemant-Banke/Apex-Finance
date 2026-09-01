@@ -1,9 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { marketAPI } from '../../lib/api';
+import { marketAPI, dashboardAPI } from '../../lib/api';
 import { Search, Loader2 } from 'lucide-react';
 import AssetIcon from './AssetIcon';
 import Popover from '../ui/Popover';
 import { formatNativeCurrency } from '../../lib/utils';
+import { isSelfPricedHolding } from '../../lib/constants';
 
 // ── Popular securities shown before user types ──────────────────────────────
 const POPULAR = {
@@ -67,6 +68,53 @@ function matchManual(q) {
   );
 }
 
+/**
+ * A holding the user already owns, as a pickable security.
+ *
+ * `owned` is what tells the form the instrument already EXISTS: a manual asset reached
+ * this way must not re-ask for its name and type, because it has them — re-typing
+ * "Wedding Gold" a second time creates `WEDDING-GOLD` all over again as far as the user
+ * is concerned, and a single character off ("Wedding gold ") would have split one asset
+ * into two. Its valuation metadata rides along for the same reason: purity, rate and
+ * quote currency are facts about the asset, not about the trade being recorded.
+ */
+const ownedToSecurity = (h) => ({
+  symbol:   h.symbol,
+  name:     h.name || h.symbol,
+  type:     h.type || 'other',
+  currency: h.currency || '',
+  purity:   h.purity || '',
+  rate:     h.rate,
+  owned:    true,
+  qty:      h.qty,
+  isManual: isSelfPricedHolding(h),
+});
+
+/**
+ * The user's own holdings, matched locally.
+ *
+ * A manual asset is not in any index in the world — it exists only on this user's own
+ * books — so "search for it and add more to it" cannot be a market query. It is also the
+ * one set small enough to filter in the browser, which makes it the only part of this
+ * panel that answers instantly and cannot fail.
+ *
+ * Every token must appear somewhere in the name or the symbol, so "wedding gold" finds
+ * `Wedding Gold` and a half-typed "wedd" finds it too.
+ */
+// `+n.toFixed(4)` the way the holdings table does it: fixed decimals so fractional
+// crypto reads honestly, the unary plus dropping the trailing zeros a whole number
+// would otherwise carry ("12.0000").
+const qtyLabel = (n) => `${+Number(n || 0).toFixed(4)}`;
+
+function matchOwned(holdings, q) {
+  const toks = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!toks.length) return [];
+  return holdings.filter(h => {
+    const hay = `${h.name || ''} ${h.symbol || ''}`.toLowerCase();
+    return toks.every(t => hay.includes(t));
+  });
+}
+
 // Per-category header meta — an emoji marker + colour-coded accent, so the empty
 // state reads as an organised board, not a flat list.
 const CATEGORY_META = {
@@ -106,7 +154,7 @@ function TypeBadge({ type }) {
 
 // Compact clickable chip: icon + short ticker + company name. Lifts slightly and
 // warms to a gilt hairline on hover so the board feels tactile.
-function SecurityChip({ s, onPick, dashed = false }) {
+function SecurityChip({ s, onPick, dashed = false, sub }) {
   const short = s.symbol.replace('.NS', '').replace('-USD', '').replace('=F', '');
   const rest = dashed ? 'transparent' : 'var(--color-bg-elevated)';
   return (
@@ -127,7 +175,7 @@ function SecurityChip({ s, onPick, dashed = false }) {
       <AssetIcon symbol={s.symbol} name={s.name} type={s.type} size={26} />
       <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 1 }}>
         <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>{s.name}</div>
-        <div className="figure" style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{short}</div>
+        <div className="figure" style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>{sub || short}</div>
       </div>
     </button>
   );
@@ -159,15 +207,28 @@ function useDebounce(val, ms) {
 /**
  * MarketSearch — reusable security search bar.
  *
+ * It searches TWO things, and the user's own book comes first. An asset you named
+ * yourself — "Wedding Gold", "Mumbai Apartment", an FD — is not listed anywhere on
+ * earth, so a market query can never find it; adding a second contribution to it meant
+ * starting from the manual catalogue again and retyping the name EXACTLY, and a stray
+ * character silently created a second asset that split the position in two. Your
+ * holdings are matched locally, appear under their own heading above the market hits,
+ * and are on the board before you type a thing.
+ *
+ * A symbol you own that the market also lists (AAPL, an AMFI fund) appears ONCE, as the
+ * owned row: it is the same instrument, and the owned row is the one carrying what you
+ * hold and how it is valued.
+ *
  * Props:
- *   onSelect(security) — called with { symbol, name, type, exchange?, isManual? }
+ *   onSelect(security) — called with { symbol, name, type, exchange?, isManual?, owned? }
  *   placeholder        — input placeholder text
  *   autoFocus          — focus input on mount
  *   inline             — render suggestions in normal flow (use inside modals/panels)
  */
-export default function MarketSearch({ onSelect, placeholder = 'Search stocks, ETFs, crypto, mutual funds…', autoFocus = true, inline = false }) {
+export default function MarketSearch({ onSelect, placeholder = 'Search your holdings, stocks, ETFs, crypto, funds…', autoFocus = true, inline = false }) {
   const [query, setQuery]       = useState('');
   const [results, setResults]   = useState([]);
+  const [owned, setOwned]       = useState([]);
   const [loading, setLoading]   = useState(false);
   const [focused, setFocused]   = useState(false);
   const [error, setError]       = useState('');
@@ -183,6 +244,22 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
     const t = setTimeout(() => inputRef.current?.focus(), 210);
     return () => clearTimeout(t);
   }, [autoFocus]);
+
+  // The user's own book, fetched once per mount — which is once per opening of the
+  // dialog, so the quantities are always current. Deliberately not cached at module
+  // level: it goes stale the moment a trade is recorded, and it is a small array.
+  // A failure here is silent; the market half of the panel still works.
+  useEffect(() => {
+    let cancelled = false;
+    dashboardAPI.getHoldings()
+      .then(r => {
+        if (cancelled) return;
+        // Biggest position first, so the board opens on what you actually own most of.
+        setOwned([...(r.data || [])].sort((a, b) => (b.totalInvested || 0) - (a.totalInvested || 0)));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   // Search when debounced query changes — a data-fetching effect that owns the
   // results/loading/error state, so the synchronous resets here are intentional.
@@ -212,17 +289,66 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
   // nested component, so it doesn't remount on every keystroke.
   const renderResults = () => {
     const manualMatches = matchManual(query);
-    if (error && results.length === 0 && manualMatches.length === 0) {
+    const ownedMatches  = matchOwned(owned, query);
+    // A symbol you own that the market also lists is ONE instrument, and the owned row
+    // is the one that knows what you hold — so the market's copy of it goes.
+    const ownedSymbols  = new Set(ownedMatches.map(h => h.symbol));
+    const marketResults = results.filter(r => !ownedSymbols.has(r.symbol));
+
+    const nothing = marketResults.length === 0 && manualMatches.length === 0 && ownedMatches.length === 0;
+    if (error && nothing) {
       return <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>{error}</div>;
     }
-    if (!loading && results.length === 0 && manualMatches.length === 0) {
+    if (!loading && nothing) {
       return <div style={{ padding: '16px 20px', color: 'var(--color-text-muted)', fontSize: '0.875rem' }}>No results for "{query}"</div>;
     }
     // When we also surface a manual option, drop one live result so the list
     // doesn't overflow into a scroll.
-    const shown = manualMatches.length ? results.slice(0, Math.max(0, results.length - 1)) : results;
+    const shown = manualMatches.length ? marketResults.slice(0, Math.max(0, marketResults.length - 1)) : marketResults;
     return (
       <div style={{ padding: 6 }}>
+
+        {/* Your own book, first. What you already hold is the likeliest thing you mean
+            — and for an asset you named yourself it is the ONLY place it exists. */}
+        {ownedMatches.length > 0 && (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '4px 10px 6px' }}>
+              <p className="eyebrow" style={{ margin: 0 }}>In your portfolio</p>
+              <span style={{ flex: 1, height: 1, background: 'var(--color-border-subtle)' }} />
+            </div>
+            {ownedMatches.map(h => (
+              <button key={`own-${h.symbol}`} onMouseDown={() => select(ownedToSecurity(h))}
+                style={{
+                  width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+                  padding: '9px 10px', background: 'none', border: 'none', cursor: 'pointer',
+                  textAlign: 'left', transition: 'background 0.12s', borderRadius: 'var(--radius-sm)',
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = 'var(--color-bg-elevated)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'none'}>
+                <AssetIcon symbol={h.symbol} name={h.name} type={h.type} size={34} />
+                <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 2 }}>
+                  <span style={{
+                    fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-text-primary)',
+                    minWidth: 0, lineHeight: 1.35,
+                    display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                    overflow: 'hidden', overflowWrap: 'anywhere',
+                  }}>{h.name}</span>
+                  {/* What you hold, not what it is worth: this is the "add more to it"
+                      path, and the quantity is what tells you it is the right one. */}
+                  <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                    <span className="figure">{qtyLabel(h.qty)}</span> held
+                    {!isSelfPricedHolding(h) && <> · <span className="figure">{h.symbol}</span></>}
+                  </span>
+                </div>
+                <span style={{ flexShrink: 0, marginTop: 2 }}><TypeBadge type={h.type} /></span>
+              </button>
+            ))}
+            {(shown.length > 0 || manualMatches.length > 0) && (
+              <div style={{ height: 1, background: 'var(--color-border-subtle)', margin: '8px 10px' }} />
+            )}
+          </>
+        )}
+
         {shown.map(r => (
           <button key={r.symbol} onMouseDown={() => select(r)}
             style={{
@@ -299,6 +425,22 @@ export default function MarketSearch({ onSelect, placeholder = 'Search stocks, E
   const renderPanel = () => showResults ? renderResults() : (
     /* Empty state — a colour-coded board of popular markets + manual options */
     <div style={{ padding: '16px 16px 14px' }}>
+
+      {/* Your own holdings lead the board. Adding to something you already own is the
+          commonest reason this dialog is open, and for a manual asset it is the only
+          route to it that does not involve retyping its name exactly. */}
+      {owned.length > 0 && (
+        <div style={{ marginBottom: 18 }}>
+          <CategoryHeader label="Your holdings" emoji="📌" accent="var(--color-accent)" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            {owned.slice(0, 8).map(h => (
+              <SecurityChip key={`own-${h.symbol}`} s={ownedToSecurity(h)} onPick={select}
+                sub={`${qtyLabel(h.qty)} held`} />
+            ))}
+          </div>
+        </div>
+      )}
+
       {Object.entries(POPULAR).map(([category, items]) => (
         <div key={category} style={{ marginBottom: 18 }}>
           <CategoryHeader

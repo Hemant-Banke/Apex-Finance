@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import AssetIcon from '../market/AssetIcon';
 import Delta from '../ui/Delta';
+import SellButton from './SellButton';
 import { formatCurrency, formatNativeCurrency, compactIfLarge, formatPct, pnlColor } from '../../lib/utils';
 import { assetTypeLabel } from '../../lib/constants';
 
@@ -151,18 +152,7 @@ export default function HoldingsTable({ holdings = [], onSell }) {
 
               {onSell && (
                 <td style={{ ...cell, textAlign: 'right', paddingLeft: 0 }}>
-                  <button
-                    onClick={() => onSell(h)}
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    title={`Sell ${h.name}`}
-                    style={{
-                      background: 'none', cursor: 'pointer', fontFamily: 'inherit',
-                      border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
-                      color: 'var(--color-danger)', fontSize: '0.6875rem', fontWeight: 600,
-                      padding: '4px 10px',
-                    }}>
-                    Sell
-                  </button>
+                  <SellButton onClick={() => onSell(h)} title={`Sell ${h.name}`} />
                 </td>
               )}
             </tr>

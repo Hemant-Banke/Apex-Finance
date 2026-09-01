@@ -56,6 +56,24 @@ export function compactIfLarge(amount, formatValue = formatCurrency) {
   return Math.abs(amount) >= 1_00_000 ? formatCompact(amount) : formatValue(amount);
 }
 
+/**
+ * The app's day turns over at 12:00 AM IST — see `server/utils/helpers.todayMs`.
+ *
+ * The client has to agree with the server about which date is "today", or between
+ * midnight and 05:30 IST the date pickers cap at yesterday and refuse a transaction
+ * the server would happily accept.
+ *
+ * Computed explicitly rather than read off the browser's clock: `toISOString()` is UTC
+ * (the bug this replaces), and local getters would be right only for a viewer who
+ * happens to be in India. The day belongs to the portfolio, not to where it is opened.
+ */
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/** "YYYY-MM-DD" for today, in IST. */
+export function todayStr() {
+  return new Date(Date.now() + IST_OFFSET_MS).toISOString().split('T')[0];
+}
+
 export function formatDate(date) {
   return new Date(date).toLocaleDateString('en-IN', {
     year: 'numeric',

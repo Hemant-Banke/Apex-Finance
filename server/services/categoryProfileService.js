@@ -41,8 +41,15 @@ async function recordTransactions(userId, txns) {
     isIncomeExpense(t) && t.category && t.category !== 'general' && !isMiscCategory(t.category));
   if (!relevant.length) return;
 
-  const doc = (await UserCategoryProfile.findOne({ user: userId }))
-    || new UserCategoryProfile({ user: userId, categories: {} });
+  // Upsert rather than find-or-construct: two requests arriving together would both
+  // see no profile, both build one, and the loser would die on the unique `user` index.
+  // This still races on the READ-MODIFY-WRITE below, which is why callers hand over a
+  // whole batch in one call instead of one call per row.
+  const doc = await UserCategoryProfile.findOneAndUpdate(
+    { user: userId },
+    { $setOnInsert: { user: userId } },
+    { upsert: true, new: true, setDefaultsOnInsert: true },
+  );
 
   const cats = doc.categories || {};
 

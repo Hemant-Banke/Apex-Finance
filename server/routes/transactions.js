@@ -13,11 +13,20 @@ const { getAccountCashBalance } = require('../services/accountBalance');
 const txService                 = require('../services/transactionService');
 const categoryProfile           = require('../services/categoryProfileService');
 
-/** Record a saved (user-confirmed) transaction into the user's category profile. */
-function learnCategory(userId, tx, narration) {
-  categoryProfile.recordTransactions(userId, [{
-    type: tx.type, category: tx.category, amount: tx.amount, date: tx.date, narration,
-  }]).catch(console.error);
+/**
+ * Record saved (user-confirmed) transactions into the user's category profile.
+ *
+ * Takes the WHOLE batch in one call. Firing it per row looked equivalent and was not:
+ * `recordTransactions` reads the profile, folds the rows in, and writes it back, so
+ * twenty concurrent calls all read the same starting state and the last write won —
+ * nineteen rows' worth of learning silently discarded. On a fresh profile they also
+ * raced to CREATE the document and lost on the unique `user` index with an E11000 that
+ * only ever surfaced in the logs. An import is precisely when the profile has the most
+ * to learn, so it was the worst possible place to drop it.
+ */
+function learnCategories(userId, rows) {
+  if (!rows.length) return;
+  categoryProfile.recordTransactions(userId, rows).catch(console.error);
 }
 
 const router = express.Router();
@@ -79,8 +88,11 @@ async function createTransactions(userId, rows) {
   prepared.sort((a, b) => a.i - b.i);   // insert in request order
   const created = await txService.bulkCreate(userId, prepared.map(p => p.data));
 
-  // Learn how this user categorizes (non-blocking).
-  created.forEach((tx, n) => learnCategory(userId, tx, prepared[n].narration));
+  // Learn how this user categorizes (non-blocking) — one pass for the whole batch.
+  learnCategories(userId, created.map((tx, n) => ({
+    type: tx.type, category: tx.category, amount: tx.amount, date: tx.date,
+    narration: prepared[n].narration,
+  })));
 
   return { created, failed };
 }
@@ -192,7 +204,10 @@ router.put('/:id', asyncHandler(async (req, res) => {
 
   // Update the stores before responding, so the client's refetch sees fresh data.
   await txService.onUpdate(req.user._id, oldTx, req.body).catch(console.error);
-  learnCategory(req.user._id, transaction, req.body.narration);
+  learnCategories(req.user._id, [{
+    type: transaction.type, category: transaction.category, amount: transaction.amount,
+    date: transaction.date, narration: req.body.narration,
+  }]);
 
   res.json(transaction);
 }));

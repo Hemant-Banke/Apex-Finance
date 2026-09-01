@@ -1,7 +1,7 @@
 import { useState } from 'react';
-import { Check, ChevronLeft, Sparkles, ArrowRight, Pencil, Plus, RotateCcw, AlertCircle } from 'lucide-react';
+import { Check, Sparkles, ArrowRight, Pencil, Plus, RotateCcw, AlertCircle } from 'lucide-react';
 import { transactionsAPI } from '../../lib/api';
-import { formatCurrency, formatDate } from '../../lib/utils';
+import { formatCurrency, formatDate, todayStr } from '../../lib/utils';
 import { useCategoryNames } from '../../lib/categoryNames';
 import CategoryPicker from '../forms/CategoryPicker';
 import DatePicker, { DateRangePicker } from '../forms/DatePicker';
@@ -10,9 +10,10 @@ import MarketSearch from '../market/MarketSearch';
 import Modal from '../ui/Modal';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import ConfidenceBadge from './ConfidenceBadge';
+import BackLink from '../ui/BackLink';
 import { useToast } from '../../context/ToastContext';
 
-const TODAY = new Date().toISOString().split('T')[0];
+const TODAY = todayStr();
 
 const TYPE_PILL_COLOR = {
   income: 'var(--color-success)',
@@ -21,14 +22,14 @@ const TYPE_PILL_COLOR = {
 };
 
 function toDateInput(iso) {
-  return iso ? iso.split('T')[0] : new Date().toISOString().split('T')[0];
+  return iso ? iso.split('T')[0] : TODAY;
 }
 
 export default function TransactionReview({ data, accounts, accountId, onBack, onDone }) {
   const toast = useToast();
   const { transactions: raw, bankName, accountName, aiParsed, confidence } = data;
 
-  const today = new Date().toISOString().split('T')[0];
+  const today = TODAY;
 
   const [rows, setRows] = useState(() =>
     raw
@@ -425,10 +426,9 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
           <Plus size={12} /> Add transaction
         </button>
 
-        <button type="button" onClick={onBack}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          <ChevronLeft size={12} /> Upload different file
-        </button>
+        <BackLink onClick={onBack} style={{ fontSize: '0.75rem', flexShrink: 0 }}>
+          Upload a different file
+        </BackLink>
       </div>
 
       {/* Transaction rows — the only scrollable region; the modal itself stays fixed */}

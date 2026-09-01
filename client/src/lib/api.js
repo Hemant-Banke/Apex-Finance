@@ -103,8 +103,11 @@ export const dashboardAPI = {
   getPortfolio:        ()       => api.get('/dashboard/portfolio'),
   // The raw book at cost. Only for callers that just need the instrument list.
   getHoldings:         ()       => api.get('/dashboard/holdings'),
+  // days omitted / 0 = the whole history
+  getContribution:     (days)   => api.get('/dashboard/contribution', { params: { days } }),
   getIncomeExpense:    (months) => api.get('/dashboard/income-expense',    { params: { months } }),
-  getExpenseCategories:(months) => api.get('/dashboard/expense-categories',{ params: { months } })
+  // Category totals for one direction — where it goes, and where it comes from.
+  getCategoryTotals:   (type, months) => api.get('/dashboard/categories', { params: { type, months } })
 };
 
 // Subscriptions — recurring transactions (SIPs, streaming, rent…). Each due

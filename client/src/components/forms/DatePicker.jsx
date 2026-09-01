@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react';
 import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import Popover from '../ui/Popover';
+import { todayStr } from '../../lib/utils';
 
 /**
  * DatePicker — value is a "YYYY-MM-DD" string.
@@ -27,9 +28,13 @@ function parseISO(s) {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s || '');
   return m ? { y: +m[1], m: +m[2] - 1, d: +m[3] } : null;
 }
+/**
+ * The calendar's "today" is the app's day (IST), not the browser's. Local getters
+ * were right only for a viewer sitting in India, and would put the highlight on the
+ * wrong cell — and the `max` cap on the wrong day — for anyone else.
+ */
 function todayParts() {
-  const t = new Date();
-  return { y: t.getFullYear(), m: t.getMonth(), d: t.getDate() };
+  return parseISO(todayStr());
 }
 function fmtDisplay(iso) {
   const p = parseISO(iso);
