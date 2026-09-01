@@ -1,5 +1,5 @@
 const AccountHoldings = require('../models/AccountHoldings');
-const { directionalAssetImpact } = require('../utils/transactionHelpers');
+const { directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
 
 // ─── Getters ────────────────────────────────────────────────────────────────
 
@@ -146,14 +146,13 @@ async function updateHoldingsFromMap(userId, byAccount) {
 // ─── Persistence ─────────────────────────────────────────────────────────────
 
 /**
- * Units below this count as a flat position. Repeated buy/sell arithmetic leaves
- * float dust (a fully-closed position lands on 1e-16, not 0), so an exact `=== 0`
- * test would keep phantom holdings alive forever.
+ * A position that has been fully closed — or deleted away — is no longer a holding.
+ *
+ * "Fully closed" is a per-asset-type tolerance, not `=== 0`: see `isFlatUnits`. Float
+ * dust settles every type on ~1e-16 rather than 0, and a share count additionally
+ * carries statement-rounding dust that is a thousandth of a share.
  */
-const FLAT_EPSILON = 1e-9;
-
-/** A position that has been fully closed — or deleted away — is no longer a holding. */
-const hasPosition = (h) => Math.abs(h?.units || 0) > FLAT_EPSILON;
+const hasPosition = (h) => !isFlatUnits(h?.units, h?.assetType);
 
 async function upsertHolding(accountId, userId, holdings) {
   // Prune flat positions here rather than in the callers: this is the single

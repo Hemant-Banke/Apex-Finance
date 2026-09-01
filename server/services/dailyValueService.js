@@ -31,7 +31,7 @@ const { fetchHistoricPrices } = require('./marketDataService');
 const { DAY_MS }              = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder }             = require('../utils/tsHelpers');
-const { buildAccountTxnsMap } = require('../utils/transactionHelpers');
+const { buildAccountTxnsMap, externalFlowImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { accruedPrice }        = require('../utils/assetPricing');
 // Subscriptions materialise into transactions at the start of every `ensureUpToToday`.
 // One-way dependency: subscriptionService must NOT require this module back.
@@ -66,6 +66,57 @@ function fetchPrices(assets, assetStartMs) {
   const today = todayMs();
   const start = (assetStartMs || today) - PRICE_LOOKBACK_DAYS * DAY_MS;
   return fetchHistoricPrices(assets || [], start, today);
+}
+
+
+// ─── Growth view ────────────────────────────────────────────────────────────
+
+/**
+ * A "growth view" index (base 100 at `startMs`) of an already-computed value series —
+ * net worth's `valuesTS` or one account's `cashTS + assetTS` — with every external
+ * inflow/outflow removed via day-by-day TWR chaining (see tsService.toGrowthIndex for
+ * why this must be chained day-to-day rather than measured against one fixed anchor —
+ * doing the latter badly distorts an account that grew mostly through later,
+ * much-larger contributions).
+ *
+ * `valuesTS` must be day-aligned to [startMs, endMs] (inclusive), matching whatever
+ * window the caller already built for the "complete" view.
+ *
+ * @param {string|ObjectId} userId
+ * @param {number} startMs  First day of `valuesTS`.
+ * @param {number} endMs    Last day of `valuesTS`.
+ * @param {number[]} valuesTS
+ * @param {string|ObjectId} [accountId]  Scope the flow boundary to one account (a
+ *                          transfer in/out counts); omitted = the whole system's
+ *                          boundary (a transfer between the user's own accounts nets
+ *                          to zero and is not a flow).
+ * @returns {Promise<(number|null)[]>}
+ */
+async function computeGrowthIndex(userId, startMs, endMs, valuesTS, accountId = null) {
+  if (!valuesTS.length) return [];
+
+  const filter = {
+    user: userId,
+    date: { $gte: new Date(startMs), $lte: new Date(endMs) },
+    type: { $in: ['income', 'expense', 'adjustment', 'transfer', 'buy', 'sell'] },
+  };
+  const txns = await Transaction.find(filter)
+    .select('type amount usesCashBalance account toAccount date')
+    .lean();
+
+  const impactsByDay = {};
+  for (const tx of txns) {
+    const impact = externalFlowImpact(tx, accountId);
+    if (!impact) continue;
+    const day = midnight(tx.date);
+    impactsByDay[day] = (impactsByDay[day] || 0) + impact;
+  }
+
+  // PER-DAY (not cumulative) flow, aligned 1:1 with valuesTS — toGrowthIndex chains
+  // one day's return at a time, so it needs what happened ON each day, not a running
+  // total.
+  const flowTS = valuesTS.map((_, i) => impactsByDay[startMs + i * DAY_MS] || 0);
+  return tsService.toGrowthIndex(valuesTS, flowTS, 100);
 }
 
 
@@ -192,7 +243,7 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
     if (accountsById[aid]?.isDebt || !d.cashTS?.length) continue;
 
     const hDoc     = await AccountHoldings.findOne({ account: d.account, user: userId }).select('holdings').lean();
-    const holdings = (hDoc?.holdings || []).filter(h => h.units);
+    const holdings = (hDoc?.holdings || []).filter(h => !isFlatUnits(h.units, h.assetType));
     if (!holdings.length) continue;
 
     holdingsByAcct[aid] = holdings;
@@ -412,4 +463,5 @@ module.exports = {
   updateForTxns,
   upsertAccountBalance,
   upsertNetWorth,
+  computeGrowthIndex,
 };

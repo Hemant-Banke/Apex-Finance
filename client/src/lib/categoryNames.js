@@ -85,7 +85,10 @@ export function describeCategory(code, map = _all) {
     emoji: c?.emoji || p?.emoji || '',
     group,
     name,
-    label: name ? `${group} · ${name}` : group,
+    // Join only the parts that exist. A code whose GROUP is unknown (a deleted parent, a
+    // half-migrated code) would otherwise render as "· Salary" — a stray separator that
+    // reads like a missing word.
+    label: [group, name].filter(Boolean).join(' · '),
   };
 }
 

@@ -10,6 +10,7 @@ const categoryProfile    = require('../services/categoryProfileService');
 const { getUserCategoryTaxonomy } = require('../services/categoryService');
 const { resolveStatementAssets }  = require('../services/symbolResolver');
 const { MISC_CATEGORY, normalizeCategory }  = require('../lib/categoryRules');
+const conf                = require('../lib/confidence');
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dayName = d => { const x = new Date(d); return isNaN(x) ? '' : DOW[x.getUTCDay()]; };
@@ -48,10 +49,23 @@ const upload = multer({
  *   3. the LLM (only for whatever remains, with the profile as context)
  *   4. Other → Miscellaneous fallback for anything still unclassified
  * Every step is best-effort; a failure just leaves earlier suggestions in place.
+ *
+ * Each layer also records WHICH layer decided and how sure it was, because the layers
+ * are not remotely equal: a merchant this user has filed forty times is close to fact,
+ * and the Miscellaneous fallback is an admission that nothing classified it at all.
+ * Both used to arrive looking identical in the review table.
  */
 async function applySmartCategories(userId, result) {
   const cashRows = (result.transactions || []).filter(t => t.type === 'income' || t.type === 'expense');
   if (!cashRows.length) return;
+
+  /** Record which layer chose this row's category, and how confident it was. */
+  const scoreCategory = (t, source, score) => {
+    t.confidenceParts = { ...(t.confidenceParts || {}), category: conf.part(source, score) };
+    // The headline stays a statement about the row's FACTS — see lib/confidence — so
+    // the category part is carried alongside rather than folded in.
+    t.confidence = conf.overall(t.confidenceParts);
+  };
 
   const taxonomy   = await getUserCategoryTaxonomy(userId);
   const validByType = {
@@ -60,6 +74,7 @@ async function applySmartCategories(userId, result) {
   };
 
   // Layer 1 (regex) already ran in buildTx → suggestedCategory. Collect the rest.
+  for (const t of cashRows) if (t.suggestedCategory) scoreCategory(t, 'rule', conf.CATEGORY.rule);
   let pending = cashRows.filter(t => !t.suggestedCategory);
 
   // Layer 2 — learned profile (decisive merchant→category).
@@ -70,7 +85,12 @@ async function applySmartCategories(userId, result) {
         pending.map(t => ({ id: t.id, type: t.type, narration: t.narration, amount: t.amount, date: t.date })),
         validByType,
       );
-      for (const t of pending) if (preds[t.id]) t.suggestedCategory = preds[t.id];
+      for (const t of pending) {
+        const p = preds[t.id];
+        if (!p) continue;
+        t.suggestedCategory = p.code;
+        scoreCategory(t, 'profile', p.confidence);
+      }
       pending = pending.filter(t => !t.suggestedCategory);
     } catch (err) { console.error('Profile categorization failed:', err.message); }
   }
@@ -82,8 +102,11 @@ async function applySmartCategories(userId, result) {
       const items = pending.map(t => ({ id: t.id, type: t.type, narration: t.narration, amount: t.amount, day: dayName(t.date) }));
       const preds = await llmService.categorizeTransactions(items, taxonomy, summary);
       for (const t of pending) {
-        const code = preds[t.id];
-        if (code && validByType[t.type].has(code)) t.suggestedCategory = code;
+        const { code, confidence } = preds[t.id] || {};
+        if (code && validByType[t.type].has(code)) {
+          t.suggestedCategory = code;
+          scoreCategory(t, 'llm', conf.withModelScore(conf.CATEGORY.llm, confidence));
+        }
       }
     } catch (err) { console.error('LLM categorization failed:', err.message); }
   }
@@ -91,6 +114,7 @@ async function applySmartCategories(userId, result) {
   // Layer 4 — Other → Miscellaneous fallback (works with or without an API key), and
   // push anything that merely landed on the bare "Other" group down to Miscellaneous.
   for (const t of cashRows) {
+    if (!t.suggestedCategory) scoreCategory(t, 'fallback', conf.CATEGORY.fallback);
     t.suggestedCategory = t.suggestedCategory
       ? normalizeCategory(t.suggestedCategory, t.type)
       : MISC_CATEGORY[t.type];
@@ -132,6 +156,13 @@ router.post('/parse', protect, upload.single('file'), asyncHandler(async (req, r
   }
 
   await applySmartCategories(req.user._id, result);
+
+  // One score for the file, not sixty. Every stage above has been scoring its own work
+  // (see lib/confidence); this is where that collapses into the single figure the
+  // review screen shows beside the AI-generated pill, and the per-row workings are
+  // dropped rather than shipped.
+  result.confidence = conf.summarise(result.transactions);
+  conf.stripRowScores(result.transactions);
 
   res.json(result);
 }));

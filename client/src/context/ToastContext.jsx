@@ -33,6 +33,21 @@ function ToastItem({ item, onDismiss }) {
       <p style={{ flex: 1, fontSize: 13, color: 'var(--color-text-primary)', lineHeight: 1.5 }}>
         {item.msg}
       </p>
+      {/* An action on the toast — in practice, Undo. It has to live HERE rather than on
+          the page that did the deleting, because by the time you regret a delete the
+          row is gone from the list and there is nothing left to click. */}
+      {item.action && (
+        <button
+          onClick={() => { onDismiss(); item.action.onClick?.(); }}
+          style={{
+            background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px',
+            color: 'var(--color-accent)', fontFamily: 'inherit', fontWeight: 600,
+            fontSize: 12, flexShrink: 0, whiteSpace: 'nowrap',
+          }}
+        >
+          {item.action.label}
+        </button>
+      )}
       <button
         onClick={onDismiss}
         style={{
@@ -57,15 +72,20 @@ export function ToastProvider({ children }) {
     setToasts(t => t.filter(x => x.id !== id));
   }, []);
 
-  const add = useCallback((msg, type = 'error', duration = 4500) => {
+  const add = useCallback((msg, type = 'error', opts = {}) => {
     const id = ++nextId;
-    setToasts(t => [...t.slice(-3), { id, msg, type }]);
+    const { action } = opts;
+    // A toast carrying an action has to outlast one that only reports — the window
+    // to notice a mistake and reach for Undo is longer than the window to read
+    // "Saved". Still bounded: an undo that waits forever is a second undo problem.
+    const duration = opts.duration ?? (action ? 9000 : 4500);
+    setToasts(t => [...t.slice(-3), { id, msg, type, action }]);
     timers.current[id] = setTimeout(() => dismiss(id), duration);
   }, [dismiss]);
 
   const toast = {
-    error:   (msg) => add(msg, 'error'),
-    success: (msg) => add(msg, 'success'),
+    error:   (msg, opts) => add(msg, 'error', opts),
+    success: (msg, opts) => add(msg, 'success', opts),
   };
 
   return (

@@ -620,6 +620,14 @@ select.input-field {
   background: var(--color-bg-card-hover);
 }
 
+/* A table row's hover. `.data-row` is flex, so it cannot dress a <tr>. */
+.table-row {
+  transition: background 0.15s ease;
+}
+.table-row:hover {
+  background: var(--color-bg-card-hover);
+}
+
 /* ═══ MINI SPARKLINE PLACEHOLDER ═══ */
 .mini-chart {
   width: 64px;

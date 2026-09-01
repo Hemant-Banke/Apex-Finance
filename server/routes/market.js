@@ -228,4 +228,38 @@ router.get('/ohlc', asyncHandler(async (req, res) => {
   res.json({ symbol, interval, candles });
 }));
 
+// GET /api/market/index-series?symbol=%5ENSEI&days=N
+// A day-by-day CLOSE series for a market index/benchmark — used by the growth view's
+// comparison overlay, so it needs one close per CALENDAR day (carried forward across
+// non-trading days), not OHLC candles: it gets re-based against the app's own
+// day-indexed growth series, which has no notion of a trading calendar.
+router.get('/index-series', asyncHandler(async (req, res) => {
+  const { symbol, days } = req.query;
+  if (!symbol) throw badRequest('symbol is required');
+
+  const daysNum = Math.max(1, parseInt(days, 10) || 3650);
+  const now     = nowMs();
+
+  const result = await fetchChart(symbol, {
+    period1: Math.floor((now - daysNum * DAY_MS) / 1000),
+    period2: Math.floor(now / 1000),
+    interval: '1d',
+  }, 10000);
+  if (!result) throw new HttpError(502, 'Index data unavailable');
+
+  const closes = closesByDay(result);
+  const seen    = Object.keys(closes).map(Number);
+  if (!seen.length) return res.json([]);
+
+  const startMs = midnight(Math.min(...seen));
+  const endMs   = midnight(todayMs());
+
+  const out = [];
+  for (let t = startMs; t <= endMs; t += DAY_MS) {
+    const last = lastOnOrBefore(closes, t);
+    out.push({ date: toDateStr(t), close: last ? last.value : null });
+  }
+  res.json(out);
+}));
+
 module.exports = router;

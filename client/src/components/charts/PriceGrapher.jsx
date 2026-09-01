@@ -1,12 +1,14 @@
 import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  AreaChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine, ReferenceArea, CartesianGrid, ComposedChart, Bar
 } from 'recharts';
-import { TrendingUp, TrendingDown, Layers, Activity, CandlestickChart } from 'lucide-react';
-import { networthAPI } from '../../lib/api';
-import { formatCurrency, compactIfLarge } from '../../lib/utils';
+import { TrendingUp, TrendingDown, Plus, Activity, CandlestickChart } from 'lucide-react';
+import { networthAPI, marketAPI } from '../../lib/api';
+import { formatCurrency, compactIfLarge, CHART_COLORS } from '../../lib/utils';
+import { BENCHMARK_INDICES } from '../../lib/constants';
 import ChartTooltip from './ChartTooltip';
+import CompareIndexDialog from './CompareIndexDialog';
 
 // ── Default config ────────────────────────────────────────────────────────────
 
@@ -45,6 +47,14 @@ function fmtY(v) {
   if (a >= 0.1)         return `₹${v.toFixed(2)}`;
   if (a >  0)           return `₹${v.toFixed(4)}`;
   return '₹0';
+}
+
+/** Y-axis tick formatter for a growth index — a plain number, no currency. */
+function fmtYIndex(v) {
+  const a = Math.abs(v);
+  if (a >= 1000) return v.toFixed(0);
+  if (a >= 10)   return v.toFixed(1);
+  return v.toFixed(2);
 }
 
 /**
@@ -150,6 +160,20 @@ function nextDayStr(dateStr) {
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
+
+// ── Benchmark comparison (growth view) ──────────────────────────────────────
+
+/** A stable colour per benchmark — its position in the curated list, not a hash,
+ *  so the same index always gets the same colour across sessions. */
+const benchmarkColor = (symbol) => {
+  const i = BENCHMARK_INDICES.findIndex(b => b.symbol === symbol);
+  return CHART_COLORS[i >= 0 ? i % CHART_COLORS.length : 0];
+};
+const benchmarkLabel = (symbol) =>
+  BENCHMARK_INDICES.find(b => b.symbol === symbol)?.label ?? symbol;
+
+/** The Recharts dataKey a benchmark's rebased series is merged into. */
+const cmpKey = (symbol) => `cmp:${symbol}`;
 
 // ── Candlestick shape factory ─────────────────────────────────────────────────
 
@@ -312,29 +336,32 @@ function SelectionLabel({ viewBox, pct, abs, pos, formatValue, chartW }) {
  * Reusable stock-style chart component.
  *
  * Props:
- *   fetchData(days)        — async fn returning [{date,value}]. Defaults to networthAPI.
- *   staticData             — static [{date,value}] array; bypasses fetching.
- *   fetchCompareData(days) — async fn for a second comparison line.
- *   fetchOHLC(days)        — async fn returning [{date,open,high,low,close}]. Enables candlestick toggle.
- *   compareLabel           — label for the compare button.
- *   onCompare              — called when Compare is clicked (for external handling).
- *   title                  — small label above the current value.
- *   valueLabel             — label shown in the tooltip (default: 'Value').
- *   formatValue(n)         — number formatter (default: formatCurrency).
- *   showCard               — wraps in a card (default true). Set false for embed use.
- *   height                 — chart pixel height (default 280).
- *   emptyText              — shown when there's no data.
- *   ranges                 — array of {label, days} (default: DEFAULT_RANGES).
- *   defaultRange           — label string for the initial range (default '1Y').
- *   refreshKey             — increment this to trigger a data refetch without remounting.
+ *   fetchData(days, growth) — async fn returning [{date,value}]. Defaults to networthAPI.
+ *                             `growth` is only ever passed through when `growthCapable`.
+ *   staticData              — static [{date,value}] array; bypasses fetching.
+ *   fetchOHLC(days)         — async fn returning [{date,open,high,low,close}]. Enables candlestick toggle.
+ *   title                   — small label above the current value.
+ *   valueLabel              — label shown in the tooltip (default: 'Value').
+ *   formatValue(n)          — number formatter (default: formatCurrency).
+ *   showCard                — wraps in a card (default true). Set false for embed use.
+ *   height                  — chart pixel height (default 280).
+ *   emptyText               — shown when there's no data.
+ *   ranges                  — array of {label, days} (default: DEFAULT_RANGES).
+ *   defaultRange            — label string for the initial range (default '1Y').
+ *   refreshKey              — increment this to trigger a data refetch without remounting.
+ *   growthCapable           — show the Complete / Growth toggle. Growth strips every
+ *                             external inflow/outflow out of the series and reindexes
+ *                             it to 100 at its own first day, so what is plotted is
+ *                             what the money itself did, not how much of it there was.
+ *                             Growth mode also enables the "+" benchmark-comparison
+ *                             overlay (Nifty 50, S&P 500, …) — comparing an index
+ *                             against raw rupee values makes no sense, only against
+ *                             another base-100 index.
  */
 export default function PriceGrapher({
   fetchData        = null,
   staticData       = null,
-  fetchCompareData = null,
   fetchOHLC        = null,
-  compareLabel     = 'Compare',
-  onCompare        = null,
   title            = null,
   valueLabel       = 'Value',
   formatValue      = formatCurrency,
@@ -344,6 +371,7 @@ export default function PriceGrapher({
   ranges           = DEFAULT_RANGES,
   defaultRange     = '1Y',
   refreshKey       = 0,
+  growthCapable    = false,
 }) {
   // ── Unique gradient IDs — prevents cross-instance bleed when multiple
   //    PriceGraphers share the same SVG defs namespace ────────────────────────
@@ -355,13 +383,19 @@ export default function PriceGrapher({
   const initRange = ranges.find(r => r.label === defaultRange) ?? ranges[ranges.length - 2] ?? ranges[0];
   const [range,       setRange]       = useState(initRange);
   const [chartMode,   setChartMode]   = useState('line');  // 'line' | 'candle'
+  const [view,        setView]        = useState('complete'); // 'complete' | 'growth'
   const [data,        setData]        = useState([]);
   const [ohlcData,    setOhlcData]    = useState([]);
-  const [compareData, setCompareData] = useState(null);
-  const [comparing,   setComparing]   = useState(false);
   const [loading,     setLoading]     = useState(!staticData);
 
-  const doFetch = useCallback(async (r, mode) => {
+  // ── Benchmark comparison (growth view only) ───────────────────────────────
+  const [compareOpen,    setCompareOpen]    = useState(false);
+  const [compareSymbols, setCompareSymbols] = useState([]);       // selected symbols
+  const [compareSeries,  setCompareSeries]  = useState({});       // symbol -> [{date,close}]
+
+  const growth = growthCapable && view === 'growth';
+
+  const doFetch = useCallback(async (r, mode, isGrowth) => {
     if (staticData) { setData(staticData); setLoading(false); return; }
     setLoading(true);
     try {
@@ -369,8 +403,10 @@ export default function PriceGrapher({
         const res = await fetchOHLC(r.days);
         setOhlcData(res ?? []);
       } else {
-        const fn  = fetchData ?? ((d) => networthAPI.getDaily(d).then(res => res.data));
-        const res = await fn(r.days);
+        // The default series is net worth: T cash + the T-1 close, with today's row
+        // always appended (see networthAPI.getDaily).
+        const fn  = fetchData ?? ((d, g) => networthAPI.getDaily(d, g).then(res => res.data));
+        const res = await fn(r.days, isGrowth);
         setData(res ?? []);
       }
     } catch {
@@ -379,7 +415,20 @@ export default function PriceGrapher({
     } finally { setLoading(false); }
   }, [fetchData, fetchOHLC, staticData]);
 
-  useEffect(() => { doFetch(range, chartMode); }, [range, doFetch, refreshKey, chartMode]);
+  useEffect(() => { doFetch(range, chartMode, growth); }, [range, doFetch, refreshKey, chartMode, growth]);
+
+  // Fetch every selected benchmark's raw close series over (roughly) the same window
+  // as the primary series — re-based against it client-side once fetched (see
+  // `compareRebased` below), so this only ever needs the RAW prices, not an index.
+  useEffect(() => {
+    if (!growth || !compareSymbols.length) { setCompareSeries({}); return; }
+    let cancelled = false;
+    const days = range.days ? range.days + 10 : 3650; // +10: buffer for the anchor day
+    Promise.all(compareSymbols.map(sym =>
+      marketAPI.indexSeries(sym, days).then(res => [sym, res.data ?? []]).catch(() => [sym, []])
+    )).then(entries => { if (!cancelled) setCompareSeries(Object.fromEntries(entries)); });
+    return () => { cancelled = true; };
+  }, [growth, compareSymbols, range]);
 
   // ── Drag-to-measure selection (line mode) ─────────────────────────────────
   // A click-drag across the plot highlights a range and shows its % / absolute
@@ -422,8 +471,67 @@ export default function PriceGrapher({
     else setSelEnd(end);
   };
 
+  // ── Pad single point so Recharts renders a line ───────────────────────────
+  const displayData = useMemo(() => (
+    data.length === 1
+      ? [data[0], { ...data[0], date: nextDayStr(data[0].date) }]
+      : data
+  ), [data]);
+
+  // ── Benchmark comparison: rebase each selected index's raw close series
+  //    against the primary series' OWN first visible value — so the overlay
+  //    starts exactly level with the primary line (wherever that happens to
+  //    sit) and both trace relative performance from there. `cmp:<symbol>` is
+  //    merged onto a copy of displayData so ONE data array drives every series
+  //    Recharts renders, which is what keeps the tooltip in sync across all of
+  //    them at a given x — a separate `data` prop per line (the old single-
+  //    compare-line design) does not synchronize that way.
+  const compareRebased = useMemo(() => {
+    if (!growth || !compareSymbols.length || !displayData.length) return {};
+    const anchorValue = displayData[0]?.value;
+    if (!anchorValue) return {};
+
+    const out = {};
+    for (const sym of compareSymbols) {
+      const series = compareSeries[sym];
+      if (!series?.length) continue;
+      const byDate = new Map(series.map(p => [p.date, p.close]));
+      const anchorClose = byDate.get(displayData[0].date);
+      if (!anchorClose) continue;
+      out[sym] = displayData.map(row => {
+        const close = byDate.get(row.date);
+        return close != null ? (anchorValue * close) / anchorClose : null;
+      });
+    }
+    return out;
+  }, [growth, compareSymbols, compareSeries, displayData]);
+
+  const chartData = useMemo(() => {
+    const symbols = Object.keys(compareRebased);
+    if (!symbols.length) return displayData;
+    return displayData.map((row, i) => {
+      const extra = {};
+      for (const sym of symbols) extra[cmpKey(sym)] = compareRebased[sym][i];
+      return { ...row, ...extra };
+    });
+  }, [displayData, compareRebased]);
+
   // ── Derived values ────────────────────────────────────────────────────────
-  const values  = data.map(d => d.value);
+  // An index has no currency and no compacting to lakhs/crores — it is a plain
+  // number centred on 100, so it gets its own formatter rather than reusing
+  // whatever the caller passes for rupee figures.
+  const formatIndex  = (v) => (v == null ? '—' : v.toFixed(2));
+  const effFormatValue = growth ? formatIndex : formatValue;
+  const effValueLabel  = growth ? 'Growth index' : valueLabel;
+  const comparing = growth && Object.keys(compareRebased).length > 0;
+
+  // Nulls (a growth series with no meaningful base) are dropped before min/max —
+  // Math.max/min coerce `null` to 0, which would otherwise skew the Y domain.
+  // The Y domain must also fit any comparison line, or it renders clipped.
+  const values  = [
+    ...data.map(d => d.value),
+    ...Object.values(compareRebased).flat(),
+  ].filter(v => v != null);
   const openVal = chartMode === 'candle' ? (ohlcData[0]?.open ?? 0)                    : (data[0]?.value ?? 0);
   const lastVal = chartMode === 'candle' ? (ohlcData[ohlcData.length - 1]?.close ?? 0) : (data[data.length - 1]?.value ?? 0);
   const absChng = lastVal - openVal;
@@ -437,13 +545,6 @@ export default function PriceGrapher({
   const aLast = useAnimatedValue(lastVal);
   const aAbs  = useAnimatedValue(absChng);
   const aPct  = useAnimatedValue(pctChng);
-
-  // ── Pad single point so Recharts renders a line ───────────────────────────
-  const displayData = useMemo(() => (
-    data.length === 1
-      ? [data[0], { ...data[0], date: nextDayStr(data[0].date) }]
-      : data
-  ), [data]);
 
   // Resolve the drag selection into ordered endpoints + change metrics.
   const selection = useMemo(() => {
@@ -495,7 +596,6 @@ export default function PriceGrapher({
   // ── Misc ──────────────────────────────────────────────────────────────────
   const Icon           = isPos ? TrendingUp : TrendingDown;
   const clr            = isFlat ? '#C9A96A' : isPos ? 'var(--color-success)' : 'var(--color-danger)';
-  const showCompareBtn = !!(onCompare || fetchCompareData);
   const activeEmpty    = chartMode === 'candle' ? ohlcData.length === 0 : data.length === 0;
 
   const wrapStyle = showCard ? {
@@ -519,7 +619,7 @@ export default function PriceGrapher({
             </p>
           )}
           <p className="figure" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8 }}>
-            {compactIfLarge(aLast, formatValue)}
+            {growth ? effFormatValue(aLast) : compactIfLarge(aLast, formatValue)}
           </p>
           {(chartMode === 'line' ? data.length > 1 : ohlcData.length > 1) && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -529,14 +629,81 @@ export default function PriceGrapher({
               </span>
               {!isFlat && <Icon size={14} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
               <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
-                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${compactIfLarge(Math.abs(aAbs), formatValue)}`}
+                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${growth ? effFormatValue(Math.abs(aAbs)) : compactIfLarge(Math.abs(aAbs), formatValue)}`}
               </span>
             </div>
           )}
         </div>
 
-        {/* Right: chart-type toggle + range selector + compare */}
+        {/* Right: complete/growth toggle + chart-type toggle + range selector + compare */}
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
+
+          {/* Complete vs growth view — growth reindexes to 100 at the series' own
+              first day, with every deposit/withdrawal after that subtracted back
+              out, so it plots what the money did rather than how much there was.
+              The "+" (growth only) opens the benchmark-comparison picker. */}
+          {growthCapable && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div className="pill-group" style={{ display: 'flex' }}>
+                <button
+                  onClick={() => setView('complete')}
+                  className={`pill-item${view === 'complete' ? ' active' : ''}`}
+                  style={{ fontSize: 11, padding: '3px 9px' }}
+                >
+                  Complete
+                </button>
+                <button
+                  onClick={() => setView('growth')}
+                  className={`pill-item${view === 'growth' ? ' active' : ''}`}
+                  style={{ fontSize: 11, padding: '3px 9px' }}
+                  title="Growth of the money itself, with deposits and withdrawals removed"
+                >
+                  Growth
+                </button>
+              </div>
+              {growth && (
+                <button
+                  onClick={() => setCompareOpen(true)}
+                  title="Compare against an index"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 22, height: 22, borderRadius: 6, border: 'none', cursor: 'pointer',
+                    background: comparing ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
+                    color: comparing ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <Plus size={13} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Selected benchmarks — colour-matched chips, each removable without
+              reopening the picker. */}
+          {growth && compareSymbols.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 5, maxWidth: 220 }}>
+              {compareSymbols.map(sym => (
+                <button
+                  key={sym}
+                  onClick={() => setCompareSymbols(s => s.filter(x => x !== sym))}
+                  title="Remove from comparison"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
+                    border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-elevated)',
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: benchmarkColor(sym), flexShrink: 0 }} />
+                  <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                    {benchmarkLabel(sym)}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
+                </button>
+              ))}
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
 
             {/* Chart type toggle (only when OHLC data source provided) */}
@@ -585,19 +752,6 @@ export default function PriceGrapher({
               ))}
             </div>
           </div>
-
-          {showCompareBtn && (
-            <button
-              className="btn-ghost"
-              style={{ fontSize: 11, padding: '3px 10px', gap: 5, opacity: comparing ? 1 : 0.55 }}
-              onClick={() => {
-                if (comparing) { setComparing(false); setCompareData(null); }
-                else if (onCompare) { onCompare(range); }
-              }}
-            >
-              <Layers size={11} /> {compareLabel}
-            </button>
-          )}
         </div>
       </div>
 
@@ -657,7 +811,7 @@ export default function PriceGrapher({
         <div ref={chartAreaRef} style={{ position: 'relative', cursor: 'crosshair', userSelect: 'none', WebkitUserSelect: 'none' }}>
         <ResponsiveContainer width="100%" height={height}>
           <AreaChart
-            data={displayData}
+            data={chartData}
             margin={{ top: 4, right: 16, bottom: 0, left: 0 }}
             onMouseDown={handleSelectDown}
             onMouseMove={handleSelectMove}
@@ -705,16 +859,19 @@ export default function PriceGrapher({
             />
             <YAxis
               domain={[yMin, yMax]}
-              tickFormatter={fmtY}
+              tickFormatter={growth ? fmtYIndex : fmtY}
               tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
             />
 
-            {/* Point tooltip — suppressed while a range is being measured */}
+            {/* Point tooltip — suppressed while a range is being measured. When
+                comparing, each series carries its own `name` (set below) instead
+                of one shared label, so `valueLabel` is left unset and ChartTooltip
+                falls back to per-series names. */}
             {!selecting && !selection && (
               <Tooltip
-                content={<ChartTooltip formatValue={formatValue} valueLabel={valueLabel} />}
+                content={<ChartTooltip formatValue={effFormatValue} valueLabel={comparing ? undefined : effValueLabel} />}
                 cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
                 isAnimationActive={false}
                 wrapperStyle={{ transition: 'none', outline: 'none' }}
@@ -733,6 +890,7 @@ export default function PriceGrapher({
 
             <Area
               type="monotone" dataKey="value"
+              name={effValueLabel}
               stroke={strokeColor} strokeWidth={1.75}
               fill={fillColor}
               dot={false}
@@ -749,16 +907,23 @@ export default function PriceGrapher({
               animationEasing="ease-out"
             />
 
-            {compareData && (
-              <Area
-                data={compareData}
-                type="monotone" dataKey="value"
-                stroke="#f59e0b" strokeWidth={1.25}
-                fill="none" dot={false}
+            {/* Benchmark comparison overlays — plain lines (not filled areas, or
+                overlapping fills would muddy the primary series' own fill), each
+                re-based to start level with the primary line (see compareRebased). */}
+            {Object.keys(compareRebased).map(sym => (
+              <Line
+                key={sym}
+                type="monotone"
+                dataKey={cmpKey(sym)}
+                name={benchmarkLabel(sym)}
+                stroke={benchmarkColor(sym)}
+                strokeWidth={1.5}
+                dot={false}
+                connectNulls
                 isAnimationActive={true}
                 animationDuration={350}
               />
-            )}
+            ))}
 
             {/* Drag-selected range — tinted band + change summary */}
             {selection && (
@@ -775,7 +940,7 @@ export default function PriceGrapher({
                     pct={selection.pct}
                     abs={selection.abs}
                     pos={selection.pos}
-                    formatValue={formatValue}
+                    formatValue={effFormatValue}
                     chartW={chartAreaRef.current?.clientWidth || 0}
                   />
                 )}
@@ -798,6 +963,16 @@ export default function PriceGrapher({
           {selection ? 'Click to release' : 'Drag to measure'}
         </div>
         </div>
+      )}
+
+      {growthCapable && (
+        <CompareIndexDialog
+          open={compareOpen}
+          onClose={() => setCompareOpen(false)}
+          selected={compareSymbols}
+          onChange={setCompareSymbols}
+          colorOf={benchmarkColor}
+        />
       )}
     </div>
   );

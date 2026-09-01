@@ -83,11 +83,15 @@ export function getTransactionColor(type) {
   return colors[type] || 'text-[var(--color-text-secondary)]';
 }
 
-export function getTransactionSign(type) {
+export function getTransactionSign(type, incoming) {
   // Only cash flows carry a direction sign. Buy/sell move value between cash and
   // assets (net-neutral), so they show no +/−.
   if (type === 'income') return '+';
   if (type === 'expense') return '−';
+  // A transfer has no direction in the abstract — it only acquires one when read
+  // FROM an account. In an account's own statement it plainly is money in or out,
+  // so the caller says which side this row is being read from.
+  if (type === 'transfer' && incoming != null) return incoming ? '+' : '−';
   return '';
 }
 
@@ -99,7 +103,7 @@ export function getTransactionSign(type) {
  * `describe` is `label` from `useCategoryNames()`; without it (or before the taxonomy
  * loads) an income/expense falls back to its bare type, which is at least not wrong.
  */
-export function getTransactionName(tx, describe) {
+export function getTransactionName(tx, describe, incoming) {
   switch (tx.type) {
     case 'income':
     case 'expense': {
@@ -107,7 +111,7 @@ export function getTransactionName(tx, describe) {
       const label = describe?.(tx.category);
       return label ? `${kind}: ${label}` : kind;
     }
-    case 'transfer':   return 'Transfer';
+    case 'transfer':   return incoming == null ? 'Transfer' : (incoming ? 'Transfer in' : 'Transfer out');
     case 'adjustment': return 'Adjustment';
     case 'buy':        return `Buy Asset: ${tx.assetName || tx.assetSymbol || 'Unknown'}`;
     case 'sell':       return `Sell Asset: ${tx.assetName || tx.assetSymbol || 'Unknown'}`;
@@ -115,7 +119,47 @@ export function getTransactionName(tx, describe) {
   }
 }
 
+/**
+ * The categorical palette — for encoding IDENTITY (which asset type, which category).
+ *
+ * Assigned in fixed order and never cycled: a 9th series folds into "Other" rather than
+ * reusing slot 1, or two different things end up the same colour.
+ *
+ * Green and red are absent on purpose. They are this app's STATUS colours (gain/loss,
+ * buy/sell) and reusing them for "series 4" would make a category look like a profit.
+ * That overlap was also the old palette's worst defect: its warm orange and its success
+ * green sat at ΔE 5.8 under protanopia — indistinguishable to a red-blind reader.
+ *
+ * Validated against the card surface (#13171C) for lightness band, chroma floor,
+ * colour-blind separation of adjacent pairs, and contrast. Do not edit by eye.
+ */
 export const CHART_COLORS = [
-  '#C9A96A', '#60a5fa', '#3fbf9a', '#a78bfa', '#22c55e',
-  '#f0a04b', '#f472b6', '#38bdf8', '#e0607a', '#8ea0b8'
+  '#B8853A', // gold      — the brand hue, deepened for a data mark
+  '#3B82F6', // blue
+  '#14A085', // teal
+  '#8B5CF6', // purple
+  '#D7743A', // orange
+  '#DB4F92', // pink
+  '#2E92B8', // cyan
+  '#8A9A3F', // olive
 ];
+
+/** Gain / loss / flat, as a text colour token. Never the categorical palette. */
+export function pnlColor(v, { flat = 'var(--color-text-secondary)' } = {}) {
+  if (!v) return flat;
+  return v > 0 ? 'var(--color-success)' : 'var(--color-danger)';
+}
+
+/** A signed money figure: "+₹12,400" / "−₹3,100". */
+export function formatSigned(amount, format = formatCurrency) {
+  if (amount == null || isNaN(amount)) return '—';
+  const sign = amount > 0 ? '+' : amount < 0 ? '−' : '';
+  return `${sign}${format(Math.abs(amount))}`;
+}
+
+/** A signed percentage: "+14.4%". Null (no meaningful base) renders as an em dash. */
+export function formatPct(pct, digits = 2) {
+  if (pct == null || isNaN(pct)) return '—';
+  const sign = pct > 0 ? '+' : pct < 0 ? '−' : '';
+  return `${sign}${Math.abs(pct).toFixed(digits)}%`;
+}

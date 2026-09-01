@@ -70,11 +70,17 @@ router.get('/:id/holdings', asyncHandler(async (req, res) => {
   res.json(holdingsToArray(holdingsDoc?.holdings));
 }));
 
-// @route   GET /api/accounts/:id/daily?days=N&fetchLatestBal=true
+// @route   GET /api/accounts/:id/daily?days=N&fetchLatestBal=true&growth=true
 // Returns [{ date, cashValue, assetValue, totalValue }] for the account's balance history.
 // cashTS (length N) runs startDate → T; assetTS (length N-1) runs startDate → T-1, so the
 // settled series stops a day short. Today is only appended when fetchLatestBal asks for
 // live prices — otherwise there is no asset value for it yet.
+//
+// `growth=true` swaps `totalValue` for a growth-only index (base 100 at the account's own
+// first day) — the complete series with every later deposit/withdrawal/uncashed trade
+// subtracted back out, so what is left is what the money itself did. `cashValue`/
+// `assetValue` are nulled out in this mode — the split stops meaning anything once the
+// series is an index rather than rupees. See dailyValueService.computeGrowthIndex.
 router.get('/:id/daily', asyncHandler(async (req, res) => {
   const account = await findAccount(req);
 
@@ -107,6 +113,26 @@ router.get('/:id/daily', asyncHandler(async (req, res) => {
     );
     const cashValue = cashTS[cashTS.length - 1];
     result.push({ date: todayStr(), cashValue, assetValue, totalValue: cashValue + assetValue });
+  }
+
+  if (req.query.growth === 'true' && cashTS.length > 1) {
+    // Always the FULL settled history (startDate → T-1), regardless of the `days`
+    // window being displayed — zooming in shows where the index sits today, not a
+    // rebase to 100 for that window.
+    const fullValuesTS = [];
+    for (let i = 0; i < cashTS.length - 1; i++) {
+      fullValuesTS.push((cashTS[i] ?? 0) + (assetTS[i] ?? 0));
+    }
+    const endMs    = docStartMs + (fullValuesTS.length - 1) * DAY_MS;
+    const growthTS = await dvService.computeGrowthIndex(
+      req.user._id, docStartMs, endMs, fullValuesTS, account._id,
+    );
+    for (const row of result) {
+      const idx = Math.round((midnight(row.date) - docStartMs) / DAY_MS);
+      row.totalValue = idx >= 0 && idx < growthTS.length ? (growthTS[idx] ?? null) : null;
+      row.cashValue  = null;
+      row.assetValue = null;
+    }
   }
 
   res.json(result);

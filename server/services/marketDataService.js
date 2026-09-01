@@ -224,6 +224,42 @@ function _lastNonNull(arr) {
   return null;
 }
 
+// ─── Live price memo ─────────────────────────────────────────────────────────
+//
+// One page load asks for live prices several times over (the summary tiles, the
+// portfolio table, the accounts list). Each was its own Yahoo call, and quotes move
+// between them — so the same holding could be worth one figure in the header and a
+// different one in the table a moment later. A short memo makes a page's numbers agree.
+//
+// It is also the FALLBACK tier: when the live call fails, a price fetched minutes ago is
+// a real market price and is far better than dropping to book cost. Entries are dropped
+// at the day boundary — yesterday's quote is not "the latest price", and the historic
+// close (which portfolioService falls back to next) is the honest answer for that.
+
+const LIVE_TTL_MS = 60 * 1000;
+
+const _liveCache = new Map();   // symbol → { price, at, day }
+
+/** Prices still inside the TTL, plus the day's last-known ones as a failure fallback. */
+function _readCache(symbols, today) {
+  const fresh = {};
+  const stale = {};
+  for (const sym of symbols) {
+    const hit = _liveCache.get(sym);
+    if (!hit || hit.day !== today) { _liveCache.delete(sym); continue; }
+    if (Date.now() - hit.at < LIVE_TTL_MS) fresh[sym] = hit.price;
+    else stale[sym] = hit.price;
+  }
+  return { fresh, stale };
+}
+
+function _writeCache(prices, today) {
+  const at = Date.now();
+  for (const [sym, price] of Object.entries(prices)) {
+    if (price != null) _liveCache.set(sym, { price, at, day: today });
+  }
+}
+
 /**
  * Fetch live prices for all symbols in a SINGLE request via the v8 spark
  * endpoint (the v7 /quote batch endpoint is gated without a session crumb).
@@ -238,6 +274,15 @@ function _lastNonNull(arr) {
 async function fetchLatestPrices(holdings) {
   if (!holdings.length) return {};
 
+  const today = toDateStr(todayMs());
+
+  // Anything quoted inside the TTL is answered from memory — no call, and the same
+  // number every caller on this page load already saw.
+  const { fresh, stale } = _readCache(holdings.map(h => h.assetSymbol), today);
+  const wanted = holdings.filter(h => !(h.assetSymbol in fresh));
+  if (!wanted.length) return fresh;
+  holdings = wanted;
+
   // Indian mutual funds: latest NAV from AMFI (via mfService), never Yahoo.
   const mfHoldings = holdings.filter(h => mfService.isMfSymbol(h.assetSymbol));
   const mfPrices   = {};
@@ -250,8 +295,18 @@ async function fetchLatestPrices(holdings) {
     }
   }
 
+  /**
+   * Everything we managed to price, newest first, then the day's last-known values for
+   * whatever this attempt could not reach. A quote from a few minutes ago is a real
+   * market price; book cost is not.
+   */
+  const settle = (fetched = {}) => {
+    _writeCache({ ...mfPrices, ...fetched }, today);
+    return { ...stale, ...fresh, ...mfPrices, ...fetched };
+  };
+
   holdings = holdings.filter(h => !mfService.isMfSymbol(h.assetSymbol));
-  if (!holdings.length) return mfPrices;
+  if (!holdings.length) return settle();
 
   try {
     const metalSpots  = _metalSpotsNeeded(holdings);
@@ -265,13 +320,13 @@ async function fetchLatestPrices(holdings) {
     const symbols = [...listed, ...extras];
     // Every exit keeps the fund NAVs already resolved — a Yahoo failure must not
     // drop prices that came from a different source entirely.
-    if (!symbols.length) return mfPrices;
+    if (!symbols.length) return settle();
 
     const url = `https://query1.finance.yahoo.com/v8/finance/spark`
               + `?symbols=${encodeURIComponent(symbols.join(','))}&range=1d&interval=1d`;
 
     const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return mfPrices;
+    if (!resp.ok) return settle();
     const data = await resp.json();
 
     const quote = (sym) => {
@@ -303,9 +358,9 @@ async function fetchLatestPrices(holdings) {
       }
     }
 
-    return { ...mfPrices, ...out };
+    return settle(out);
   } catch {
-    return mfPrices;
+    return settle();
   }
 }
 
@@ -320,16 +375,21 @@ async function fetchLatestPrices(holdings) {
  */
 async function fetchMetalPricePerGram(assetType, purity, dateMs) {
   if (!isPurityAsset(assetType)) return null;
-  const item  = [{ assetSymbol: '_METAL', assetType }];
+
+  // The synthetic symbol must name the METAL, not just "a metal": the live-price memo is
+  // keyed by symbol, so a shared `_METAL` key would serve silver whatever gold was
+  // quoted at a moment earlier.
+  const sym   = `_METAL:${assetType}`;
+  const item  = [{ assetSymbol: sym, assetType }];
   const scale = purityFactor(assetType, purity);
   const today = todayMs();
 
   if (dateMs >= today) {
-    const price = (await fetchLatestPrices(item))['_METAL'];
+    const price = (await fetchLatestPrices(item))[sym];
     return price == null ? null : { price: _round2(price * scale), asof: toDateStr(today) };
   }
 
-  const series = (await fetchHistoricPrices(item, dateMs - 7 * DAY_MS, dateMs))['_METAL'] || {};
+  const series = (await fetchHistoricPrices(item, dateMs - 7 * DAY_MS, dateMs))[sym] || {};
   const last   = lastOnOrBefore(series, dateMs);
   if (!last) return null;
 

@@ -41,6 +41,13 @@ const HISTORY_TTL_MS = 12 * 60 * 60 * 1000;  // NAVs are published once a day
  */
 const NAV_STALE_MS   = 4 * DAY_MS;
 const NAV_TOLERANCE  = 0.02;                 // a statement NAV this close is the same plan
+/**
+ * How wide a gap between a tracked scheme's cached `latestDay` and its freshly-mirrored
+ * `navDate` is still just a normal non-publishing stretch (a long weekend, a run of
+ * holidays) rather than a real hole from a missed/failed refresh. Anything wider gets a
+ * full history refetch instead of a single-day top-up — see `refreshDailyCaches`.
+ */
+const MAX_TOPUP_GAP_DAYS = 4;
 
 // ─── Symbols ─────────────────────────────────────────────────────────────────
 
@@ -296,18 +303,24 @@ async function searchSchemes(query, limit = 10) {
 /**
  * A scheme's full NAV history, cached. mfapi returns the whole series in one call,
  * so we store it whole: rebuilds that replay years of transactions cost nothing.
- * Refetched only when the cache is older than a day (a new NAV may have published).
+ * Refetched only when the cache is older than a day (a new NAV may have published),
+ * or when `force` bypasses that check entirely (a real gap was detected upstream —
+ * see `refreshDailyCaches` — and the cache must be refetched regardless of its age).
  */
-async function _loadHistory(schemeCode, { allowStale = false } = {}) {
+async function _loadHistory(schemeCode, { allowStale = false, force = false } = {}) {
   const cached = await MfNav.findOne({ schemeCode }).lean();
-  const fresh  = cached?.fetchedAt && (Date.now() - new Date(cached.fetchedAt).getTime()) < HISTORY_TTL_MS;
+  const fresh  = !force && cached?.fetchedAt && (Date.now() - new Date(cached.fetchedAt).getTime()) < HISTORY_TTL_MS;
   if (cached && (fresh || allowStale)) return cached.navs || {};
 
   let data;
   try {
     data = await _json(`/mf/${schemeCode}`, 20000);
-  } catch {
-    return cached?.navs || {};   // network trouble → serve what we have
+  } catch (err) {
+    // Network trouble → serve what we have, but say so: this failure path used to be
+    // fully silent, which is exactly how a scheme's history can fall behind for weeks
+    // without anyone noticing (see refreshDailyCaches's gap backfill).
+    console.warn(`mfService: history refetch failed for ${schemeCode}: ${err.message}`);
+    return cached?.navs || {};
   }
 
   const navs = {};
@@ -429,7 +442,9 @@ async function refreshLatestNav(schemeCode) {
     const row = d?.data?.[0];
     nav = parseFloat(row?.nav);
     day = parseMfDate(row?.date);
-  } catch { /* fall through */ }
+  } catch (err) {
+    console.warn(`mfService: latest-NAV fetch failed for ${schemeCode}: ${err.message}`);
+  }
 
   if (!Number.isFinite(nav) || day == null) {
     // Network trouble — serve whatever the cached history already knows.
@@ -458,35 +473,63 @@ async function refreshLatestNav(schemeCode) {
  * The once-a-day pass. ONE network call: `/mf/latest` re-mirrors every scheme AND its
  * newest NAV.
  *
- * The histories we hold (only for funds someone actually owns) are then topped up
- * from that same payload — a day appended locally, rather than re-downloading years
- * of a series to learn one number. History therefore stays ad-hoc: pulled in full the
- * first time a scheme is used, and kept current from here on.
+ * The histories we hold (only for funds someone actually owns) are then topped up from
+ * that same payload — a day appended locally, rather than re-downloading years of a
+ * series to learn one number. History therefore stays ad-hoc: pulled in full the first
+ * time a scheme is used, and kept current from here on.
+ *
+ * That "append one day" top-up is only correct when the cached history is already
+ * current to within a normal non-publishing gap. If a scheme's `MfNav.latestDay` has
+ * fallen further behind `MfScheme.navDate` than that — this daily pass didn't run for a
+ * while (the process was down), or a `_loadHistory` refetch kept failing — patching in
+ * only the newest day would stamp `latestDay` as current while leaving the days in
+ * between permanently absent: `buildAssetTS` then carries the last known price forward
+ * across that whole hole, which reads as the asset's value going flat for weeks and then
+ * jumping the day the gap is finally patched. Detect that case and force a full refetch
+ * of the scheme's history instead, so the pass is self-healing no matter how long it was
+ * stalled — no scheduler redesign needed.
  */
 async function refreshDailyCaches() {
   const schemes = await ensureSchemeIndex({ force: true });
 
-  const tracked = await MfNav.find().select('schemeCode').lean();
-  if (!tracked.length) return { schemes, histories: 0 };
+  const tracked = await MfNav.find().select('schemeCode latestDay').lean();
+  if (!tracked.length) return { schemes, histories: 0, backfilled: 0 };
 
   const codes  = tracked.map(t => t.schemeCode);
   const latest = await MfScheme.find({ schemeCode: { $in: codes } })
     .select('schemeCode nav navDate').lean();
+  const latestByCode = Object.fromEntries(latest.map(s => [s.schemeCode, s]));
 
   const ops = [];
-  for (const s of latest) {
-    if (s.nav == null || !s.navDate) continue;
+  const gapCodes = [];
+  for (const t of tracked) {
+    const s = latestByCode[t.schemeCode];
+    if (!s || s.nav == null || !s.navDate) continue;
     const day = midnight(s.navDate);
+
+    const gapDays = t.latestDay != null ? (day - t.latestDay) / DAY_MS : Infinity;
+    if (gapDays > MAX_TOPUP_GAP_DAYS) {
+      gapCodes.push(t.schemeCode);
+      continue;
+    }
+
     ops.push({
       updateOne: {
-        filter: { schemeCode: s.schemeCode },
+        filter: { schemeCode: t.schemeCode },
         update: { $set: { [`navs.${day}`]: s.nav, latestDay: day } },
       },
     });
   }
   if (ops.length) await MfNav.bulkWrite(ops, { ordered: false });
 
-  return { schemes, histories: ops.length };
+  let backfilled = 0;
+  if (gapCodes.length) {
+    console.warn(`mfService: backfilling ${gapCodes.length} scheme(s) with a stale NAV history: ${gapCodes.join(', ')}`);
+    const results = await Promise.all(gapCodes.map(c => _loadHistory(c, { force: true }).catch(() => null)));
+    backfilled = results.filter(Boolean).length;
+  }
+
+  return { schemes, histories: ops.length, backfilled };
 }
 
 /** Cached scheme metadata → { [schemeCode]: doc }. Fetches any we have not seen. */

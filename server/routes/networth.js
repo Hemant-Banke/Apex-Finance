@@ -4,7 +4,7 @@ const DailyNetWorth = require('../models/DailyNetWorth');
 const { protect }             = require('../middleware/auth');
 const { asyncHandler }        = require('../middleware/asyncHandler');
 const { DAY_MS }              = require('../utils/constants');
-const { midnight, toDateStr, todayStr } = require('../utils/helpers');
+const { midnight, toDateStr, todayStr, todayMs } = require('../utils/helpers');
 const { sliceStartIndex }     = require('../utils/tsHelpers');
 const dvService               = require('../services/dailyValueService');
 const { getAllAccountsAssetBalance } = require('../services/accountBalance');
@@ -13,9 +13,22 @@ const router = express.Router();
 router.use(protect);
 
 /**
- * GET /api/networth/daily?days=N&fetchLatestBal=true
- * Returns [{ date, value }] from valuesTS (settled net worth, ending at T-1).
- * With fetchLatestBal, today is appended: T cash + live asset prices.
+ * GET /api/networth/daily?days=N&growth=true
+ *
+ * The history comes from `valuesTS`, which is a PURE T-1 series: both cash and assets as
+ * they stood at the last close.
+ *
+ * Today is then always appended, at T cash + the T-1 asset close — leaving it off was a
+ * bug. A "settled balance" in this app already means T cash + the T-1 close (see
+ * `settledValue`), so the series ending at a pure T-1 point made the chart disagree with
+ * the headline above it — anything that moved cash TODAY (an account opened, a salary in)
+ * was in the headline and missing from the line. The chart must end where the number says
+ * it ends.
+ *
+ * `growth=true` swaps every point for a growth-only index (base 100 at the series' own
+ * first day, i.e. the user's very first transaction) — the complete series with every
+ * later income/expense/uncashed trade subtracted back out, so what is left is what the
+ * money itself did. See dailyValueService.computeGrowthIndex.
  */
 router.get('/daily', asyncHandler(async (req, res) => {
   const doc = await DailyNetWorth.findOne({ user: req.user._id }).lean();
@@ -29,9 +42,20 @@ router.get('/daily', asyncHandler(async (req, res) => {
     result.push({ date: toDateStr(startMs + i * DAY_MS), value: doc.valuesTS[i] });
   }
 
-  if (req.query.fetchLatestBal === 'true') {
-    const { value: liveAssetValue } = await getAllAccountsAssetBalance(req.user, true);
-    result.push({ date: todayStr(), value: (doc.lastCashValue || 0) + liveAssetValue });
+  const { value: assetValue } = await getAllAccountsAssetBalance(req.user, false);
+  const todayValue = (doc.lastCashValue || 0) + assetValue;
+  result.push({ date: todayStr(), value: todayValue });
+
+  if (req.query.growth === 'true') {
+    // Always indexed from the TRUE start of history, regardless of the `days` window
+    // being displayed — zooming into the last month shows where the index sits today,
+    // not a rebase to 100 for that month (the standard convention for a growth chart).
+    const fullValuesTS = doc.valuesTS.concat([todayValue]);
+    const growthTS = await dvService.computeGrowthIndex(req.user._id, startMs, todayMs(), fullValuesTS);
+    for (const row of result) {
+      const idx = Math.round((midnight(row.date) - startMs) / DAY_MS);
+      row.value = growthTS[idx] ?? null;
+    }
   }
 
   res.json(result);

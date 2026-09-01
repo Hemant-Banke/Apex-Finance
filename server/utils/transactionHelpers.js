@@ -29,6 +29,50 @@ function accountCashImpact(tx, accountId) {
   return 0;
 }
 
+/**
+ * The VALUE impact of a transaction that crosses a boundary from OUTSIDE the tracked
+ * system — the "growth view" subtracts exactly this, so what remains is what the money
+ * itself did rather than how much of it there was. A buy/sell settled in cash is
+ * flow-neutral (cash and asset just swap places inside the boundary); one that ISN'T
+ * settled in cash moves value across the boundary on its own, same as an
+ * income/expense/transfer would (see the import review's In/Out convention, which is
+ * this exact same system-boundary idea).
+ *
+ * `accountId` scopes which boundary: pass an account id for THAT account's own boundary
+ * (a transfer in/out crosses it); omit it for the whole system's boundary (a transfer
+ * between the user's own accounts cancels there and is not a flow).
+ */
+function externalFlowImpact(tx, accountId) {
+  if (!accountId) {
+    switch (tx.type) {
+      case 'income':     return  tx.amount;
+      case 'expense':    return -tx.amount;
+      case 'adjustment': return  tx.amount;
+      case 'buy':        return tx.usesCashBalance ? 0 :  tx.amount;
+      case 'sell':       return tx.usesCashBalance ? 0 : -tx.amount;
+      default:           return 0; // transfer nets to zero across the user's own accounts
+    }
+  }
+
+  const aid = accountId.toString();
+  const src = accountIdOf(tx.account);
+  const dst = accountIdOf(tx.toAccount);
+
+  if (src === aid) {
+    switch (tx.type) {
+      case 'income':
+      case 'adjustment': return  tx.amount;
+      case 'expense':
+      case 'transfer':   return -tx.amount;
+      case 'buy':        return tx.usesCashBalance ? 0 :  tx.amount;
+      case 'sell':       return tx.usesCashBalance ? 0 : -tx.amount;
+      default:           return 0;
+    }
+  }
+  if (dst === aid && tx.type === 'transfer') return tx.amount;
+  return 0;
+}
+
 /** Directional asset-quantity impact of a transaction (+1 acquires units, -1 releases). */
 function directionalAssetImpact(txType) {
   switch (txType) {
@@ -37,6 +81,40 @@ function directionalAssetImpact(txType) {
     case 'buy':               return 1;
     default:                  return 0;
   }
+}
+
+/**
+ * Units below which a position counts as CLOSED, by asset type.
+ *
+ * Two different kinds of dust land in a holdings row, and they are orders of magnitude
+ * apart:
+ *
+ *   - Float dust. Repeated AVCO buy/sell arithmetic never lands on exactly 0 — closing
+ *     a fractional crypto position leaves 5.55e-17. Every asset type suffers this, so
+ *     `FLAT_EPSILON` is the floor everywhere.
+ *   - Quantity dust. A share is not divisible on any exchange this app prices against,
+ *     yet a statement rounds ("9.9999" sold against 10 bought) and an import books the
+ *     rounded figure. What is left is a thousandth of a share — not a position, an
+ *     artefact — and it kept a symbol on the books, in the donut and in the asset
+ *     series long after the user had sold out of it.
+ *
+ * Only exchange-traded SHARE counts get the wider tolerance. Crypto is genuinely held
+ * in satoshis, a mutual fund in fractional units, metal in fractions of a gram, and an
+ * EPF balance carries rupees as its "units" — a 1e-3 cut there would silently delete
+ * real holdings, which is why the TODO scoped this to stocks alone.
+ */
+const FLAT_EPSILON       = 1e-9;
+const SHARE_EPSILON      = 1e-3;
+const SHARE_UNIT_TYPES   = new Set(['stock', 'etf']);
+
+/** Tolerance below which `units` of this asset type is indistinguishable from zero. */
+function unitsEpsilon(assetType) {
+  return SHARE_UNIT_TYPES.has(assetType) ? SHARE_EPSILON : FLAT_EPSILON;
+}
+
+/** True when a quantity is dust rather than a real position (see `unitsEpsilon`). */
+function isFlatUnits(units, assetType) {
+  return Math.abs(Number(units) || 0) <= unitsEpsilon(assetType);
 }
 
 /**
@@ -136,7 +214,10 @@ function buildAccountTxnsMap(txns) {
 
 module.exports = {
   accountIdOf,
+  unitsEpsilon,
+  isFlatUnits,
   accountCashImpact,
+  externalFlowImpact,
   directionalAssetImpact,
   flipTx,
   buildCashImpactMap,

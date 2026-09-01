@@ -44,8 +44,9 @@ mongoose.connection.once('open', async () => {
   // on it, and every read falls back to whatever is already cached.
   const mfService = require('./services/mfService');
   const refreshMf = () => mfService.refreshDailyCaches()
-    .then(({ schemes, histories }) =>
-      console.log(`MF caches ready — ${schemes} schemes + NAVs indexed, ${histories} histories topped up`))
+    .then(({ schemes, histories, backfilled }) =>
+      console.log(`MF caches ready — ${schemes} schemes + NAVs indexed, ${histories} histories topped up`
+        + (backfilled ? `, ${backfilled} backfilled from a stale gap` : '')))
     .catch(e => console.error('MF cache refresh failed:', e.message));
 
   refreshMf();

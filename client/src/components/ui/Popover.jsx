@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
  * Props:
  *   anchorRef  — ref to the trigger element
  *   open       — visibility
- *   onClose    — called on outside pointerdown / scroll / resize / Escape
+ *   onClose    — called on outside pointerdown / Escape / anchor scrolled out of view
  *   width      — panel width (default: match the anchor)
  *   maxHeight  — hard cap before flipping (default 320)
  *   children   — panel content
@@ -23,6 +23,16 @@ export default function Popover({ anchorRef, open, onClose, width, maxHeight = 3
   // final spot instead of visibly jumping into place mid-animation.
   const [ready, setReady] = useState(false);
   const panelRef = useRef(null);
+
+  // `onClose` is almost always an inline arrow, so its identity changes on EVERY
+  // render of the parent. Held in a ref and kept out of the effect's deps, because
+  // the effect's cleanup hides the panel: with `onClose` in there, any parent
+  // re-render — drilling into a category's children, typing in the search box —
+  // tore the effect down and rebuilt it, and the panel visibly blinked out and
+  // faded back in. The ref means the listeners always call the CURRENT handler
+  // without the effect having to re-run to learn about it.
+  const onCloseRef = useRef(onClose);
+  useLayoutEffect(() => { onCloseRef.current = onClose; });
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -71,23 +81,44 @@ export default function Popover({ anchorRef, open, onClose, width, maxHeight = 3
     };
     settle();
 
-    // Dismiss when the page/anchor scrolls, but NOT when scrolling inside the
-    // panel itself (e.g. a long option list).
+    /**
+     * FOLLOW the anchor on scroll rather than dismissing.
+     *
+     * Closing on any scroll made every picker feel brittle — a stray trackpad nudge
+     * while reading a long option list threw the panel away and the user had to open
+     * it again. A popover that tracks its trigger is what the interaction actually
+     * means: it belongs to that control, wherever the control has got to.
+     *
+     * It is only dismissed when the anchor itself has left the viewport, at which
+     * point the panel would be floating over nothing.
+     */
+    let trackRaf = 0;
     const onScroll = (e) => {
+      // Scrolling INSIDE the panel (or a nested one) moves nothing — ignore it.
       if (panelRef.current?.contains(e.target)) return;
       if (e.target?.closest?.('.popover-panel')) return;
-      onClose?.();
+      if (trackRaf) return;
+      trackRaf = requestAnimationFrame(() => {
+        trackRaf = 0;
+        const r = anchorRef.current?.getBoundingClientRect();
+        if (!r) return;
+        const offscreen = r.bottom < 0 || r.top > window.innerHeight
+                       || r.right  < 0 || r.left > window.innerWidth;
+        if (offscreen) onCloseRef.current?.();
+        else place();
+      });
     };
     const onResize = () => place();
     window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onResize);
     return () => {
       cancelAnimationFrame(raf);
+      if (trackRaf) cancelAnimationFrame(trackRaf);
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onResize);
       setReady(false);
     };
-  }, [open, anchorRef, width, maxHeight, onClose]);
+  }, [open, anchorRef, width, maxHeight]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -97,16 +128,16 @@ export default function Popover({ anchorRef, open, onClose, width, maxHeight = 3
       // A nested popover (e.g. a date picker inside a range popover) is portaled
       // elsewhere in the DOM — clicks inside it must not dismiss this parent.
       if (e.target.closest?.('.popover-panel')) return;
-      onClose?.();
+      onCloseRef.current?.();
     };
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current?.(); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('mousedown', onDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, anchorRef, onClose]);
+  }, [open, anchorRef]);
 
   if (!open || !style) return null;
 

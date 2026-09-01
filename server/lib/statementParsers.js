@@ -1,5 +1,6 @@
 const { autoCategory } = require('./categoryRules');
 const llmService = require('./llmService');
+const conf = require('./confidence');
 
 // ─── Shared helpers ────────────────────────────────────────────────────────
 
@@ -57,10 +58,22 @@ function cleanNarration(raw) {
   return s;
 }
 
-function buildTx({ date, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit }) {
+/**
+ * @param parseSource       which extractor produced this row (keys of confidence.PARSE)
+ * @param modelScore        the LLM's own 0–1 score for this row, when it gave one
+ * @param directionVerified false when income/expense was assumed rather than checked
+ *                          against the running balance
+ */
+function buildTx({ date, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit,
+                   parseSource = 'llm_text', modelScore, directionVerified = true }) {
   const isAsset = type === 'buy' || type === 'sell';
   const u = units       != null ? Number(units)       : undefined;
   const p = pricePerUnit != null ? Number(pricePerUnit) : undefined;
+
+  // How much this row's DATE, AMOUNT and DIRECTION can be trusted — the method's own
+  // prior, refined by whatever the model said about this particular row, and marked
+  // down when the direction was a guess rather than a balance check.
+  const fields = conf.fieldsPart(parseSource, { modelScore, directionVerified });
 
   const tx = {
     id: uid(),
@@ -76,6 +89,10 @@ function buildTx({ date, narration, amount, type, source, accountRef, assetSymbo
     // Only set when the statement covers several of the holder's accounts — the
     // review form then lets the user keep just one account's rows.
     accountRef: accountRef || undefined,
+    // Per-stage scores; `confidence` is the headline the review UI badges. Symbol and
+    // category parts are added later, by the stages that produce them.
+    confidenceParts: { fields },
+    confidence: conf.overall({ fields }),
   };
 
   if (isAsset) {
@@ -114,6 +131,10 @@ function finalizeAiResult(parsed, source) {
       assetType:    tx.assetType,
       units:        tx.units,
       pricePerUnit: tx.pricePerUnit,
+      // A vision read of a screenshot is a different proposition from a text read of a
+      // PDF dump, so the two carry different priors even though the prompt is shared.
+      parseSource:  source === 'image' ? 'llm_image' : 'llm_text',
+      modelScore:   tx.confidence,
     }))
     .filter(keepTx);
 
@@ -231,7 +252,13 @@ function parseBankText(text) {
       const closing  = parseAmount(sm[5]);
       if (dateISO && amount > 0.01) {
         const type = resolveType(prevBalance, closing, narration, holderWords);
-        transactions.push(buildTx({ date: dateISO, narration, amount, type, source: 'pdf' }));
+        transactions.push(buildTx({
+          date: dateISO, narration, amount, type, source: 'pdf',
+          parseSource: 'bank_line',
+          // Before the opening balance is found there is nothing to check the
+          // direction against, and the parser simply assumes a debit.
+          directionVerified: prevBalance !== null,
+        }));
         prevBalance = closing;
       }
       i++;
@@ -262,7 +289,11 @@ function parseBankText(text) {
             const narration = narrationParts.filter(l => l && !JUNK.test(l)).join(' ').trim();
             if (narration && amount > 0.01) {
               const type = resolveType(prevBalance, closing, narration, holderWords);
-              transactions.push(buildTx({ date: startDate, narration, amount, type, source: 'pdf' }));
+              transactions.push(buildTx({
+                date: startDate, narration, amount, type, source: 'pdf',
+                parseSource: 'bank_block',
+                directionVerified: prevBalance !== null,
+              }));
               prevBalance = closing;
             }
             break;
@@ -384,6 +415,8 @@ function parseUPIHtml(html) {
     // from. `Bank` is the account each transaction actually moved through.
     transactions.push(buildTx({
       date: dateISO, narration, amount, type, source: 'upi', accountRef: get('Bank'),
+      // Amount and direction are XML attributes here, not prose to be interpreted.
+      parseSource: 'upi',
     }));
   }
 

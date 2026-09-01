@@ -72,7 +72,10 @@ export const accountsAPI = {
   getAll: () => api.get('/accounts'),
   getById: (id) => api.get(`/accounts/${id}`),
   getHoldings: (id) => api.get(`/accounts/${id}/holdings`),
-  getDaily: (id, days) => api.get(`/accounts/${id}/daily`, { params: days ? { days } : {} }),
+  // `growth` swaps the series for a growth-only index (base 100) — see PriceGrapher.
+  getDaily: (id, days, growth) => api.get(`/accounts/${id}/daily`, {
+    params: { ...(days ? { days } : {}), ...(growth ? { growth: 'true' } : {}) },
+  }),
   create: (data) => api.post('/accounts', data),
   update: (id, data) => api.put(`/accounts/${id}`, data),
   delete: (id) => api.delete(`/accounts/${id}`)
@@ -86,14 +89,20 @@ export const transactionsAPI = {
   // re-prices and re-aggregates every store per row.
   bulkCreate: (transactions) => api.post('/transactions/bulk', { transactions }),
   update: (id, data) => api.put(`/transactions/${id}`, data),
-  delete: (id) => api.delete(`/transactions/${id}`)
+  delete: (id) => api.delete(`/transactions/${id}`),
+  // Undo an import: one request, one store pass. Axios puts a DELETE body under
+  // `data`, not as the second positional argument.
+  bulkDelete: (ids) => api.delete('/transactions/bulk', { data: { ids } })
 };
 
 // Dashboard
 export const dashboardAPI = {
   getSummary:          ()       => api.get('/dashboard/summary'),
+  // The book marked to market — value, unrealised/realised P&L, day change, weight,
+  // and allocation by market value. This is what anything about PERFORMANCE reads.
+  getPortfolio:        ()       => api.get('/dashboard/portfolio'),
+  // The raw book at cost. Only for callers that just need the instrument list.
   getHoldings:         ()       => api.get('/dashboard/holdings'),
-  getAssetAllocation:  ()       => api.get('/dashboard/asset-allocation'),
   getIncomeExpense:    (months) => api.get('/dashboard/income-expense',    { params: { months } }),
   getExpenseCategories:(months) => api.get('/dashboard/expense-categories',{ params: { months } })
 };
@@ -114,6 +123,9 @@ export const marketAPI = {
   // by type rather than by symbol.
   price:  (symbol, date, opts = {}) => api.get('/market/price', { params: { symbol, date, ...opts } }),
   ohlc:   (symbol, days) => api.get('/market/ohlc',   { params: days ? { symbol, days } : { symbol } }),
+  // A day-by-day close series for a benchmark index, carried forward across
+  // non-trading days — feeds the growth view's comparison overlay.
+  indexSeries: (symbol, days) => api.get('/market/index-series', { params: days ? { symbol, days } : { symbol } }),
 };
 
 // Statement import (parse PDF / HTML / image)
@@ -135,7 +147,12 @@ export const categoriesAPI = {
 
 // Net Worth store
 export const networthAPI = {
-  getDaily: (days) => api.get('/networth/daily', { params: days ? { days } : {} }),
+  // Today is always appended to the settled series (T cash + T-1 close), so the chart
+  // ends where the headline figure does instead of a day short of it.
+  // `growth` swaps the series for a growth-only index (base 100) — see PriceGrapher.
+  getDaily: (days, growth) => api.get('/networth/daily', {
+    params: { ...(days ? { days } : {}), ...(growth ? { growth: 'true' } : {}) },
+  }),
   ensure:   ()     => api.post('/networth/ensure'),
   rebuild:  ()     => api.post('/networth/rebuild'),
 };

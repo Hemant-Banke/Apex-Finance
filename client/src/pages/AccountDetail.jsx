@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { accountsAPI, transactionsAPI } from '../lib/api';
-import { formatCurrency, formatNativeCurrency, compactIfLarge, formatDate } from '../lib/utils';
+import { formatCurrency, formatNativeCurrency, formatDate, formatSigned, pnlColor } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import Spinner from '../components/ui/Spinner';
 import TransactionRow from '../components/transactions/TransactionRow';
@@ -10,12 +10,14 @@ import TransactionForm from '../components/forms/TransactionForm';
 import MarketSearch from '../components/market/MarketSearch';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
 import HoldingsDonut from '../components/charts/HoldingsDonut';
+import SellHoldingModal from '../components/portfolio/SellHoldingModal';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import AssetPricePanel from '../components/charts/AssetPricePanel';
 import ImportModal from '../components/import/ImportModal';
 import Button from '../components/ui/Button';
 import AssetIcon from '../components/market/AssetIcon';
 import { assetTypeLabel } from '../lib/constants';
+import { toCreatePayload } from '../lib/undo';
 import {
   ArrowLeft, Plus, Pencil, TrendingUp, Shield, CreditCard,
   Landmark, Wallet, Briefcase, Package, BarChart2, Upload
@@ -72,6 +74,8 @@ export default function AccountDetail() {
   const [assetModal, setAssetModal]         = useState(false);
   const [selectedSecurity, setSelectedSecurity] = useState(null);
   const [importOpen, setImportOpen]         = useState(false);
+  // Sell-a-holding modal — the holding itself is the open flag.
+  const [sellHolding, setSellHolding]       = useState(null);
   // Rename / edit-details modal
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [details, setDetails]         = useState({ name: '', description: '' });
@@ -111,14 +115,29 @@ export default function AccountDetail() {
     setEditTx(tx);
   };
 
-  const delTx = async (txId) => {
-    try { await transactionsAPI.delete(txId); load(); setChartKey(k => k + 1); }
+  // Takes the whole transaction, not just its id: undo posts the document back, and
+  // after the delete this page no longer holds it.
+  const delTx = async (tx) => {
+    const refresh = () => { load(); setChartKey(k => k + 1); };
+    try {
+      await transactionsAPI.delete(tx._id);
+      refresh();
+      toast.success('Transaction deleted', {
+        action: {
+          label: 'Undo',
+          onClick: async () => {
+            try { await transactionsAPI.create(toCreatePayload(tx)); refresh(); }
+            catch (e) { toast.error(e.response?.data?.message || 'Could not restore the transaction'); }
+          },
+        },
+      });
+    }
     catch (e) { toast.error(e.response?.data?.message || 'Failed to delete transaction'); }
   };
 
   const handleDeleteClick = (tx) => {
     if (localStorage.getItem(SKIP_DELETE_KEY) === 'true') {
-      delTx(tx._id);
+      delTx(tx);
     } else {
       setDeleteTx(tx);
     }
@@ -157,17 +176,23 @@ export default function AccountDetail() {
   // Fetch function for PriceGrapher — stable ref, uses account id from closure.
   // The /daily route returns { date, cashValue, assetValue, totalValue }; the
   // chart plots `value`, so map to the total account balance over time.
+  // `growth` is threaded straight through — PriceGrapher only ever passes it when
+  // its own Complete/Growth toggle is on.
   const fetchDailyBalance = useCallback(
-    (days) => accountsAPI.getDaily(id, days).then(res =>
+    (days, growth) => accountsAPI.getDaily(id, days, growth).then(res =>
       res.data.map(d => ({ date: d.date, value: d.totalValue }))
     ),
     [id]
   );
 
-  // Balance breakdown (non-debt accounts)
+  // Balance breakdown (non-debt accounts). `assetBalance` and `balance` come from the
+  // server, already settled at the T-1 close; `totalInvested` is the cost
+  // basis, which is what the gain is measured against — not what the account is worth.
   const cashBalance   = account?.cashBalance ?? account?.balance ?? 0;
+  const assetValue    = account?.assetBalance ?? 0;
+  const totalValue    = account?.balance ?? (cashBalance + assetValue);
   const totalInvested = account?.holdings?.filter(h => h.qty > 0).reduce((s, h) => s + h.totalInvested, 0) || 0;
-  const totalValue    = cashBalance + totalInvested;
+  const assetPnl      = assetValue - totalInvested;
 
   if (loading) return <Spinner />;
   if (!account) return (
@@ -212,7 +237,7 @@ export default function AccountDetail() {
             </p>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <Button variant="icon" icon={Upload} onClick={openImport} title="Import transactions" aria-label="Import transactions" />
           {(() => {
             const addTxn   = <Button key="txn" variant={isAssetAccount ? 'secondary' : 'gold'} icon={Plus} onClick={openModal}>Add transaction</Button>;
@@ -226,7 +251,12 @@ export default function AccountDetail() {
         </div>
       </div>
 
-      {/* Balance */}
+      {/* Balance —  in FULL, to the rupee.
+          Everywhere else in the app a figure is a comparison ("₹12.5L in assets" beside
+          "₹3.2L cash") and rounding to two significant figures helps the eye. Here it is
+          the answer to "how much is in this account", read against a bank app that
+          prints every digit. "₹12.53L" cannot be reconciled with ₹12,52,840, and a
+          balance you cannot reconcile is a balance you do not trust. */}
       {account.isDebt ? (
         <div className="card">
           <p className="heading-sm mb-3">Outstanding Balance</p>
@@ -234,27 +264,40 @@ export default function AccountDetail() {
           <p className="figure display-number" style={{
             color: account.balance <= 0 ? 'var(--color-danger)' : 'var(--color-success)',
           }}>
-            {compactIfLarge(account.balance)}
+            {formatCurrency(account.balance)}
           </p>
         </div>
       ) : (
+        /* Assets are shown at MARKET value (the server's settled T-1 close) with the
+           cost basis and the gain beneath — the panel used to print the cost basis and
+           call it "Total Value", which is the one thing it is not. */
         <div className="card" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 0 }}>
           <div style={{ paddingRight: 24, borderRight: '1px solid var(--color-border-subtle)' }}>
             <p className="label" style={{ marginBottom: 8 }}>Cash</p>
-            <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              {compactIfLarge(cashBalance)}
+            <p className="figure" style={{ fontSize: 'clamp(1.05rem, 2.1vw, 1.35rem)', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+              {formatCurrency(cashBalance)}
             </p>
           </div>
           <div style={{ padding: '0 24px', borderRight: '1px solid var(--color-border-subtle)' }}>
-            <p className="label" style={{ marginBottom: 8 }}>Assets (book value)</p>
-            <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-text-primary)' }}>
-              {compactIfLarge(totalInvested)}
+            <p className="label" style={{ marginBottom: 8 }}>Assets</p>
+            <p className="figure" style={{ fontSize: 'clamp(1.05rem, 2.1vw, 1.35rem)', fontWeight: 500, color: 'var(--color-text-primary)' }}>
+              {formatCurrency(assetValue)}
             </p>
+            {totalInvested > 0 && (
+              <p className="figure text-xs" style={{ marginTop: 6, color: 'var(--color-text-muted)' }}>
+                {formatCurrency(totalInvested)} invested
+                <span style={{ color: pnlColor(assetPnl), marginLeft: 8 }}>
+                  {formatSigned(assetPnl)}
+                </span>
+              </p>
+            )}
           </div>
           <div style={{ paddingLeft: 24 }}>
-            <p className="label" style={{ marginBottom: 8 }}>Total Value</p>
-            <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: 'var(--color-accent)' }}>
-              {compactIfLarge(totalValue)}
+            <p className="label" style={{ marginBottom: 8 }}>Total value</p>
+            {/* Full rupees are longer than the compact form was, so the three columns
+                give a little size back rather than letting a crore overflow. */}
+            <p className="figure" style={{ fontSize: 'clamp(1.05rem, 2.1vw, 1.35rem)', fontWeight: 500, color: 'var(--color-accent)' }}>
+              {formatCurrency(totalValue)}
             </p>
           </div>
         </div>
@@ -276,6 +319,10 @@ export default function AccountDetail() {
           { label: 'Max', days: null },
         ]}
         emptyText="No transaction history yet"
+        // Growth (money-only, deposits/withdrawals removed) only means something for an
+        // account that can hold assets — every non-debt account, not just brokerage/
+        // retirement (a bank or wallet account can hold assets too, e.g. NEXO Crypto).
+        growthCapable={!account.isDebt}
       />
 
       {/* Holdings Donut */}
@@ -294,7 +341,7 @@ export default function AccountDetail() {
           <p className="heading-sm" style={{ marginBottom: 12 }}>Breakdown</p>
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
             {account.holdings.map((h, i) => (
-              <div key={h.symbol} className="data-row"
+              <div key={h.symbol} className="data-row group"
                 style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none' }}>
                 <div className="flex items-center gap-3">
                   <Package size={15} style={{ color: 'var(--color-text-muted)' }} />
@@ -312,16 +359,34 @@ export default function AccountDetail() {
                     </p>
                   </div>
                 </div>
-                <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
-                  <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                    {formatCurrency(h.totalInvested)}
-                  </span>
-                  {h.currency && (
-                    <span className="figure" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
-                      {formatNativeCurrency(h.totalInvestedNative, h.currency)}
+                <div className="flex items-center" style={{ gap: 12, flexShrink: 0 }}>
+                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+                    <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                      {formatCurrency(h.totalInvested)}
                     </span>
-                  )}
-                </span>
+                    {h.currency && (
+                      <span className="figure" style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>
+                        {formatNativeCurrency(h.totalInvestedNative, h.currency)}
+                      </span>
+                    )}
+                  </span>
+                  {/* Selling used to mean opening Add asset, searching the market for
+                      something already on your own books, and remembering the quantity.
+                      It belongs on the holding. Revealed on hover, like every other row
+                      action in the app, so the list still reads as figures. */}
+                  <button
+                    onClick={() => setSellHolding(h)}
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    title={`Sell ${h.name}`}
+                    style={{
+                      background: 'none', cursor: 'pointer', fontFamily: 'inherit',
+                      border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
+                      color: 'var(--color-danger)', fontSize: '0.6875rem', fontWeight: 600,
+                      padding: '4px 10px', flexShrink: 0,
+                    }}>
+                    Sell
+                  </button>
+                </div>
               </div>
             ))}
           </div>
@@ -333,19 +398,33 @@ export default function AccountDetail() {
         <p className="heading-sm" style={{ marginBottom: 12 }}>Transactions ({txns.length})</p>
         {txns.length > 0 ? (
           <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            {txns.map((tx, i) => (
-              <TransactionRow
-                key={tx._id}
-                tx={tx}
-                divided={i > 0}
-                subtitle={<>
-                  {tx.type} · {formatDate(tx.date)}
-                  {tx.toAccount && ` → ${tx.toAccount.name}`}
-                </>}
-                onEdit={openEdit}
-                onDelete={handleDeleteClick}
-              />
-            ))}
+            {txns.map((tx, i) => {
+              // The statement now carries transfers INTO this account as well as out of
+              // it, and the two read as opposites from here: one credits, one debits.
+              // Everything else in the list belongs to this account outright.
+              const incoming = tx.type === 'transfer'
+                ? (tx.toAccount?._id || tx.toAccount) === id
+                : undefined;
+              const counterparty = incoming ? tx.account : tx.toAccount;
+              return (
+                <TransactionRow
+                  key={tx._id}
+                  tx={tx}
+                  divided={i > 0}
+                  incoming={incoming}
+                  subtitle={<>
+                    {tx.type} · {formatDate(tx.date)}
+                    {counterparty?.name && ` ${incoming ? '←' : '→'} ${counterparty.name}`}
+                  </>}
+                  // An incoming transfer is the OTHER account's transaction — the edit
+                  // form is built around `account`, which from here is the DESTINATION,
+                  // so it would rewrite the wrong side. This end stays read-only; the
+                  // row is editable from the source account (or the Transactions page).
+                  onEdit={incoming ? undefined : openEdit}
+                  onDelete={incoming ? undefined : handleDeleteClick}
+                />
+              );
+            })}
           </div>
         ) : (
           <div className="card flex items-center justify-center" style={{ padding: '48px 24px' }}>
@@ -401,7 +480,7 @@ export default function AccountDetail() {
       <ConfirmModal
         open={!!deleteTx}
         onClose={() => setDeleteTx(null)}
-        onConfirm={() => delTx(deleteTx._id)}
+        onConfirm={() => delTx(deleteTx)}
         title="Delete transaction"
         message={`Delete this ${deleteTx?.type} transaction of ${deleteTx ? formatCurrency(deleteTx.amount) : ''}? This action cannot be undone.`}
         skipKey={SKIP_DELETE_KEY}
@@ -439,6 +518,15 @@ export default function AccountDetail() {
         accounts={[account, ...allAccounts]}
         defaultAccountId={id}
         onSuccess={() => { setImportOpen(false); load(); setChartKey(k => k + 1); }}
+      />
+
+      {/* Sell a holding — this account is the only place it can be sold from here */}
+      <SellHoldingModal
+        holding={sellHolding}
+        accounts={[account, ...allAccounts]}
+        defaultAccountId={id}
+        onClose={() => setSellHolding(null)}
+        onSuccess={() => { setSellHolding(null); load(); setChartKey(k => k + 1); }}
       />
 
       {/* Add Asset Modal — MarketSearch → AssetTransactionForm */}

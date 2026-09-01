@@ -98,9 +98,14 @@ export default function TypePicker({
 
   function selectFlat(o)      { onChange(o.value); close(); }
   function selectPrimary(o) {
+    // Step INTO a group whenever there is anything to choose inside it — its existing
+    // children, or the "Add sub-category" affordance. A group with no children used to
+    // select itself outright and close, which is exactly the moment the user most wants
+    // to create its first sub-category. The "No sub-category" row at the top of the
+    // second phase still files the transaction under the group alone, one extra click.
     const kids = childrenOf(o.value);
-    if (kids.length === 0) { onChange(o.value); close(); }
-    else { setNavPrimary(o); setPhase('secondary'); setShowAdd(false); setQuery(''); }
+    if (kids.length === 0 && !onAdd) { onChange(o.value); close(); return; }
+    setNavPrimary(o); setPhase('secondary'); setShowAdd(false); setQuery('');
   }
   function selectPrimaryOnly() { onChange(navPrimary.value); close(); }
   function selectChild(o)      { onChange(`${navPrimary.value}/${o.value}`); close(); }
@@ -116,6 +121,18 @@ export default function TypePicker({
       if (created?.value != null) {
         onChange(parent ? `${parent}/${created.value}` : created.value);
       }
+      // A brand-new GROUP is rarely the whole answer — someone adds "Hobbies" because
+      // they want "Hobbies · Climbing" in it. Closing here selected the bare group and
+      // left them to reopen the picker and find it again just to add the child. So the
+      // group is selected (nothing is lost if they click away) and the panel steps into
+      // it, where "Add sub-category" is the next thing under the cursor.
+      if (hierarchical && level === 'primary' && created?.value != null) {
+        setNavPrimary(created);
+        setPhase('secondary');
+        setShowAdd(false);
+        setNewName(''); setNewEmoji('📋'); setQuery('');
+        return;
+      }
       close();
     } catch (err) {
       setAddError(err?.response?.data?.message || err?.message || 'Failed to add');
@@ -125,6 +142,10 @@ export default function TypePicker({
   }
 
   const canAddHere = !!onAdd;
+
+  // Inside a group, filing under the group ALONE has to stay reachable — it is the
+  // only way back to a bare primary once the picker always drills in.
+  const showNoSubOption = hierarchical && phase === 'secondary' && !query;
 
   return (
     <div style={{ position: 'relative' }}>
@@ -185,7 +206,7 @@ export default function TypePicker({
           <div style={{ maxHeight: 248, overflowY: 'auto', padding: '4px 0' }}>
             {loading && <div style={{ padding: '20px 14px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>Loading…</div>}
 
-            {!loading && hierarchical && phase === 'secondary' && !query && (
+            {!loading && showNoSubOption && (
               <Row emoji="" label="No sub-category" muted onClick={selectPrimaryOnly} />
             )}
 
@@ -196,13 +217,17 @@ export default function TypePicker({
                 icon={o.icon}
                 label={o.label}
                 sublabel={o.sublabel}
-                hasArrow={hierarchical && phase === 'primary' && childrenOf(o.value).length > 0}
+                hasArrow={hierarchical && phase === 'primary' && (childrenOf(o.value).length > 0 || canAddHere)}
                 onClick={() => hierarchical ? (phase === 'primary' ? selectPrimary(o) : selectChild(o)) : selectFlat(o)}
               />
             ))}
 
-            {!loading && filtered.length === 0 && (
-              <div style={{ padding: '16px 14px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>No matches</div>
+            {/* An empty group is not "no matches" — it simply has no sub-categories yet,
+                and the row above plus the Add button below are the whole answer. */}
+            {!loading && filtered.length === 0 && !showNoSubOption && (
+              <div style={{ padding: '16px 14px', textAlign: 'center', color: 'var(--color-text-muted)', fontSize: '0.8125rem' }}>
+                {hierarchical && phase === 'secondary' && !query ? 'No sub-categories yet' : 'No matches'}
+              </div>
             )}
           </div>
 

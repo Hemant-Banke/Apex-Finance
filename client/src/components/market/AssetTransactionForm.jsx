@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { marketAPI, transactionsAPI, subscriptionsAPI } from '../../lib/api';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, formatSigned, pnlColor } from '../../lib/utils';
 import { ASSET_TYPES, PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
 import DatePicker from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
@@ -18,23 +18,45 @@ function todayStr() {
  *
  * Create mode:  pass security + accounts + defaultAccountId + onBack + onSuccess
  * Edit mode:    pass transaction + accounts + onSuccess  (security derived from tx)
+ * Sell mode:    pass holding  + accounts + onSuccess     (security derived from the holding)
+ *
+ * `holding` is a position the user already owns — `{ symbol, name, type, qty,
+ * avgCostPerUnit, currency, purity, rate, positions }`. It turns the form from "record
+ * a trade in some instrument" into "sell what you have": the side starts on Sell, the
+ * quantity the account actually holds is shown and one-click fillable, and the gain the
+ * sale would book is worked out against the average cost before anything is saved.
+ * Selling used to mean searching the market for an instrument already on your own books
+ * and typing a quantity you had to remember.
+ *
+ * `positions` is the per-account split (a symbol can sit in two brokers). The available
+ * quantity follows the account picker, because a sale draws from ONE account.
  */
 export default function AssetTransactionForm({
   security: securityProp,
   transaction,          // present in edit mode
+  holding,              // present in sell-from-holdings mode
   accounts = [],
   defaultAccountId,
   onSuccess
 }) {
   const isEdit = !!transaction;
 
-  // Derive security from the existing transaction in edit mode
+  // Derive the security from whatever identifies the instrument in this mode: the
+  // transaction being edited, the holding being sold, or an explicit market pick.
   const security = isEdit
     ? {
         symbol:   transaction.assetSymbol,
         name:     transaction.assetName || transaction.assetSymbol,
         type:     transaction.assetType || 'other',
         isManual: isManualSymbol(transaction.assetSymbol)
+      }
+    : holding
+    ? {
+        symbol:   holding.symbol,
+        name:     holding.name || holding.symbol,
+        type:     holding.type || 'other',
+        currency: holding.currency || '',
+        isManual: isManualSymbol(holding.symbol)
       }
     : securityProp;
 
@@ -46,11 +68,17 @@ export default function AssetTransactionForm({
     ? (transaction.account?._id || transaction.account || '')
     : '';
 
-  const [txType,       setTxType]       = useState(isEdit ? transaction.type : 'buy');
+  // Opening a position you already own means selling it — that is the only reason to
+  // start from a holding rather than from the market search.
+  const initialType = isEdit ? transaction.type : (holding ? 'sell' : 'buy');
+
+  const [txType,       setTxType]       = useState(initialType);
   // Whether the trade settles against the account's cash balance.
   // Default: buy → false (asset tracked independently), sell → true (proceeds land in cash).
+  // Derived from the OPENING side, not hardcoded false, or a sell would open with the
+  // proceeds silently going nowhere.
   const [usesCashBalance, setUsesCashBalance] = useState(
-    isEdit ? !!transaction.usesCashBalance : false
+    isEdit ? !!transaction.usesCashBalance : initialType === 'sell'
   );
   const [date,         setDate]         = useState(isEdit ? transaction.date?.split?.('T')[0] ?? todayStr() : todayStr());
   const [units,        setUnits]        = useState(isEdit ? String(transaction.units ?? '') : '');
@@ -59,7 +87,9 @@ export default function AssetTransactionForm({
   const [priceLoading, setPriceLoading] = useState(false);
   const [priceError,   setPriceError]   = useState('');
   const [refetchNonce, setRefetchNonce] = useState(0); // bump to re-run auto-fetch
-  const [accountId,    setAccountId]    = useState(txAccountId || defaultAccountId || nonDebtAccounts[0]?._id || '');
+  const [accountId,    setAccountId]    = useState(
+    txAccountId || defaultAccountId || holding?.positions?.[0]?.account || nonDebtAccounts[0]?._id || ''
+  );
   const [notes,        setNotes]        = useState(isEdit ? (transaction.notes || '') : '');
   const [saving,       setSaving]       = useState(false);
   const [error,        setError]        = useState('');
@@ -70,14 +100,18 @@ export default function AssetTransactionForm({
   const [assetType,  setAssetType]  = useState(security?.type || 'other');
 
   // Valuation metadata: purity for physical metal, annual rate for unlisted assets.
-  const [purity, setPurity] = useState(isEdit ? (transaction.purity || '') : '');
-  const [rate,   setRate]   = useState(isEdit ? String(transaction.rate ?? '') : '');
+  // A holding already knows how it is valued — carry its purity/rate over so a sale
+  // does not have to re-declare (or worse, silently drop) them.
+  const [purity, setPurity] = useState(isEdit ? (transaction.purity || '') : (holding?.purity || ''));
+  const [rate,   setRate]   = useState(
+    isEdit ? String(transaction.rate ?? '') : (holding?.rate != null ? String(holding.rate) : '')
+  );
 
   // Foreign-quoted assets (US stocks, USD crypto): `price` is the NATIVE figure the
   // exchange quotes and what we store; `fxRate` (INR per unit of that currency)
   // converts it for the INR total we book. Both come back from the price endpoint.
   const [currency, setCurrency] = useState(
-    isEdit ? (transaction.currency || '') : (securityProp?.currency || '')
+    isEdit ? (transaction.currency || '') : (holding?.currency || securityProp?.currency || '')
   );
   const [fxRate, setFxRate] = useState(isEdit ? (transaction.fxRate ?? null) : null);
   const isForeign = !!currency && currency !== 'INR';
@@ -126,6 +160,28 @@ export default function AssetTransactionForm({
       : (isForeign ? (fxRate ? nativeTotal * fxRate : null) : nativeTotal);
 
   const submitTone  = txType === 'buy' ? 'var(--color-success)' : 'var(--color-danger)';
+
+  // ── What this account actually holds ──────────────────────────────────────
+  // A sale draws from ONE account, so the quantity on offer follows the account
+  // picker rather than the merged book: "you hold 30" is a lie if 12 of them sit
+  // in another broker.
+  const position = holding?.positions?.find(p => p.account === accountId) || null;
+  const heldQty  = position ? position.qty : (holding?.positions ? 0 : holding?.qty ?? null);
+  const heldAvg  = position?.avgCostPerUnit ?? holding?.avgCostPerUnit ?? null;
+  const showHeld = holding != null && heldQty != null && !enterAmount;
+
+  const unitsNum = parseFloat(units);
+  // Selling more than you hold is legal — it opens a short, which this app models
+  // symmetrically — so this warns rather than blocks.
+  const oversell = showHeld && txType === 'sell' && unitsNum > 0 && heldQty > 0 && unitsNum > heldQty + 1e-9;
+
+  // What the sale would BOOK, against the average cost as it stands. The price field is
+  // native for a foreign asset while the cost basis is INR, so compare in INR or a $185
+  // sale reads as a catastrophic loss against a ₹16,000 average.
+  const unitPriceInr = price === '' ? null : (isForeign ? (fxRate ? parseFloat(price) * fxRate : null) : parseFloat(price));
+  const realisedGain = (showHeld && heldQty > 0 && txType === 'sell' && heldAvg != null && unitPriceInr != null && unitsNum > 0)
+    ? (unitPriceInr - heldAvg) * unitsNum
+    : null;
 
   // Auto-fetch the market price when the date changes (listed assets).
   // Physical metal has no market symbol but IS priceable (INR per gram, by type
@@ -366,13 +422,28 @@ export default function AssetTransactionForm({
           balance-style, or the schedule is amount-invariant (a ₹5,000 SIP buys whatever
           units that day's price allows, so asking for units would be nonsense). */}
       <div>
-        <label className="label block" style={{ marginBottom: 6 }}>
-          {enterAmount
-            ? <>Amount <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>
-                {amountMode ? '(₹ each time)' : '(₹)'}
-              </span></>
-            : (showPurity ? 'Weight (grams)' : 'Units / Quantity')}
-        </label>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8, minHeight: 18 }}>
+          <label className="label">
+            {enterAmount
+              ? <>Amount <span style={{ color: 'var(--color-accent)', fontWeight: 600 }}>
+                  {amountMode ? '(₹ each time)' : '(₹)'}
+                </span></>
+              : (showPurity ? 'Weight (grams)' : 'Units / Quantity')}
+          </label>
+          {/* What you hold, and one click to sell all of it — the whole point of
+              starting from a holding instead of a market search. */}
+          {showHeld && heldQty > 0 && (
+            <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+              <span className="figure">{+heldQty.toFixed(6)}</span> held
+              {txType === 'sell' && (
+                <button type="button" onClick={() => setUnits(String(+heldQty.toFixed(8)))}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.6875rem', padding: 0, fontFamily: 'inherit' }}>
+                  Sell all
+                </button>
+              )}
+            </span>
+          )}
+        </div>
         <input type="number" step="any" min="0.000001" value={units}
           onChange={e => setUnits(e.target.value)}
           className="input-field" required style={{ fontFamily: 'var(--font-mono)' }}
@@ -385,6 +456,18 @@ export default function AssetTransactionForm({
           <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
             {txType === 'buy' ? 'The amount contributed.' : 'The amount withdrawn.'}
             {showRate && rate !== '' && ' It then grows at the rate above.'}
+          </p>
+        )}
+        {/* Overselling is allowed — it opens a short — but it is almost never what
+            someone clicking "Sell" from their own holdings meant to do. */}
+        {oversell && (
+          <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-chart-warm)' }}>
+            More than the <span className="figure">{+heldQty.toFixed(6)}</span> held here — this opens a short position.
+          </p>
+        )}
+        {showHeld && heldQty === 0 && (
+          <p style={{ marginTop: 4, fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            This account holds none of it.
           </p>
         )}
       </div>
@@ -509,6 +592,32 @@ export default function AssetTransactionForm({
         <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
           className="input-field" placeholder="Optional" />
       </div>
+
+      {/* What the sale would BOOK. A sell is the one trade with a result, and it was
+          only discoverable after the fact on the Analytics page — by which point it is
+          too late to think again about the quantity or the date. Measured against the
+          average cost, which is exactly what the server will realise it against. */}
+      {realisedGain != null && (
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+          background: 'var(--color-bg-input)', border: '1px solid var(--color-border-subtle)',
+        }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+            Realised gain vs <span className="figure">{formatCurrency(heldAvg)}</span> avg cost
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6, flexShrink: 0 }}>
+            <span className="figure" style={{ fontSize: '0.875rem', fontWeight: 600, color: pnlColor(realisedGain) }}>
+              {formatSigned(realisedGain)}
+            </span>
+            {heldAvg > 0 && (
+              <span className="figure" style={{ fontSize: '0.6875rem', color: pnlColor(realisedGain), opacity: 0.8 }}>
+                {realisedGain >= 0 ? '+' : '−'}{Math.abs((realisedGain / (heldAvg * unitsNum)) * 100).toFixed(1)}%
+              </span>
+            )}
+          </span>
+        </div>
+      )}
 
       {error && <p style={{ fontSize: '0.8125rem', color: 'var(--color-danger)' }}>{error}</p>}
 

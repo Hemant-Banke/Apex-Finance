@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
 
@@ -21,6 +22,14 @@ function learnCategory(userId, tx, narration) {
 
 const router = express.Router();
 router.use(protect);
+
+/**
+ * Cast an id for the query. `find` would cast a string itself, but the summary
+ * `aggregate` runs the SAME filter and Mongoose does not cast pipeline stages —
+ * a string id there matches nothing, so the totals silently came back empty.
+ * An unparseable id is left as-is and simply matches nothing, as before.
+ */
+const oid = (id) => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
 
 /** Validate one row and return the document to insert. Throws a human-readable message. */
 async function prepareTransaction(userId, body) {
@@ -78,11 +87,13 @@ async function createTransactions(userId, rows) {
 
 
 // GET /api/transactions
+//
+// `summary` totals the WHOLE filtered set, not the page being returned — "₹40,000 in,
+// ₹32,000 out" has to describe the filter the user built, or it is a lie about page 1.
 router.get('/', asyncHandler(async (req, res) => {
-  const { account, type, category, startDate, endDate, limit = 50, page = 1 } = req.query;
+  const { account, type, category, search, startDate, endDate, limit = 50, page = 1 } = req.query;
 
   const filter = { user: req.user._id };
-  if (account)   filter.account  = account;
   if (type)      filter.type     = type;
   if (category)  filter.category = category;
   if (startDate || endDate) {
@@ -91,16 +102,60 @@ router.get('/', asyncHandler(async (req, res) => {
     if (endDate)   filter.date.$lte = new Date(endDate);
   }
 
-  const total = await Transaction.countDocuments(filter);
-  const transactions = await Transaction.find(filter)
-    .populate('account',   'name type')
-    .populate('toAccount', 'name type')
-    .sort({ date: -1 })
-    .limit(parseInt(limit))
-    .skip((parseInt(page) - 1) * parseInt(limit))
-    .lean();
+  // Two independent `$or`s can live in one filter only under `$and` — the second
+  // assignment would otherwise silently overwrite the first.
+  const clauses = [];
 
-  res.json({ transactions, total, page: parseInt(page), pages: Math.ceil(total / parseInt(limit)) });
+  // An account's statement is every transaction that MOVED ITS MONEY, and a transfer
+  // moves the destination's just as much as the source's. The cash store has always
+  // credited both sides (see buildAccountTxnsMap); the list was the one place that
+  // showed only the source, so an incoming transfer appeared as a balance rise with
+  // no transaction to explain it.
+  if (account) clauses.push({ $or: [{ account: oid(account) }, { toAccount: oid(account) }] });
+
+  // Free text matches whatever the user would recognise the row by: its note, or the
+  // asset it traded. Escaped — a stray "(" in the box must not throw a regex error.
+  if (search?.trim()) {
+    const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    clauses.push({ $or: [{ notes: rx }, { assetName: rx }, { assetSymbol: rx }] });
+  }
+  if (clauses.length) filter.$and = clauses;
+
+  const [total, transactions, flows] = await Promise.all([
+    Transaction.countDocuments(filter),
+    Transaction.find(filter)
+      .populate('account',   'name type')
+      .populate('toAccount', 'name type')
+      .sort({ date: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean(),
+    Transaction.aggregate([
+      { $match: filter },
+      { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const of = (t) => flows.find(f => f._id === t)?.total || 0;
+  const income  = of('income');
+  const expense = of('expense');
+
+  res.json({
+    transactions,
+    total,
+    page:  parseInt(page),
+    pages: Math.ceil(total / parseInt(limit)),
+    summary: {
+      income,
+      expense,
+      net:     income - expense,
+      // Trades are reported separately: a buy is not an expense, and rolling it into
+      // "out" would make an investment look like money burnt.
+      invested: of('buy'),
+      divested: of('sell'),
+      count:    total,
+    },
+  });
 }));
 
 // POST /api/transactions
@@ -142,6 +197,21 @@ router.put('/:id', asyncHandler(async (req, res) => {
   res.json(transaction);
 }));
 
+// DELETE /api/transactions/bulk
+// Body: { ids: [ "txId1", "txId2", ... ] }
+//
+// MUST be declared before `/:id`. Express matches in declaration order, so with the
+// parameterised route first this landed in it as `id === 'bulk'` and died casting that
+// to an ObjectId — a 500 on a route that looked perfectly well defined.
+router.delete('/bulk', asyncHandler(async (req, res) => {
+  const { ids } = req.body;
+  if (!Array.isArray(ids) || !ids.length) {
+    throw badRequest('Transaction Ids array is required');
+  }
+  await txService.bulkDelete(req.user._id, ids);
+  res.json({ message: `${ids.length} transaction(s) deleted` });
+}));
+
 // DELETE /api/transactions/:id
 router.delete('/:id', asyncHandler(async (req, res) => {
   const transaction = await Transaction.findOneAndDelete({ _id: req.params.id, user: req.user._id }).lean();
@@ -166,15 +236,5 @@ router.post('/bulk', asyncHandler(async (req, res) => {
   res.status(201).json({ count: created.length, transactions: created, failed });
 }));
 
-// DELETE /api/transactions/bulk
-// Body: { ids: [ "txId1", "txId2", ... ] }
-router.delete('/bulk', asyncHandler(async (req, res) => {
-  const { ids } = req.body;
-  if (!Array.isArray(ids) || !ids.length) {
-    throw badRequest('Transaction Ids array is required');
-  }
-  await txService.bulkDelete(req.user._id, ids);
-  res.json({ message: `${ids.length} transaction(s) deleted` });
-}));
 
 module.exports = router;

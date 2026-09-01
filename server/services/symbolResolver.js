@@ -23,6 +23,7 @@ const { YF_HEADERS, DAY_MS } = require('../utils/constants');
 const { mapQuoteType, resolveQuoteName, midnight } = require('../utils/helpers');
 const { fetchHistoricPrices, fetchQuoteMeta } = require('./marketDataService');
 const mfService = require('./mfService');
+const conf      = require('../lib/confidence');
 
 /** An ISIN, if the statement printed one (they identify a fund plan outright). */
 const _isinIn = (s) => (/\b(IN[A-Z0-9]{10})\b/.exec(String(s || '').toUpperCase()) || [])[1] || null;
@@ -215,6 +216,12 @@ async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
       currency:    'INR',
       navMatched:  hit.matchedBy === 'nav' || hit.matchedBy === 'isin',
       ambiguous:   !!hit.ambiguous,
+      // An ISIN names one plan of one fund outright; a NAV that matches on the trade
+      // date separates the plans a name cannot. A name alone leaves the plan open.
+      certainty:   hit.ambiguous ? 'ambiguous'
+                 : hit.matchedBy === 'isin' ? 'isin'
+                 : hit.matchedBy === 'nav'  ? 'nav'
+                 : 'name',
       resolved:    true,
     };
   }
@@ -234,6 +241,9 @@ async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
           assetName:   name || candidate,
           assetType:   assetType || 'stock',
           currency:    meta[candidate].currency || '',
+          // The statement printed a ticker and it priced. Short of an ISIN this is
+          // the strongest identification available.
+          certainty:   'ticker',
           resolved:    true,
         };
       }
@@ -282,6 +292,7 @@ async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
     // traded is not listed on Yahoo. Surface it rather than quietly booking it.
     ambiguous:   !!pick.navMismatch,
     foundNav:    pick.foundNav,
+    certainty:   pick.navMismatch ? 'ambiguous' : pick.navMatched ? 'nav' : 'name',
   };
 }
 
@@ -310,8 +321,17 @@ async function resolveStatementAssets(transactions = []) {
         date:         tx.date,
       });
 
+      // An asset row is only as good as the instrument behind it: a perfectly-read
+      // "12 units @ ₹250" against a ticker we could not resolve will never price, so
+      // the row's headline confidence has to fall to the symbol's.
+      const score = (certainty) => {
+        tx.confidenceParts = { ...(tx.confidenceParts || {}), symbol: conf.part(certainty, conf.SYMBOL[certainty]) };
+        tx.confidence = conf.overall(tx.confidenceParts);
+      };
+
       if (!hit) {
         tx.symbolUnresolved = true;
+        score('unresolved');
         return;
       }
 
@@ -321,6 +341,7 @@ async function resolveStatementAssets(transactions = []) {
       if (hit.currency && hit.currency !== 'INR') tx.currency = hit.currency;
       if (hit.navMatched) tx.navMatched = true;
       if (hit.ambiguous)  tx.symbolAmbiguous = true;
+      score(hit.certainty || 'name');
     }));
   }
 

@@ -125,7 +125,18 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
           const on = form.type === k;
           return (
             <button key={k} type="button"
-              onClick={() => set({ type: k, amount: '', category: '' })}
+              onClick={() => set({
+                type: k,
+                // The figure SURVIVES the switch. Someone who typed 1,240 and then
+                // realised it was an expense, not a transfer, meant to change the type
+                // — not to retype the number. Only the sign is normalised: an
+                // adjustment may be negative, and nothing else may.
+                amount: k === 'adjustment' ? form.amount : form.amount.replace(/^-/, ''),
+                // The category, on the other hand, genuinely cannot survive: a code
+                // belongs to one type's taxonomy, so an expense code on an income row
+                // is not a classification the server would accept.
+                category: '',
+              })}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                 padding: '10px 4px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',

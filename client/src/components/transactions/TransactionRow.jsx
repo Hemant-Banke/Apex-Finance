@@ -12,8 +12,13 @@ import { useCategoryNames } from '../../lib/categoryNames';
  * type and destination, or the asset and units — so it is passed in as a node rather
  * than reconstructed from flags. `onEdit`/`onDelete` are optional: a read-only feed
  * simply omits them and gets no hover affordances.
+ *
+ * `incoming` is for TRANSFERS only, and only where the list is read from one account's
+ * point of view: a transfer is money in for the destination and money out for the
+ * source, and the same row means both depending on where you are standing. Leave it
+ * undefined in an account-agnostic list and the row shows no direction, as before.
  */
-export default function TransactionRow({ tx, subtitle, badge = false, onEdit, onDelete, divided = false }) {
+export default function TransactionRow({ tx, subtitle, badge = false, incoming, onEdit, onDelete, divided = false }) {
   const { label } = useCategoryNames();
 
   const actionStyle = {
@@ -34,7 +39,7 @@ export default function TransactionRow({ tx, subtitle, badge = false, onEdit, on
     >
       <div style={{ minWidth: 0, flex: 1 }}>
         <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>
-          {getTransactionName(tx, label)}
+          {getTransactionName(tx, label, incoming)}
         </p>
         <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
           {subtitle}
@@ -47,7 +52,7 @@ export default function TransactionRow({ tx, subtitle, badge = false, onEdit, on
         className={`figure text-sm ${getTransactionColor(tx.type)}`}
         style={{ marginLeft: 16, fontWeight: 500 }}
       >
-        {getTransactionSign(tx.type)}{formatCurrency(tx.amount)}
+        {getTransactionSign(tx.type, incoming)}{formatCurrency(tx.amount)}
       </span>
 
       {onEdit && (

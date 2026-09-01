@@ -40,11 +40,19 @@ Return ONLY a JSON object (no markdown, no commentary):
   "period": { "from": "YYYY-MM-DD or null", "to": "YYYY-MM-DD or null" },
   "transactions": [
     // CASH movement (bank / UPI / card):
-    { "date": "YYYY-MM-DD", "narration": "original description verbatim", "amount": 1234.56, "type": "expense|income|transfer", "accountRef": "only if the statement covers several accounts — see below" },
+    { "date": "YYYY-MM-DD", "narration": "original description verbatim", "amount": 1234.56, "type": "expense|income|transfer", "confidence": 0.95, "accountRef": "only if the statement covers several accounts — see below" },
     // ASSET trade (broker / demat statement):
-    { "date": "YYYY-MM-DD", "narration": "original description verbatim", "type": "buy|sell", "assetSymbol": "TICKER", "assetName": "Full instrument name", "assetType": "stock|etf|mutual_fund|bond|gold|crypto|other", "units": 10, "pricePerUnit": 250.5 }
+    { "date": "YYYY-MM-DD", "narration": "original description verbatim", "type": "buy|sell", "confidence": 0.95, "assetSymbol": "TICKER", "assetName": "Full instrument name", "assetType": "stock|etf|mutual_fund|bond|gold|crypto|other", "units": 10, "pricePerUnit": 250.5 }
   ]
 }
+
+CONFIDENCE — report one on EVERY row, and mean it:
+- "confidence" is how sure you are of that row's DATE, AMOUNT and TYPE together. 0.0 = a guess, 1.0 = the statement states all three unambiguously. It is NOT about the category, which you are not being asked for here.
+- Judge the row you actually read, not the document in general. Two rows of the same statement routinely deserve different scores.
+- Score HIGH (0.9–1.0) when the date, the figure and the debit/credit column are all printed plainly and you copied them.
+- Score MIDDLING (0.6–0.85) when you had to infer something real: the direction from a running balance, a year the row omitted, a row you reassembled from wrapped lines, an amount you picked between two adjacent numbers.
+- Score LOW (below 0.5) when a character was genuinely unclear, a column was cut off, the row may be a subtotal, or the amount could plausibly be read another way.
+- Do NOT report high confidence everywhere. A uniform score tells the user nothing and is worse than no score at all — the whole point is that they can see which rows to look at.
 
 DIRECTION RULES (cash):
 - Money OUT of the account (debit / withdrawal / DR / paid / purchase / spent) -> "expense".
@@ -163,9 +171,10 @@ ${fmt(taxonomy.income)}
 TRANSACTIONS (JSON array of {id, type, narration, amount, day}):
 ${JSON.stringify(items)}
 
-Return ONLY a JSON object mapping each transaction id to a category code from the matching type's allowed list, or null:
-{ "<id>": "<code|null>", ... }
-Use codes EXACTLY as written in the allowed list. No markdown, no commentary.`;
+Return ONLY a JSON object mapping each transaction id to your choice and how sure you are of it:
+{ "<id>": { "code": "<code|null>", "confidence": 0.0-1.0 }, ... }
+- "confidence" is for THAT row: 0.9+ when the learned profile or an unmistakable merchant name settles it, 0.6–0.85 when the merchant is recognisable but the exact sub-category is a judgement, below 0.5 when you are mostly going on amount or timing. Vary it honestly — a flat score across every row is useless to the user reviewing them.
+- Use codes EXACTLY as written in the allowed list. No markdown, no commentary.`;
 
   const resp = await client.messages.create({
     model: MODEL,
@@ -174,7 +183,21 @@ Use codes EXACTLY as written in the allowed list. No markdown, no commentary.`;
   });
 
   const map = _extractJSON(resp.content?.[0]?.text || '');
-  return (map && typeof map === 'object') ? map : {};
+  if (!map || typeof map !== 'object') return {};
+
+  // Normalise to `{ code, confidence }`. A bare string is still accepted — models drift
+  // back to the simpler shape, and losing the whole batch over a missing wrapper would
+  // be a far worse failure than an unscored (but correct) category.
+  const out = {};
+  for (const [id, v] of Object.entries(map)) {
+    if (v == null) continue;
+    if (typeof v === 'string') { out[id] = { code: v, confidence: null }; continue; }
+    if (typeof v === 'object' && v.code) {
+      const c = Number(v.confidence);
+      out[id] = { code: v.code, confidence: Number.isFinite(c) && c >= 0 && c <= 1 ? c : null };
+    }
+  }
+  return out;
 }
 
 module.exports = {

@@ -20,6 +20,17 @@ const asyncHandler = (fn) => (req, res, next) =>
  */
 // eslint-disable-next-line no-unused-vars -- Express identifies an error handler by arity.
 function errorHandler(err, req, res, next) {
+  // A Mongoose schema rejection is the USER's input being wrong, not a fault of ours.
+  // Reporting it as a 500 "Server error" tells them nothing and blames the wrong party.
+  if (err.name === 'ValidationError' && err.errors) {
+    const fields = Object.values(err.errors).map(e => e.message);
+    return res.status(400).json({ message: fields[0] || 'Validation failed', errors: fields });
+  }
+  // A duplicate on a unique index is likewise a 409-shaped conflict, not a crash.
+  if (err.code === 11000) {
+    return res.status(400).json({ message: 'That already exists' });
+  }
+
   const status = err.status || 500;
 
   if (status >= 500) {

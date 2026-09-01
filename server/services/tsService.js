@@ -12,7 +12,7 @@
 const { DAY_MS } = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder } = require('../utils/tsHelpers');
-const { buildCashImpactMap, directionalAssetImpact } = require('../utils/transactionHelpers');
+const { buildCashImpactMap, directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { resolveUnitPrice, accruedPrice } = require('../utils/assetPricing');
 
 // ─── Pure TS builders ─────────────────────────────────────────────────────────
@@ -120,7 +120,10 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPr
     // failing that the book price stands, so the series is never spuriously 0.
     let value = 0;
     for (const [sym, qty] of Object.entries(holdings)) {
-      if (qty === 0) continue;
+      // Dust is not a position. A share count left on a thousandth by statement
+      // rounding must stop being valued on the very day it closes, or the series
+      // carries a ghost of the holding for as long as the account exists.
+      if (isFlatUnits(qty, meta[sym]?.assetType)) continue;
       const p = pricesBySymbol[sym]?.[dayMs];
       if (p != null) lastPrice[sym] = Number(p);
 
@@ -166,6 +169,49 @@ function seedPricesBefore(pricesBySymbol, beforeMs) {
     if (bestDay > -Infinity) seeds[sym] = series[bestDay];
   }
   return seeds;
+}
+
+/**
+ * Rescale an absolute value series to a growth-only index, base 100 at its own first
+ * point — the "growth view": what the money itself did, with every external deposit
+ * or withdrawal removed. A proper day-by-day Time-Weighted Return: each day's return
+ * is measured against THAT DAY's own prior value (with that day's own flow backed
+ * out), then chained by compounding — not measured against one fixed historical
+ * value, which is what a fund's own NAV/index construction does and for the same
+ * reason: a single fixed denominator badly distorts an account that grew mostly
+ * through LATER contributions. An account that opened with ₹500 and grew via
+ * monthly SIPs to ₹11L would, under a fixed-denominator scheme, see a completely
+ * ordinary 1% move on the ₹11L pool reported as a double-digit swing — a real ₹1,000
+ * gain is still ₹1,000 whether the account started at ₹500 or ₹5,00,000, but dividing
+ * by the ₹500 anchor forever makes it look 1000x more dramatic than it is. Chaining
+ * day-to-day fixes this: each day's return is sized to what was actually invested
+ * that day, so later, larger contributions carry proportionally larger — not
+ * artificially inflated — weight in the index.
+ *
+ *   r(t)     = (value(t) − flow(t)) / value(t-1)   — flow(t) is what arrived ON t;
+ *              excluded because a same-day deposit hasn't had a day to move yet.
+ *   index(t) = index(t-1) × r(t),  index(0) = base
+ *
+ * `flowTS` is a PER-DAY (non-cumulative) external-flow series, day-aligned to
+ * `valuesTS` (same length, same start day) — see
+ * utils/transactionHelpers.externalFlowImpact for what counts as a flow.
+ *
+ * A day whose prior value is zero/negative (nothing invested yet, or a fully
+ * liquidated position) has no meaningful return — the index holds flat through it
+ * rather than dividing by zero.
+ */
+function toGrowthIndex(valuesTS, flowTS, base = 100) {
+  if (!valuesTS.length) return [];
+  if (!valuesTS[0]) return valuesTS.map(() => null);
+
+  const index = [base];
+  for (let i = 1; i < valuesTS.length; i++) {
+    const prev = valuesTS[i - 1];
+    if (!(prev > 0)) { index.push(index[i - 1]); continue; }
+    const ret = (valuesTS[i] - (flowTS[i] || 0)) / prev;
+    index.push(index[i - 1] * ret);
+  }
+  return index;
 }
 
 /**
@@ -255,8 +301,10 @@ function buildTransactionsTS(byAccount, pricesBySymbol, accountsById = {}, initi
 }
 
 module.exports = {
+  buildCashTS,
   buildAssetTS,
   buildNetWorthTS,
   buildTransactionsTS,
   seedPricesBefore,
+  toGrowthIndex,
 };

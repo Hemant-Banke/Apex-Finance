@@ -18,6 +18,21 @@ export const ACCOUNT_TYPES = [
   { value: 'other',      label: 'Other' },
 ];
 
+// Benchmarks selectable in the growth view's comparison overlay (PriceGrapher /
+// CompareIndexDialog). Yahoo Finance symbols for market indices — verified to
+// resolve on /v8/finance/chart. Kept short and curated rather than open search:
+// an index isn't a holding, so it doesn't belong in MarketSearch's instrument list.
+export const BENCHMARK_INDICES = [
+  { symbol: '^NSEI',             label: 'Nifty 50' },
+  { symbol: '^CNX100',           label: 'Nifty 100' },
+  { symbol: '^CRSLDX',           label: 'Nifty 500' },
+  { symbol: 'NIFTYMIDCAP150.NS', label: 'Nifty Midcap 150' },
+  { symbol: '^NSEBANK',          label: 'Nifty Bank' },
+  { symbol: '^BSESN',            label: 'Sensex' },
+  { symbol: '^GSPC',             label: 'S&P 500' },
+  { symbol: '^IXIC',             label: 'Nasdaq Composite' },
+];
+
 export const TRANSACTION_TYPES = [
   { value: 'income',     label: 'Income' },
   { value: 'expense',    label: 'Expense' },

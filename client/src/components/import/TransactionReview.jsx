@@ -9,6 +9,8 @@ import TypePicker from '../forms/TypePicker';
 import MarketSearch from '../market/MarketSearch';
 import Modal from '../ui/Modal';
 import { accountOptions } from '../../lib/accountPickerOptions';
+import ConfidenceBadge from './ConfidenceBadge';
+import { useToast } from '../../context/ToastContext';
 
 const TODAY = new Date().toISOString().split('T')[0];
 
@@ -23,7 +25,8 @@ function toDateInput(iso) {
 }
 
 export default function TransactionReview({ data, accounts, accountId, onBack, onDone }) {
-  const { transactions: raw, bankName, accountName, aiParsed } = data;
+  const toast = useToast();
+  const { transactions: raw, bankName, accountName, aiParsed, confidence } = data;
 
   const today = new Date().toISOString().split('T')[0];
 
@@ -41,11 +44,14 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         notes:      tx.notes || '',
         toAccount:  '',
         editing:    false,
-        // Whether the trade settles against the account's cash. A buy is tracked
-        // independently of cash by default (the money usually left a different
-        // account); a sell's proceeds land in this one. Same default as the manual
-        // asset form — overridable per row below.
-        usesCashBalance: tx.type === 'sell',
+        // Whether the trade settles against the account's cash. ON for both sides here,
+        // unlike the manual asset form: a statement is a record of what one account
+        // DID, so a buy printed on it was paid for out of that account and a sell was
+        // credited to it. Defaulting a buy to "off" (the manual default, where the
+        // money often moved in an account we are not recording) meant every imported
+        // broker statement had to be corrected row by row before it was true.
+        // Overridable per row, and in bulk from the header.
+        usesCashBalance: true,
       }))
   );
   const [submitting, setSubmitting] = useState(false);
@@ -67,6 +73,7 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
   const [accountRef, setAccountRef] = useState(accountRefs[0] || '');
   const multiAccount = accountRefs.length > 1;
 
+  // A row with no label is unattributed — always show it, whatever the filter.
   // A row with no label is unattributed — always show it, whatever the filter.
   const inScope = r =>
     (!rangeFrom || r.date >= rangeFrom) && (!rangeTo || r.date <= rangeTo) &&
@@ -208,9 +215,11 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
     // ONE request. Sending these one at a time made the server re-price every symbol
     // and re-aggregate every store per row — an N-row import cost N full store passes.
     try {
-      const { data } = await transactionsAPI.bulkCreate(payloads);
-      const count  = data.count ?? 0;
-      const failed = data.failed || [];
+      // Named `res`, not `data`: the component's own prop is called `data`, and a
+      // shadow here reads as the parsed statement when it is the server's reply.
+      const { data: res } = await transactionsAPI.bulkCreate(payloads);
+      const count  = res.count ?? 0;
+      const failed = res.failed || [];
 
       setImportedCount(count);
       if (failed.length) {
@@ -218,6 +227,30 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
       } else {
         setDone(true);
         setTimeout(() => onDone?.(), 1800);
+
+        // Undo for the whole batch. An import is the single largest thing this app
+        // does in one click — forty rows into the wrong account is a genuinely
+        // miserable thing to unpick by hand — and the offer has to survive the modal
+        // closing behind it, which is exactly what a toast does and this screen
+        // cannot. Nothing below touches component state: by the time anyone clicks,
+        // this component is unmounted.
+        const ids = (res.transactions || []).map(t => t._id).filter(Boolean);
+        if (ids.length) {
+          toast.success(`${count} transaction${count === 1 ? '' : 's'} imported`, {
+            action: {
+              label: 'Undo',
+              onClick: async () => {
+                try {
+                  await transactionsAPI.bulkDelete(ids);
+                  toast.success('Import undone');
+                } catch (e) {
+                  toast.error(e.response?.data?.message || 'Could not undo the import');
+                }
+                onDone?.();   // the parent's refresh — the modal is already closed
+              },
+            },
+          });
+        }
       }
     } catch (err) {
       setImportedCount(0);
@@ -365,6 +398,10 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         )}
 
         <span style={{ flex: 1 }} />
+
+        {/* One figure for the whole parse, beside the AI pill — that pill raises the
+            question of how much to trust this, and on its own never answered it. */}
+        <ConfidenceBadge summary={confidence} />
 
         {aiParsed && (
           <span
