@@ -1,9 +1,13 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import AssetIcon from '../market/AssetIcon';
 import Delta from '../ui/Delta';
 import SellButton from './SellButton';
+import ShowMore from '../ui/ShowMore';
 import { formatCurrency, formatNativeCurrency, compactIfLarge, formatPct, pnlColor } from '../../lib/utils';
 import { assetTypeLabel } from '../../lib/constants';
+import { viewPathFor } from '../../lib/markets';
+import { isSelfPricedHolding } from '../../lib/constants';
 
 /**
  * The holdings book, marked to market — the table this app never had.
@@ -48,7 +52,15 @@ export default function HoldingsTable({ holdings = [], onSell }) {
 
   const cell = { padding: '12px 14px', whiteSpace: 'nowrap' };
 
+  // The largest eight positions open (by whatever the table is sorted on); a long book
+  // keeps the rest behind the toggle, beneath the table rather than inside it.
   return (
+    <ShowMore items={rows} initial={8} noun="holdings"
+      // The table sits in a flush card, so the toggle supplies the card's own 24px gutter
+      // itself — full width inside it, exactly as in a padded card (Contributions). Not
+      // `width: auto`: a <button> shrinks to its label rather than stretching.
+      toggleStyle={{ width: 'calc(100% - 48px)', margin: '10px 24px 16px' }}
+      wrap={(body) => (
     <div style={{ overflowX: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 780 }}>
         <thead>
@@ -77,8 +89,10 @@ export default function HoldingsTable({ holdings = [], onSell }) {
           </tr>
         </thead>
 
-        <tbody>
-          {rows.map(h => (
+        <tbody>{body}</tbody>
+      </table>
+    </div>
+    )} render={(h) => (
             <tr key={h.symbol} className="table-row group" style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
               {/* Identity: the name leads, the ticker is the quieter reference beneath. */}
               <td style={{ ...cell, maxWidth: 260 }}>
@@ -86,7 +100,12 @@ export default function HoldingsTable({ holdings = [], onSell }) {
                   <AssetIcon symbol={h.symbol} type={h.type} size={26} />
                   <div style={{ minWidth: 0 }}>
                     <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>
-                      {h.name}
+                      {/* Anything with a market opens its page — an Indian listed stock its
+                          company page, every other quoted holding (a fund, a coin, physical
+                          gold → the gold price) the asset page. An FD has no market. */}
+                      {viewPathFor({ ...h, isManual: isSelfPricedHolding(h) })
+                        ? <Link to={viewPathFor({ ...h, isManual: isSelfPricedHolding(h) })} className="stock-link" style={{ color: 'inherit' }}>{h.name}</Link>
+                        : h.name}
                     </p>
                     <p className="figure text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
                       {h.symbol} · {assetTypeLabel(h.type)}
@@ -156,9 +175,6 @@ export default function HoldingsTable({ holdings = [], onSell }) {
                 </td>
               )}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    )} />
   );
 }

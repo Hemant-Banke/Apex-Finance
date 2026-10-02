@@ -19,6 +19,7 @@ import AssetIcon from '../components/market/AssetIcon';
 import { assetTypeLabel } from '../lib/constants';
 import { toCreatePayload } from '../lib/undo';
 import Card from '../components/ui/Card';
+import ShowMore from '../components/ui/ShowMore';
 import SectionHeader from '../components/ui/SectionHeader';
 import BackLink from '../components/ui/BackLink';
 import {
@@ -414,7 +415,9 @@ export default function AccountDetail() {
               </div>
             )}
 
-            {allocation.map((h, i) => (
+            {/* The largest six positions open; a long book keeps the rest behind the
+                toggle. The allocation bar above still draws all of them. */}
+            <ShowMore items={allocation} initial={6} noun="positions" toggleStyle={{ width: 'calc(100% - 48px)', margin: '10px 24px 16px' }} render={(h, i) => (
               <div key={h.symbol} className="data-row group"
                 style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none', gap: 16 }}>
                 {/* Identity. The real instrument mark, not the one grey parcel icon
@@ -471,7 +474,7 @@ export default function AccountDetail() {
                     something already on your own books. It belongs on the holding. */}
                 <SellButton onClick={() => setSellHolding(h)} title={`Sell ${h.name}`} />
               </div>
-            ))}
+            )} />
           </Card>
           {/* Say which basis these are on. The header above prices the account at
               market; these rows are what was paid, and the two figures sitting on one

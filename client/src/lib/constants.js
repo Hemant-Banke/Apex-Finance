@@ -18,19 +18,32 @@ export const ACCOUNT_TYPES = [
   { value: 'other',      label: 'Other' },
 ];
 
-// Benchmarks selectable in the growth view's comparison overlay (PriceGrapher /
-// CompareIndexDialog). Yahoo Finance symbols for market indices — verified to
-// resolve on /v8/finance/chart. Kept short and curated rather than open search:
-// an index isn't a holding, so it doesn't belong in MarketSearch's instrument list.
-export const BENCHMARK_INDICES = [
-  { symbol: '^NSEI',             label: 'Nifty 50' },
-  { symbol: '^CNX100',           label: 'Nifty 100' },
-  { symbol: '^CRSLDX',           label: 'Nifty 500' },
-  { symbol: 'NIFTYMIDCAP150.NS', label: 'Nifty Midcap 150' },
-  { symbol: '^NSEBANK',          label: 'Nifty Bank' },
-  { symbol: '^BSESN',            label: 'Sensex' },
-  { symbol: '^GSPC',             label: 'S&P 500' },
-  { symbol: '^IXIC',             label: 'Nasdaq Composite' },
+// Everything a growth view can be compared against (PriceGrapher / CompareIndexDialog) —
+// one catalogue for every chart, so net worth, an account, the Markets board and a company
+// page all offer the same yardsticks. Any symbol `/market/index-series` serves: Yahoo
+// symbols verified on /v8/finance/chart, plus `_METAL:gold|silver` — DOMESTIC metal in
+// ₹/g, because COMEX gold in dollars would chart the rupee's move as gold's. `INR:<symbol>`
+// is a foreign index converted at each day's rupee rate, so it compounds the index's growth
+// AND the dollar's: what an Indian investor holding it actually earned, beside the plain
+// index that says how that market did. `group` is the heading the dialog files it under.
+// Kept curated rather than open search: a benchmark is a yardstick, not a holding.
+export const BENCHMARKS = [
+  { symbol: '^NSEI',             label: 'Nifty 50',         group: 'Indian indices' },
+  { symbol: '^CNX100',           label: 'Nifty 100',        group: 'Indian indices' },
+  { symbol: '^CRSLDX',           label: 'Nifty 500',        group: 'Indian indices' },
+  { symbol: '^NSEMDCP50',        label: 'Nifty Midcap 50',  group: 'Indian indices' },
+  { symbol: 'NIFTYMIDCAP150.NS', label: 'Nifty Midcap 150', group: 'Indian indices' },
+  { symbol: '^NSEBANK',          label: 'Nifty Bank',       group: 'Indian indices' },
+  { symbol: '^CNXIT',            label: 'Nifty IT',         group: 'Indian indices' },
+  { symbol: '^BSESN',            label: 'Sensex',           group: 'Indian indices' },
+  { symbol: '^GSPC',             label: 'S&P 500',          group: 'Global' },
+  { symbol: '^IXIC',             label: 'Nasdaq Composite', group: 'Global' },
+  { symbol: 'INR:^GSPC',         label: 'S&P 500 in ₹',     group: 'Global, in rupees' },
+  { symbol: 'INR:^IXIC',         label: 'Nasdaq in ₹',      group: 'Global, in rupees' },
+  { symbol: '_METAL:gold',       label: 'Gold',             group: 'Assets' },
+  { symbol: '_METAL:silver',     label: 'Silver',           group: 'Assets' },
+  { symbol: 'BTC-INR',           label: 'Bitcoin',          group: 'Assets' },
+  { symbol: 'USDINR=X',          label: 'US dollar',        group: 'Assets' },
 ];
 
 export const TRANSACTION_TYPES = [

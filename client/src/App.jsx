@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import AppShell from './components/layout/AppShell';
+import DesktopOnly from './components/layout/DesktopOnly';
 import AppLoader from './components/ui/AppLoader';
 import TopProgressBar from './components/ui/TopProgressBar';
 import Login from './pages/Login';
@@ -11,6 +12,9 @@ import Accounts from './pages/Accounts';
 import AccountDetail from './pages/AccountDetail';
 import Transactions from './pages/Transactions';
 import Analytics from './pages/Analytics';
+import Markets from './pages/Markets';
+import Stock from './pages/Stock';
+import Asset from './pages/Asset';
 import Settings from './pages/Settings';
 
 function ProtectedRoute({ children }) {
@@ -29,6 +33,8 @@ function PublicRoute({ children }) {
 
 function App() {
   return (
+    // The whole site, login included — there is no part of Apex laid out for a phone.
+    <DesktopOnly>
     <AuthProvider>
       <ToastProvider>
         <TopProgressBar />
@@ -64,6 +70,21 @@ function App() {
               <AppShell><Analytics /></AppShell>
             </ProtectedRoute>
           } />
+          <Route path="/markets" element={
+            <ProtectedRoute>
+              <AppShell><Markets /></AppShell>
+            </ProtectedRoute>
+          } />
+          <Route path="/markets/stocks/:symbol" element={
+            <ProtectedRoute>
+              <AppShell><Stock /></AppShell>
+            </ProtectedRoute>
+          } />
+          <Route path="/markets/assets/:symbol" element={
+            <ProtectedRoute>
+              <AppShell><Asset /></AppShell>
+            </ProtectedRoute>
+          } />
           <Route path="/settings" element={
             <ProtectedRoute>
               <AppShell><Settings /></AppShell>
@@ -76,6 +97,7 @@ function App() {
         </Router>
       </ToastProvider>
     </AuthProvider>
+    </DesktopOnly>
   );
 }
 

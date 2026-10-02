@@ -121,7 +121,8 @@ export const subscriptionsAPI = {
 
 // Market data (search + historical prices via Yahoo Finance proxy)
 export const marketAPI = {
-  search: (q)            => api.get('/market/search', { params: { q } }),
+  // `indices` — include market indices (Markets can show one; nothing can buy one).
+  search: (q, indices)   => api.get('/market/search', { params: indices ? { q, indices: true } : { q } }),
   // assetType/purity are only needed for physical metal, which is priced per gram
   // by type rather than by symbol.
   price:  (symbol, date, opts = {}) => api.get('/market/price', { params: { symbol, date, ...opts } }),
@@ -129,6 +130,16 @@ export const marketAPI = {
   // A day-by-day close series for a benchmark index, carried forward across
   // non-trading days — feeds the growth view's comparison overlay.
   indexSeries: (symbol, days) => api.get('/market/index-series', { params: days ? { symbol, days } : { symbol } }),
+};
+
+// The Indian market as a whole (the Markets page) — not the user's money.
+export const marketsAPI = {
+  // `fresh` — the Markets refresh button: bypass the server's caches (it throttles).
+  overview: (fresh)              => api.get('/markets/overview', { params: fresh ? { fresh: true } : {} }),
+  sectors:  (fresh)              => api.get('/markets/sectors',  { params: fresh ? { fresh: true } : {} }),
+  stock:    (symbol, fresh)      => api.get(`/markets/stocks/${encodeURIComponent(symbol)}`, { params: fresh ? { fresh: true } : {} }),
+  asset:    (symbol, fresh)      => api.get(`/markets/assets/${encodeURIComponent(symbol)}`, { params: fresh ? { fresh: true } : {} }),
+  flows:    (sessions = 60, fresh) => api.get('/markets/flows',  { params: { sessions, ...(fresh ? { fresh: true } : {}) } }),
 };
 
 // Statement import (parse PDF / HTML / image)

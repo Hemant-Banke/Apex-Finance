@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { marketAPI, dashboardAPI } from '../../lib/api';
-import { Search, Loader2 } from 'lucide-react';
+import { Search, Loader2, Activity } from 'lucide-react';
 import AssetIcon from './AssetIcon';
 import Popover from '../ui/Popover';
 import { formatNativeCurrency } from '../../lib/utils';
@@ -43,6 +43,33 @@ const POPULAR = {
     { symbol: 'CL=F', name: 'Crude Oil', type: 'commodity' },
   ],
 };
+
+// The board shown ahead of POPULAR in `browse` mode (the Markets page), where the point
+// is to LOOK at an instrument rather than book a trade in it: the indices — which no one
+// can buy, so the asset form never lists them — and the domestic metal prices.
+const BROWSE = {
+  'Indices': [
+    { symbol: '^NSEI',             name: 'Nifty 50',         type: 'index' },
+    { symbol: '^BSESN',            name: 'Sensex',           type: 'index' },
+    { symbol: '^NSEBANK',          name: 'Nifty Bank',       type: 'index' },
+    { symbol: 'NIFTYMIDCAP150.NS', name: 'Nifty Midcap 150', type: 'index' },
+    { symbol: '^GSPC',             name: 'S&P 500',          type: 'index' },
+    { symbol: '^IXIC',             name: 'Nasdaq Composite', type: 'index' },
+  ],
+  'Metals & currency': [
+    { symbol: '_METAL:gold',   name: 'Gold (₹/g)',   type: 'gold' },
+    { symbol: '_METAL:silver', name: 'Silver (₹/g)', type: 'silver' },
+    { symbol: 'USDINR=X',      name: 'US dollar',    type: 'currency' },
+  ],
+};
+const BROWSE_ITEMS = Object.values(BROWSE).flat();
+
+/** Board entries whose name or ticker carries every typed token ("gold" → Gold ₹/g). */
+function matchBrowse(q) {
+  const toks = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!toks.length) return [];
+  return BROWSE_ITEMS.filter(b => toks.every(t => `${b.name} ${b.symbol}`.toLowerCase().includes(t)));
+}
 
 // Manual / unlisted assets — price auto-fetch is skipped for these. `keywords`
 // let a free-text query surface the right option (e.g. "house" → Real Estate).
@@ -118,6 +145,9 @@ function matchOwned(holdings, q) {
 // Per-category header meta — an emoji marker + colour-coded accent, so the empty
 // state reads as an organised board, not a flat list.
 const CATEGORY_META = {
+  // The same pulse line AssetIcon draws for an index, so header and rows agree.
+  'Indices':               { emoji: <Activity size={14} strokeWidth={2.25} color="#8ea0b8" />, accent: 'var(--color-text-secondary)' },
+  'Metals & currency':     { emoji: '🥇', accent: '#fbbf24' },
   'Popular Indian Stocks': { emoji: '🇮🇳', accent: 'var(--color-accent)' },
   'Popular US Stocks':     { emoji: '🇺🇸', accent: '#60a5fa' },
   'Popular ETFs':          { emoji: '🧺', accent: 'var(--color-chart-warm)' },
@@ -135,6 +165,8 @@ const TYPE_COLORS = {
   gold:        '#fbbf24',
   fd:          '#22c55e',
   epf_nps:     '#60a5fa',
+  index:       'var(--color-text-secondary)',
+  currency:    '#22c55e',
   other:       'var(--color-text-muted)',
 };
 
@@ -155,7 +187,7 @@ function TypeBadge({ type }) {
 // Compact clickable chip: icon + short ticker + company name. Lifts slightly and
 // warms to a gilt hairline on hover so the board feels tactile.
 function SecurityChip({ s, onPick, dashed = false, sub }) {
-  const short = s.symbol.replace('.NS', '').replace('-USD', '').replace('=F', '');
+  const short = s.symbol.startsWith('_METAL:') ? 'Domestic' : s.symbol.replace('.NS', '').replace('-USD', '').replace('=F', '');
   const rest = dashed ? 'transparent' : 'var(--color-bg-elevated)';
   return (
     <button
@@ -187,7 +219,7 @@ function CategoryHeader({ label, emoji, accent }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 9 }}>
       {emoji
-        ? <span style={{ fontSize: '0.95rem', flexShrink: 0 }}>{emoji}</span>
+        ? <span style={{ fontSize: '0.95rem', flexShrink: 0, display: 'inline-flex' }}>{emoji}</span>
         : <span style={{ width: 6, height: 6, borderRadius: '50%', background: accent, flexShrink: 0, boxShadow: `0 0 8px -1px ${accent}` }} />}
       <p className="eyebrow" style={{ margin: 0 }}>{label}</p>
       <span style={{ flex: 1, height: 1, background: 'var(--color-border-subtle)' }} />
@@ -224,8 +256,21 @@ function useDebounce(val, ms) {
  *   placeholder        — input placeholder text
  *   autoFocus          — focus input on mount
  *   inline             — render suggestions in normal flow (use inside modals/panels)
+ *   filter(security)   — keep only securities passing it, in EVERY group (holdings,
+ *                        popular board, market hits); manual assets are offered only
+ *                        when there is no filter. The Markets page passes "NSE-listed
+ *                        equity", since only those have a company page.
+ *   size               — 'md' (default, the dialog's command-palette field) | 'sm'
+ *                        (a page-header field)
+ *   panelWidth         — results panel width when it should be wider than the field
+ *   browse             — Markets: searching to VIEW, not to trade. Market indices are
+ *                        included and an Indices / Metals board leads the popular one.
  */
-export default function MarketSearch({ onSelect, placeholder = 'Search your holdings, stocks, ETFs, crypto, funds…', autoFocus = true, inline = false }) {
+export default function MarketSearch({
+  onSelect, placeholder = 'Search your holdings, stocks, ETFs, crypto, funds…', autoFocus = true, inline = false,
+  filter = null, size = 'md', panelWidth, browse = false,
+}) {
+  const keep = filter || (() => true);
   const [query, setQuery]       = useState('');
   const [results, setResults]   = useState([]);
   const [owned, setOwned]       = useState([]);
@@ -269,12 +314,12 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
     let cancelled = false;
     setLoading(true);
     setError('');
-    marketAPI.search(debouncedQ)
+    marketAPI.search(debouncedQ, browse)
       .then(r => { if (!cancelled) setResults(r.data || []); })
       .catch(() => { if (!cancelled) setError('Search unavailable'); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [debouncedQ]);
+  }, [debouncedQ, browse]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const showResults = query.trim().length > 0;
@@ -288,12 +333,19 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
   // Shared panel content (results or popular grid) — a render helper, not a
   // nested component, so it doesn't remount on every keystroke.
   const renderResults = () => {
-    const manualMatches = matchManual(query);
-    const ownedMatches  = matchOwned(owned, query);
+    const manualMatches = filter ? [] : matchManual(query);
+    const ownedMatches  = matchOwned(owned, query).filter(h => keep(ownedToSecurity(h)));
     // A symbol you own that the market also lists is ONE instrument, and the owned row
     // is the one that knows what you hold — so the market's copy of it goes.
     const ownedSymbols  = new Set(ownedMatches.map(h => h.symbol));
-    const marketResults = results.filter(r => !ownedSymbols.has(r.symbol));
+    // In browse mode the board's own entries answer first — Yahoo has no "domestic gold
+    // per gram", and its index hits come back named in capitals ("NIFTY 50").
+    const boardMatches  = browse ? matchBrowse(query).filter(keep) : [];
+    const boardSymbols  = new Set(boardMatches.map(b => b.symbol));
+    const marketResults = [
+      ...boardMatches,
+      ...results.filter(r => !ownedSymbols.has(r.symbol) && !boardSymbols.has(r.symbol) && keep(r)),
+    ];
 
     const nothing = marketResults.length === 0 && manualMatches.length === 0 && ownedMatches.length === 0;
     if (error && nothing) {
@@ -372,7 +424,7 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
                 overflow: 'hidden', overflowWrap: 'anywhere',
               }}>{r.name}</span>
               <span style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                <span className="figure">{r.symbol}</span>{r.exchange ? ` · ${r.exchange}` : ''}
+                <span className="figure">{r.symbol.startsWith("_METAL:") ? "Domestic price" : r.symbol}</span>{r.exchange ? ` · ${r.exchange}` : ''}
                 {/* Same-named fund plans (Direct/Regular, Growth/IDCW) are only
                     distinguishable by NAV — Yahoo exposes the plan nowhere. */}
                 {r.nav != null && (
@@ -422,6 +474,12 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
     );
   };
 
+  // The pre-typing board, through the same filter as the results.
+  const ownedBoard = owned.filter(h => keep(ownedToSecurity(h)));
+  const popularBoard = Object.entries(browse ? { ...BROWSE, ...POPULAR } : POPULAR)
+    .map(([category, items]) => [category, items.filter(keep)])
+    .filter(([, items]) => items.length);
+
   const renderPanel = () => showResults ? renderResults() : (
     /* Empty state — a colour-coded board of popular markets + manual options */
     <div style={{ padding: '16px 16px 14px' }}>
@@ -429,11 +487,11 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
       {/* Your own holdings lead the board. Adding to something you already own is the
           commonest reason this dialog is open, and for a manual asset it is the only
           route to it that does not involve retyping its name exactly. */}
-      {owned.length > 0 && (
+      {ownedBoard.length > 0 && (
         <div style={{ marginBottom: 18 }}>
           <CategoryHeader label="Your holdings" emoji="📌" accent="var(--color-accent)" />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-            {owned.slice(0, 8).map(h => (
+            {ownedBoard.slice(0, 8).map(h => (
               <SecurityChip key={`own-${h.symbol}`} s={ownedToSecurity(h)} onPick={select}
                 sub={`${qtyLabel(h.qty)} held`} />
             ))}
@@ -441,7 +499,7 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
         </div>
       )}
 
-      {Object.entries(POPULAR).map(([category, items]) => (
+      {popularBoard.map(([category, items]) => (
         <div key={category} style={{ marginBottom: 18 }}>
           <CategoryHeader
             label={category}
@@ -455,29 +513,34 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
       ))}
 
       {/* Manual / Unlisted — set off by a gilt hairline; these are self-priced */}
-      <div className="gilt-rule" style={{ margin: '4px 0 14px' }} />
-      <CategoryHeader label="Manual · self-priced" emoji="✍️" accent="var(--color-text-muted)" />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
-        {MANUAL.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} dashed />)}
-      </div>
+      {!filter && (
+        <>
+          <div className="gilt-rule" style={{ margin: '4px 0 14px' }} />
+          <CategoryHeader label="Manual · self-priced" emoji="✍️" accent="var(--color-text-muted)" />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            {MANUAL.map(s => <SecurityChip key={s.symbol} s={s} onPick={select} dashed />)}
+          </div>
+        </>
+      )}
     </div>
   );
+  const sm = size === 'sm';
 
   return (
     <div style={{ position: inline ? 'static' : 'relative' }}>
       {/* Search input — prominent, command-palette style */}
       <div ref={searchBoxRef} style={{
-        display: 'flex', alignItems: 'center', gap: 12,
+        display: 'flex', alignItems: 'center',
         background: 'var(--color-bg-input)',
         border: `1px solid ${focused ? 'var(--color-accent)' : 'var(--color-border)'}`,
-        borderRadius: 'var(--radius)',
-        padding: '14px 16px',
+        borderRadius: sm ? 9 : 'var(--radius)',
+        padding: sm ? '8px 12px' : '14px 16px', gap: sm ? 8 : 12,
         boxShadow: focused ? 'inset 0 1px 2px rgba(0,0,0,0.25), 0 0 0 3px var(--color-accent-dim)' : 'inset 0 1px 2px rgba(0,0,0,0.25)',
         transition: 'border-color 0.2s, box-shadow 0.2s'
       }}>
         {loading
-          ? <Loader2 size={18} style={{ color: 'var(--color-accent)', flexShrink: 0, animation: 'spin 0.6s linear infinite' }} />
-          : <Search size={18} style={{ color: focused ? 'var(--color-accent)' : 'var(--color-text-muted)', flexShrink: 0, transition: 'color 0.2s' }} />
+          ? <Loader2 size={sm ? 14 : 18} style={{ color: 'var(--color-accent)', flexShrink: 0, animation: 'spin 0.6s linear infinite' }} />
+          : <Search size={sm ? 14 : 18} style={{ color: focused ? 'var(--color-accent)' : 'var(--color-text-muted)', flexShrink: 0, transition: 'color 0.2s' }} />
         }
         <input
           ref={inputRef}
@@ -485,9 +548,10 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
           onChange={e => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
           placeholder={placeholder}
+          autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
           style={{
             flex: 1, background: 'none', border: 'none', outline: 'none',
-            color: 'var(--color-text-primary)', fontSize: '1rem', fontFamily: 'inherit'
+            color: 'var(--color-text-primary)', fontSize: sm ? '0.875rem' : '1rem', fontFamily: 'inherit'
           }}
         />
         {query && (
@@ -514,7 +578,7 @@ export default function MarketSearch({ onSelect, placeholder = 'Search your hold
       {/* Floating dropdown — portaled, always on top of the modal. The Popover
           panel supplies the surface (bg + border + radius + shadow). */}
       {!inline && (
-        <Popover anchorRef={searchBoxRef} open={focused} onClose={() => setFocused(false)} maxHeight={480}>
+        <Popover anchorRef={searchBoxRef} open={focused} onClose={() => setFocused(false)} maxHeight={480} width={panelWidth}>
           {renderPanel()}
         </Popover>
       )}

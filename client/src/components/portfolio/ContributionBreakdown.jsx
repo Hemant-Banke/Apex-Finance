@@ -4,6 +4,9 @@ import { compactIfLarge, formatCurrency, formatPct, pnlColor } from '../../lib/u
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import Spinner from '../ui/Spinner';
+import ShowMore from '../ui/ShowMore';
+import SegmentedControl from '../ui/SegmentedControl';
+import DivergingBar from '../ui/DivergingBar';
 import AssetIcon from '../market/AssetIcon';
 
 /**
@@ -44,50 +47,32 @@ import AssetIcon from '../market/AssetIcon';
  * never could.
  */
 
+// Keys are the day counts the endpoint takes (0 = all time), as strings for the picker.
 const WINDOWS = [
-  { label: '1M',  days: 30   },
-  { label: '6M',  days: 182  },
-  { label: '1Y',  days: 365  },
-  { label: 'All', days: 0    },
+  { key: '30',  label: '1M'  },
+  { key: '182', label: '6M'  },
+  { key: '365', label: '1Y'  },
+  { key: '0',   label: 'All' },
 ];
 
 const TOP_N   = 10;
 const TRACK   = 132;   // px the diverging bar spans, zero at its centre
-const HALF    = TRACK / 2;
-const PP_COL  = 78;
-const RET_COL = 66;
-const GAIN_COL = 84;
+const PP_COL  = 84;
+const RET_COL = 74;
+const GAIN_COL = 100;
 const GAP     = 14;
 
-function WindowPicker({ days, onChange }) {
-  return (
-    <div style={{ display: 'flex', gap: 4 }}>
-      {WINDOWS.map(w => (
-        <button key={w.label} onClick={() => onChange(w.days)}
-          className="text-xs font-medium"
-          style={{
-            padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-            border: '1px solid ' + (days === w.days ? 'var(--color-accent-dim)' : 'var(--color-border-subtle)'),
-            background: days === w.days ? 'var(--color-accent-dim)' : 'transparent',
-            color: days === w.days ? 'var(--color-accent)' : 'var(--color-text-muted)',
-          }}>
-          {w.label}
-        </button>
-      ))}
-    </div>
-  );
-}
 
 /** The column names, so four numeric columns are a table rather than a wall. */
 function Head() {
-  const cell = { fontSize: '0.625rem', letterSpacing: '0.1em', textAlign: 'right', flexShrink: 0 };
+  const cell = { textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap' };
   return (
     <div className="flex items-center" style={{ gap: GAP, paddingBottom: 10, borderBottom: '1px solid var(--color-border-subtle)' }}>
       <span style={{ width: 26, flexShrink: 0 }} />
-      <span className="heading-sm" style={{ flex: 1, minWidth: 0, fontSize: '0.625rem', letterSpacing: '0.1em' }}>Holding</span>
-      <span className="heading-sm" style={{ ...cell, width: GAIN_COL }}>Gain</span>
-      <span className="heading-sm" style={{ ...cell, width: RET_COL }}>Return</span>
-      <span className="heading-sm" style={{ ...cell, width: TRACK + GAP + PP_COL }}>Contribution</span>
+      <span className="col-head" style={{ flex: 1, minWidth: 0 }}>Holding</span>
+      <span className="col-head" style={{ ...cell, width: GAIN_COL }}>Gain</span>
+      <span className="col-head" style={{ ...cell, width: RET_COL }}>Return</span>
+      <span className="col-head" style={{ ...cell, width: TRACK + GAP + PP_COL }}>Contribution</span>
     </div>
   );
 }
@@ -145,7 +130,7 @@ export default function ContributionBreakdown() {
         eyebrow="Contribution"
         size="sm"
         style={{ marginBottom: 18 }}
-        action={<WindowPicker days={days} onChange={setDays} />}
+        action={<SegmentedControl options={WINDOWS} value={String(days)} onChange={k => setDays(Number(k))} ariaLabel="Window" />}
       />
 
       {loading ? <Spinner height={200} /> : !rows.length ? (
@@ -156,12 +141,15 @@ export default function ContributionBreakdown() {
         </div>
       ) : (
         <div style={{ overflowX: 'auto' }}>
-          <div style={{ minWidth: 560 }}>
+          <div style={{ minWidth: 620 }}>
             <Head />
 
-            {rows.map(r => {
+            {/* Ranked by signed gain, so the biggest contributors AND the worst
+                detractors stay open — the middle, the holdings that barely moved the
+                total, folds. The Total line still reconciles to every row, shown or not. */}
+            <ShowMore items={rows} ends initial={6} noun="holdings"
+              render={(r) => {
               const pos  = (r.contributionPp || 0) >= 0;
-              const w    = Math.max(2, (Math.abs(r.contributionPp || 0) / maxPp) * HALF);
 
               return (
                 <div key={r.symbol} className="flex items-center"
@@ -184,42 +172,36 @@ export default function ContributionBreakdown() {
                     )}
                   </div>
 
-                  <span className="figure text-sm" style={{ width: GAIN_COL, textAlign: 'right', flexShrink: 0, color: pnlColor(r.gain) }}>
+                  <span className="figure text-sm" style={{ width: GAIN_COL, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', color: pnlColor(r.gain) }}>
                     {compactIfLarge(r.gain)}
                   </span>
 
-                  <span className="figure text-xs" style={{ width: RET_COL, textAlign: 'right', flexShrink: 0, color: r.returnPct == null ? 'var(--color-text-muted)' : pnlColor(r.returnPct) }}>
+                  <span className="figure text-xs" style={{ width: RET_COL, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', color: r.returnPct == null ? 'var(--color-text-muted)' : pnlColor(r.returnPct) }}>
                     {r.returnPct == null ? '—' : formatPct(r.returnPct, 1)}
                   </span>
 
-                  <div style={{ position: 'relative', width: TRACK, height: 7, flexShrink: 0 }}>
-                    <span style={{ position: 'absolute', left: HALF, top: -3, bottom: -3, width: 1, background: 'var(--color-border)' }} />
-                    <span style={{
-                      position: 'absolute', top: 0, height: 7, width: w, borderRadius: 2,
-                      ...(pos ? { left: HALF } : { left: HALF - w }),
-                      background: pos ? 'var(--color-success)' : 'var(--color-danger)',
-                      opacity: r.rest ? 0.45 : 0.85,
-                    }} />
+                  <div style={{ width: TRACK, flexShrink: 0 }}>
+                    <DivergingBar value={r.contributionPp || 0} max={maxPp} height={7} muted={r.rest} />
                   </div>
 
-                  <span className="figure text-sm" style={{ width: PP_COL, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(r.contributionPp) }}>
+                  <span className="figure text-sm" style={{ width: PP_COL, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', fontWeight: 500, color: pnlColor(r.contributionPp) }}>
                     {r.contributionPp == null ? '—' : `${pos ? '+' : '−'}${Math.abs(r.contributionPp).toFixed(2)} pp`}
                   </span>
                 </div>
               );
-            })}
-
+              }} />
             {/* The reconciliation: the rows above add up to exactly this. Without it
-                they are a list of plausible-looking numbers. */}
+                they are a list of plausible-looking numbers. It sits AFTER the fold
+                toggle — a "show all" beneath the total read as a row of the table. */}
             <div className="flex items-center"
-              style={{ gap: GAP, padding: '13px 0 0', marginTop: 2, borderTop: '1px solid var(--color-accent-dim)' }}>
+              style={{ gap: GAP, padding: '13px 0 0', marginTop: 8, borderTop: '1px solid var(--color-accent-dim)' }}>
               <span style={{ width: 26, flexShrink: 0 }} />
               <span className="text-sm" style={{ flex: 1, minWidth: 0, color: 'var(--color-accent)' }}>Total</span>
-              <span className="figure text-sm" style={{ width: GAIN_COL, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(totals.gain) }}>
+              <span className="figure text-sm" style={{ width: GAIN_COL, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', fontWeight: 500, color: pnlColor(totals.gain) }}>
                 {compactIfLarge(totals.gain || 0)}
               </span>
               <span style={{ width: RET_COL, flexShrink: 0 }} />
-              <span className="figure text-sm" style={{ width: TRACK + GAP + PP_COL, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(totals.returnPct) }}>
+              <span className="figure text-sm" style={{ width: TRACK + GAP + PP_COL, textAlign: 'right', flexShrink: 0, whiteSpace: 'nowrap', fontWeight: 500, color: pnlColor(totals.returnPct) }}>
                 {totals.returnPct == null ? '—' : formatPct(totals.returnPct, 2)}
               </span>
             </div>

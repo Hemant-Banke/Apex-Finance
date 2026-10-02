@@ -197,6 +197,7 @@ export default function TypePicker({
                 value={query}
                 onChange={e => setQuery(e.target.value)}
                 placeholder="Search…"
+                autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false}
                 style={{ width: '100%', height: 34, padding: '0 10px', background: 'var(--color-bg-elevated)', border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)', color: 'var(--color-text-primary)', fontSize: '0.8125rem', fontFamily: 'inherit', outline: 'none' }}
               />
             </div>

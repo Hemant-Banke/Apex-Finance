@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Activity } from 'lucide-react';
 import { isManualSymbol } from '../../lib/constants';
 
 /**
@@ -30,6 +31,8 @@ const TYPE_TINT = {
   silver:      '#b8c2cc',
   fd:          '#3fbf9a',
   epf_nps:     '#60a5fa',
+  index:       '#8ea0b8',
+  currency:    '#3fbf9a',
   other:       '#8ea0b8',
 };
 
@@ -45,6 +48,7 @@ const TYPE_EMOJI = {
   silver:      '🥈',
   fd:          '🏦',
   epf_nps:     '🛡️',
+  currency:    '💱',
   other:       '💠',
 };
 
@@ -52,7 +56,8 @@ const TYPE_EMOJI = {
 // (popular commodities, crypto, and every manual / unlisted option).
 const SYMBOL_EMOJI = {
   'BTC-USD': '🟠', 'ETH-USD': '🔷', 'SOL-USD': '🟣', 'BNB-USD': '🟡',
-  'GC=F': '🥇', 'SI=F': '🥈', 'CL=F': '🛢️',
+  'GC=F': '🥇', 'SI=F': '🥈', 'CL=F': '🛢️', '_METAL:gold': '🥇', '_METAL:silver': '🥈',
+  'BTC-INR': '🟠', 'USDINR=X': '💵',
   'REAL-ESTATE': '🏠', 'FIXED-DEPOSIT': '🏦', 'EPF-NPS': '🛡️',
   'PHYS-GOLD': '🥇', 'PHYS-SILVER': '🥈', 'PRIVATE-EQUITY': '📊',
   'UNLISTED-BOND': '📜', 'OTHER-ASSET': '💠',
@@ -112,6 +117,16 @@ export default function AssetIcon({ symbol, type = 'other', size = 34 }) {
           onError={() => setFailedSym(symbol)}
           style={{ width: '100%', height: '100%', objectFit: 'contain', padding: 4 }}
         />
+      </div>
+    );
+  }
+
+  // An index is a yardstick, not a holding: a pulse line in its own tint, never an
+  // emoji (the old 📉 read as "this is falling" on every index, whatever it did).
+  if (type === 'index') {
+    return (
+      <div aria-hidden="true" style={{ ...shell, background: `color-mix(in srgb, ${tint} 14%, var(--color-bg-elevated))` }}>
+        <Activity size={Math.round(size * 0.5)} strokeWidth={2} color={tint} />
       </div>
     );
   }

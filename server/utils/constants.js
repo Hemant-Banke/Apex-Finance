@@ -6,6 +6,19 @@ const YF_HEADERS = {
   'Accept': 'application/json',
 };
 
+/**
+ * A full browser identity, for the Indian sources (NSE, its archives, moneycontrol) that
+ * refuse the short agent above. Kept SEPARATE because the reverse is also true: Yahoo
+ * answers a full desktop-Chrome agent with an empty body, so one shared header cannot
+ * serve both.
+ */
+const BROWSER_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+  'Accept': 'application/json, text/html;q=0.9, */*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Referer': 'https://www.nseindia.com/',
+};
+
 const ACCOUNT_TYPES = [
   'bank', 
   'brokerage', 
@@ -50,6 +63,7 @@ module.exports = {
   DAY_MS,
   IST_OFFSET_MS,
   YF_HEADERS,
+  BROWSER_HEADERS,
 
   ACCOUNT_TYPES, 
   TRANSACTION_TYPES, 

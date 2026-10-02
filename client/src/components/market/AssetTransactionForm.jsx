@@ -329,7 +329,8 @@ export default function AssetTransactionForm({
           <div className="field">
             <label className="label">Asset Name</label>
             <input type="text" value={customName} onChange={e => setCustomName(e.target.value)}
-              className="input-field" placeholder="e.g. Mumbai Apartment" required />
+              className="input-field" placeholder="e.g. Mumbai Apartment" required
+              autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} />
           </div>
           <div className="field">
             <label className="label">Asset Type</label>

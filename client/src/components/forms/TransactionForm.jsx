@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { transactionsAPI, subscriptionsAPI } from '../../lib/api';
-import { formatCurrency, todayStr } from '../../lib/utils';
+import { formatCurrency, todayStr, toDateInput } from '../../lib/utils';
 import { TRANSACTION_TYPES } from '../../lib/constants';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
@@ -20,10 +20,6 @@ const TYPE_META = {
   adjustment: { label: 'Adjustment', Icon: SlidersHorizontal, color: 'var(--color-accent)' },
 };
 const FORM_TYPE_KEYS = TRANSACTION_TYPES.filter(t => !['buy', 'sell'].includes(t.value)).map(t => t.value);
-
-function toDateInput(date) {
-  return new Date(date).toISOString().split('T')[0];
-}
 
 function initFromTransaction(tx) {
   return {

@@ -3,60 +3,31 @@ import { dashboardAPI } from '../lib/api';
 import { getCategoryMap, describeCategory } from '../lib/categoryNames';
 import {
   formatCurrency, compactIfLarge, formatPct, pnlColor, CHART_COLORS,
+  monthLabel, pctChange,
 } from '../lib/utils';
 import { assetTypeLabel } from '../lib/constants';
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
-} from 'recharts';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
 import Divider from '../components/ui/Divider';
+import SegmentedControl from '../components/ui/SegmentedControl';
+import ShowMore from '../components/ui/ShowMore';
 import Delta from '../components/ui/Delta';
 import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import { useToast } from '../context/ToastContext';
 import PriceGrapher from '../components/charts/PriceGrapher';
-import ChartTooltip from '../components/charts/ChartTooltip';
+import CashflowChart from '../components/charts/CashflowChart';
 import HoldingsTable from '../components/portfolio/HoldingsTable';
 import AllocationBar from '../components/portfolio/AllocationBar';
 import ContributionBreakdown from '../components/portfolio/ContributionBreakdown';
 
-const RANGES = [6, 12, 24];
-
 /**
- * The month range, placed ON the section it governs.
- *
- * It used to live in the page header, which read as though it scoped the whole page —
- * but it has never touched the portfolio, whose holdings and P&L are a position as of
- * now, not a window. It only ever drove the cashflow and the expense breakdown, so it
- * belongs on those.
+ * The month ranges, picked ON the section they govern (a `SegmentedControl` in the
+ * cashflow card). They used to live in the page header, which read as though they scoped
+ * the whole page — but they never touched the portfolio, whose holdings and P&L are a
+ * position as of now, not a window. They only drive the cashflow and the breakdowns.
  */
-function RangePicker({ months, onChange }) {
-  return (
-    <div style={{ display: 'flex', gap: 4 }}>
-      {RANGES.map(r => (
-        <button key={r} onClick={() => onChange(r)}
-          className="text-xs font-medium"
-          style={{
-            padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-            border: '1px solid ' + (months === r ? 'var(--color-accent-dim)' : 'var(--color-border-subtle)'),
-            background: months === r ? 'var(--color-accent-dim)' : 'transparent',
-            color: months === r ? 'var(--color-accent)' : 'var(--color-text-muted)',
-          }}>
-          {r}M
-        </button>
-      ))}
-    </div>
-  );
-}
-
-const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-
-/** "2026-03" → "Mar 2026". */
-function monthLabel(key) {
-  const m = /^(\d{4})-(\d{2})$/.exec(key || '');
-  return m ? `${MONTH_NAMES[+m[2] - 1]} ${m[1]}` : key;
-}
+const RANGES = [6, 12, 24].map(m => ({ key: String(m), label: `${m}M` }));
 
 /**
  * The months, one line each — what came in, what went out, what was kept.
@@ -79,11 +50,11 @@ const COL = { money: 108, rate: 62 };
 function LedgerHead() {
   return (
     <div className="flex items-center" style={{ gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--color-border-subtle)' }}>
-      <span className="heading-sm" style={{ flex: 1, minWidth: 96, fontSize: '0.625rem', letterSpacing: '0.1em' }}>Month</span>
-      <span className="heading-sm" style={{ width: COL.money, textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>In</span>
-      <span className="heading-sm" style={{ width: COL.money, textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>Out</span>
-      <span className="heading-sm" style={{ width: COL.money, textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>Net</span>
-      <span className="heading-sm" style={{ width: COL.rate,  textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>Saved</span>
+      <span className="col-head" style={{ flex: 1, minWidth: 96 }}>Month</span>
+      <span className="col-head" style={{ width: COL.money, textAlign: 'right', flexShrink: 0 }}>In</span>
+      <span className="col-head" style={{ width: COL.money, textAlign: 'right', flexShrink: 0 }}>Out</span>
+      <span className="col-head" style={{ width: COL.money, textAlign: 'right', flexShrink: 0 }}>Net</span>
+      <span className="col-head" style={{ width: COL.rate,  textAlign: 'right', flexShrink: 0 }}>Saved</span>
     </div>
   );
 }
@@ -103,59 +74,70 @@ function MonthlyLedger({ rows, avgIncome, avgExpense, overallRate }) {
       <div style={{ minWidth: 480 }}>
         <LedgerHead />
 
-        {ordered.map(m => (
-          <div key={m.month} className="flex items-center"
-            style={{ gap: 16, padding: '11px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
-            <span className="text-sm" style={{ flex: 1, minWidth: 96, color: 'var(--color-text-secondary)', display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
-              <span className="truncate">{monthLabel(m.month)}</span>
-              {/* The ranking, on the row it is about — where "Best month · ₹42k" in a
-                  tile could only ever be a claim about a row you then had to find. */}
-              {(m.month === best || m.month === worst) && (
-                <span className="text-xs" style={{ flexShrink: 0, opacity: 0.85, color: m.month === best ? 'var(--color-success)' : 'var(--color-danger)' }}>
-                  {m.month === best ? 'best' : 'worst'}
-                </span>
-              )}
+        {/* The latest six months open; the rest of the window is a click away. The
+            summary line stays put beneath whatever is showing — it is the ledger's
+            answer, and it describes the WHOLE window either way. */}
+        <ShowMore items={ordered} initial={6} noun="months"
+          // `body`, not `rows`: the summary below counts the ledger's own `rows` (every
+          // active month), and a parameter of that name would silently count the six
+          // rows on screen instead.
+          wrap={(body) => (
+            <>
+              {body}
+          {/* The totals line of a ledger, in the app's own accent so it reads as the
+              summary OF the rows above rather than one more of them. */}
+          <div className="flex items-center"
+            style={{ gap: 16, padding: '13px 0 0', marginTop: 2, borderTop: '1px solid var(--color-accent-dim)' }}>
+            <span className="text-sm" style={{ flex: 1, minWidth: 96, color: 'var(--color-accent)' }}>
+              Average month
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)', marginLeft: 8 }}>
+                over {rows.length} active month{rows.length === 1 ? '' : 's'}
+              </span>
             </span>
-            <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-secondary)' }}>
-              {compactIfLarge(m.income)}
+            <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-primary)' }}>
+              {compactIfLarge(avgIncome)}
             </span>
-            <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-secondary)' }}>
-              {compactIfLarge(m.expense)}
+            <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-primary)' }}>
+              {compactIfLarge(avgExpense)}
             </span>
-            <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(m.net) }}>
-              {compactIfLarge(m.net)}
+            <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(avgNet) }}>
+              {compactIfLarge(avgNet)}
             </span>
-            {/* A month with no income has no rate at all — that is not the same as
-                having kept none of it, so it prints as nothing rather than 0%. */}
             <span className="figure text-sm" style={{ width: COL.rate, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-muted)' }}>
-              {m.savingsRate == null ? '—' : `${m.savingsRate.toFixed(0)}%`}
+              {overallRate == null ? '—' : `${overallRate.toFixed(0)}%`}
             </span>
           </div>
-        ))}
-
-        {/* The totals line of a ledger, in the app's own accent so it reads as the
-            summary OF the rows above rather than one more of them. */}
-        <div className="flex items-center"
-          style={{ gap: 16, padding: '13px 0 0', marginTop: 2, borderTop: '1px solid var(--color-accent-dim)' }}>
-          <span className="text-sm" style={{ flex: 1, minWidth: 96, color: 'var(--color-accent)' }}>
-            Average month
-            <span className="text-xs" style={{ color: 'var(--color-text-muted)', marginLeft: 8 }}>
-              over {rows.length} active month{rows.length === 1 ? '' : 's'}
-            </span>
-          </span>
-          <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-primary)' }}>
-            {compactIfLarge(avgIncome)}
-          </span>
-          <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-primary)' }}>
-            {compactIfLarge(avgExpense)}
-          </span>
-          <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(avgNet) }}>
-            {compactIfLarge(avgNet)}
-          </span>
-          <span className="figure text-sm" style={{ width: COL.rate, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-muted)' }}>
-            {overallRate == null ? '—' : `${overallRate.toFixed(0)}%`}
-          </span>
-        </div>
+            </>
+          )}
+          render={(m) => (
+            <div key={m.month} className="flex items-center"
+              style={{ gap: 16, padding: '11px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
+              <span className="text-sm" style={{ flex: 1, minWidth: 96, color: 'var(--color-text-secondary)', display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+                <span className="truncate">{monthLabel(m.month)}</span>
+                {/* The ranking, on the row it is about — where "Best month · ₹42k" in a
+                    tile could only ever be a claim about a row you then had to find. */}
+                {(m.month === best || m.month === worst) && (
+                  <span className="text-xs" style={{ flexShrink: 0, opacity: 0.85, color: m.month === best ? 'var(--color-success)' : 'var(--color-danger)' }}>
+                    {m.month === best ? 'best' : 'worst'}
+                  </span>
+                )}
+              </span>
+              <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-secondary)' }}>
+                {compactIfLarge(m.income)}
+              </span>
+              <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-secondary)' }}>
+                {compactIfLarge(m.expense)}
+              </span>
+              <span className="figure text-sm" style={{ width: COL.money, textAlign: 'right', flexShrink: 0, fontWeight: 500, color: pnlColor(m.net) }}>
+                {compactIfLarge(m.net)}
+              </span>
+              {/* A month with no income has no rate at all — that is not the same as
+                  having kept none of it, so it prints as nothing rather than 0%. */}
+              <span className="figure text-sm" style={{ width: COL.rate, textAlign: 'right', flexShrink: 0, color: 'var(--color-text-muted)' }}>
+                {m.savingsRate == null ? '—' : `${m.savingsRate.toFixed(0)}%`}
+              </span>
+            </div>
+          )} />
       </div>
     </div>
   );
@@ -187,9 +169,6 @@ function MonthlyLedger({ rows, avgIncome, avgExpense, overallRate }) {
  * hue that is not really its own, and the column reconciles to 100% again.
  */
 const TOP_N = 8;
-
-/** A change against the window before. `null` when there is no base to measure from. */
-const pctChange = (now, before) => (before > 0 ? ((now - before) / before) * 100 : null);
 
 function CategoryBreakdown({ title, rows, months, invert, emptyText }) {
   // The denominator is the rows' OWN sum, so the percentages in the column are
@@ -239,8 +218,11 @@ function CategoryBreakdown({ title, rows, months, invert, emptyText }) {
         }
       />
       {shown.length ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>
-          {shown.map((cat, i) => {
+        // The five largest open; the tail — and the "Other" row folding the rest of
+        // it — sits behind the toggle. The card's own total above still covers it all.
+        <ShowMore items={shown} initial={5} noun="categories"
+          wrap={(body) => <div style={{ display: 'flex', flexDirection: 'column', gap: 15 }}>{body}</div>}
+          render={(cat, i) => {
             const change = pctChange(cat.total, cat.prev || 0);
             const avg    = cat.count ? cat.total / cat.count : 0;
 
@@ -293,8 +275,7 @@ function CategoryBreakdown({ title, rows, months, invert, emptyText }) {
                 </div>
               </div>
             );
-          })}
-        </div>
+          }} />
       ) : <Empty text={emptyText} height={160} />}
     </Card>
   );
@@ -326,13 +307,15 @@ function AllocationDrift({ allocation }) {
           "+3.2" beside a weight is not. The header costs one line and turns the block
           from a wall of numbers into a table. */}
       <div className="flex items-center justify-between" style={{ gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--color-border-subtle)' }}>
-        <span className="heading-sm" style={{ flex: 1, fontSize: '0.625rem', letterSpacing: '0.1em' }}>Asset type</span>
-        <span className="heading-sm" style={{ width: 150, textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>Cost → Value</span>
-        <span className="heading-sm" style={{ width: 110, textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>P&L</span>
-        <span className="heading-sm" style={{ width: 92,  textAlign: 'right', fontSize: '0.625rem', letterSpacing: '0.1em', flexShrink: 0 }}>Weight · drift</span>
+        <span className="col-head" style={{ flex: 1 }}>Asset type</span>
+        <span className="col-head" style={{ width: 150, textAlign: 'right', flexShrink: 0 }}>Cost → Value</span>
+        <span className="col-head" style={{ width: 110, textAlign: 'right', flexShrink: 0 }}>P&L</span>
+        <span className="col-head" style={{ width: 92,  textAlign: 'right', flexShrink: 0 }}>Weight · drift</span>
       </div>
 
-      {allocation.map((a, i) => {
+      {/* Largest weights first (the order the portfolio service ranks them in); the
+          small asset types fold away. */}
+      <ShowMore items={allocation} initial={5} noun="asset types" render={(a, i) => {
         const costWeight = totalCost ? (a.invested / totalCost) * 100 : 0;
         const drift      = a.weight - costWeight;
         const pnl        = a.value - a.invested;
@@ -370,7 +353,7 @@ function AllocationDrift({ allocation }) {
             </div>
           </div>
         );
-      })}
+      }} />
     </div>
   );
 }
@@ -425,6 +408,9 @@ export default function Analytics() {
   const hasPortfolio = holdings.length > 0;
 
   const flowMonths = ie.filter(m => m.income || m.expense);
+  // A month with no activity has no cashflow at all — not a cashflow of zero. Left as 0,
+  // the month you are only a day into dragged the net line down to the axis as if it had
+  // broken exactly even; as null, the line simply stops where the record does.
   const totalIncome  = ie.reduce((s, m) => s + m.income, 0);
   const totalExpense = ie.reduce((s, m) => s + m.expense, 0);
   const overallRate  = totalIncome > 0 ? ((totalIncome - totalExpense) / totalIncome) * 100 : null;
@@ -552,27 +538,14 @@ export default function Analytics() {
         <SectionHeader
           eyebrow="Cashflow"
           size="sm"
-          sub={`Income against spending, month by month · last ${months} months`}
+          sub={`Income, spending and the net cashflow between them · last ${months} months`}
           style={{ marginBottom: 20 }}
-          action={<RangePicker months={months} onChange={setMonths} />}
+          action={<SegmentedControl options={RANGES} value={String(months)} onChange={k => setMonths(Number(k))} ariaLabel="Months" />}
         />
 
         {flowMonths.length ? (
           <>
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={ie} barGap={4} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <XAxis dataKey="month" tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false} dy={8}
-                  tickFormatter={m => m.slice(5)} interval="preserveStartEnd" />
-                <YAxis tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false}
-                  tickFormatter={v => `₹${v >= 1000 ? (v/1000).toFixed(0)+'k' : v}`} width={46} />
-                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} content={<ChartTooltip />} isAnimationActive={false} />
-                <Legend wrapperStyle={{ fontSize: 11, color: '#626873', paddingTop: 12 }} iconType="circle" iconSize={7} />
-                {/* Income and expense are the same measure on one scale, so they share an
-                    axis honestly. Green/red here are STATUS, not category identity. */}
-                <Bar dataKey="income"  name="Income"  fill="var(--color-success)" radius={[4,4,0,0]} maxBarSize={22} />
-                <Bar dataKey="expense" name="Expense" fill="var(--color-danger)"  radius={[4,4,0,0]} maxBarSize={22} />
-              </BarChart>
-            </ResponsiveContainer>
+            <CashflowChart rows={ie} />
 
             <Divider gilt margin={22} />
 

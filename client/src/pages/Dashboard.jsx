@@ -3,17 +3,15 @@ import { Link } from 'react-router-dom';
 import { dashboardAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import {
-  formatCurrency, compactIfLarge, formatDate, formatPct, pnlColor, CHART_COLORS,
+  formatCurrency, compactIfLarge, formatDate, formatPct, pnlColor,
 } from '../lib/utils';
 import { Wallet } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import PriceGrapher from '../components/charts/PriceGrapher';
-import ChartTooltip from '../components/charts/ChartTooltip';
+import CashflowChart from '../components/charts/CashflowChart';
 import Card from '../components/ui/Card';
 import Spinner from '../components/ui/Spinner';
 import Delta from '../components/ui/Delta';
-import Divider from '../components/ui/Divider';
 import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import TransactionRow from '../components/transactions/TransactionRow';
@@ -207,14 +205,6 @@ export default function Dashboard() {
   const holdings = portfolio?.holdings || [];
   const hasPortfolio = holdings.length > 0;
 
-  const savings = summary?.monthlySavings || 0;
-  const rate    = summary?.savingsRate;
-
-  // This month against the trailing average — a number is only interesting next to the
-  // one it should be compared with.
-  const avgExpense = summary?.avgMonthlyExpense || 0;
-  const vsAverage  = avgExpense ? (summary.monthlyExpense - avgExpense) : 0;
-
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
@@ -281,56 +271,21 @@ export default function Dashboard() {
             size="sm"
             style={{ marginBottom: 20 }}
             action={
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                Net per month
-              </span>
+              <Link to="/analytics" className="text-xs font-medium"
+                style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
+                Details →
+              </Link>
             }
           />
+          {/* The same chart Analytics opens its cashflow card with; the month-by-month
+              ledger stays there. */}
           {incExp.some(m => m.income || m.expense) ? (
-            <ResponsiveContainer width="100%" height={200}>
-              {/* One measure, one axis: the NET of each month. Income and expense as
-                  paired bars invited reading the gap between two scales; the thing the
-                  user actually wants to know is whether the month was up or down. */}
-              <BarChart data={incExp} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
-                <XAxis dataKey="month" tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false} dy={8}
-                  tickFormatter={m => m.slice(5)} />
-                <YAxis tick={{ fill: '#626873', fontSize: 11 }} axisLine={false} tickLine={false}
-                  tickFormatter={v => `₹${Math.abs(v) >= 1000 ? (v/1000).toFixed(0)+'k' : v}`} width={46} />
-                <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} content={<ChartTooltip />} isAnimationActive={false} />
-                <Bar dataKey="net" name="Net" radius={[4, 4, 0, 0]} maxBarSize={30}>
-                  {/* Colour states the sign — a surplus month and a deficit month are
-                      different in kind, not just in magnitude. */}
-                  {incExp.map((m, i) => (
-                    <Cell key={i} fill={m.net >= 0 ? 'var(--color-success)' : 'var(--color-danger)'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+            <CashflowChart rows={incExp} height={240} />
           ) : (
-            <div className="flex items-center justify-center" style={{ height: 200 }}>
+            <div className="flex items-center justify-center" style={{ height: 240 }}>
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No income or expenses yet</p>
             </div>
           )}
-
-          <Divider gilt margin={20} />
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px 32px' }}>
-            <div>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>This month's saving</p>
-              <p className="figure text-sm" style={{ color: pnlColor(savings), fontWeight: 500, marginTop: 4 }}>
-                {compactIfLarge(savings)}
-                {rate != null && <span style={{ opacity: 0.7 }}> · {rate.toFixed(0)}% of income</span>}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Spend vs 6-month average</p>
-              <p className="figure text-sm" style={{ marginTop: 4, color: vsAverage > 0 ? 'var(--color-danger)' : 'var(--color-success)' }}>
-                {avgExpense
-                  ? <>{compactIfLarge(summary.monthlyExpense)} vs {compactIfLarge(avgExpense)}</>
-                  : '—'}
-              </p>
-            </div>
-          </div>
         </Card>
 
         <Card flush>

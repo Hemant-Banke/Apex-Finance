@@ -24,6 +24,7 @@ const { resolveUnitPrice }        = require('../utils/assetPricing');
 const { directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { midnight, todayMs, t1Ms, todayStr, t1Str, toDateStr } = require('../utils/helpers');
 const { DAY_MS }                  = require('../utils/constants');
+const mfService                   = require('./mfService');
 
 /** How far back to look for a T-1 close: enough to clear a weekend plus a holiday run. */
 const PREV_CLOSE_LOOKBACK_DAYS = 10;
@@ -153,7 +154,7 @@ async function computeRealised(userId) {
  * honest rather than counting it as zero.
  */
 async function priceBook(book) {
-  if (!book.length) return { live: {}, prev: {} };
+  if (!book.length) return { live: {}, prev: {}, dayBase: {} };
 
   const t1 = t1Ms();
   const [latest, history] = await Promise.all([
@@ -163,12 +164,27 @@ async function priceBook(book) {
 
   const live = {};
   const prev = {};
+  const dayBase = {};   // what today's move is measured FROM — `prev`, except for a fund
 
   for (const pos of book) {
     const sym     = pos.assetSymbol;
     const basisMs = midnight(pos.lastTransactionDate || pos.firstPurchaseDate || todayMs());
 
     const prevQuote = lastOnOrBefore(history[sym] || {}, t1)?.value ?? null;
+    let dayBaseQuote = prevQuote;
+
+    // A fund reprices once a day, and its NAV for today is published only at night. All
+    // day, then, its "latest" NAV IS yesterday's, and comparing it with yesterday's close
+    // reported every fund as unchanged. A fund's day change is its LAST NAV move: when the
+    // latest NAV is the one already on or before T-1, compare it with the NAV before that.
+    // Only the day change's BASE moves — the fund is still VALUED at its latest NAV.
+    if (mfService.isMfSymbol(sym) && latest[sym] != null) {
+      const navDays = Object.keys(history[sym] || {}).map(Number).filter(d => d <= t1).sort((a, b) => a - b);
+      const lastNav = navDays.length ? history[sym][navDays[navDays.length - 1]] : null;
+      if (lastNav != null && Math.abs(lastNav - latest[sym]) < 1e-9 && navDays.length > 1) {
+        dayBaseQuote = history[sym][navDays[navDays.length - 2]];
+      }
+    }
 
     // A missing LIVE quote falls back to the last market CLOSE, not to book cost.
     //
@@ -195,9 +211,16 @@ async function priceBook(book) {
       basisMs,
       atMs: t1,
     });
+
+    dayBase[sym] = dayBaseQuote === prevQuote ? prev[sym] : resolveUnitPrice(pos, {
+      marketPrice: dayBaseQuote,
+      basePrice:   pos.avgPricePerUnit ?? null,
+      basisMs,
+      atMs: t1,
+    });
   }
 
-  return { live, prev };
+  return { live, prev, dayBase };
 }
 
 /**
@@ -229,7 +252,7 @@ async function getPortfolio(userId, { live: wantLive = true } = {}) {
     };
   }
 
-  const { live, prev } = await priceBook(book);
+  const { live, prev, dayBase: dayFrom } = await priceBook(book);
 
   // `priced` tells the client whether these are real market numbers or a book-value
   // stand-in, so the UI can say so instead of quietly showing a P&L of exactly zero.
@@ -263,9 +286,10 @@ async function getPortfolio(userId, { live: wantLive = true } = {}) {
     // Derived from the two PRICES, not from `value` — in settled mode `value` is itself
     // the T-1 figure, so `value - prevValue` would collapse to zero and the day's move
     // would vanish the moment you switched basis.
-    const comparable = livePrice != null && prevPrice != null;
-    const prevValue  = comparable ? pos.units * prevPrice : 0;
-    const dayChange  = comparable ? pos.units * (livePrice - prevPrice) : 0;
+    const fromPrice  = dayFrom[sym];
+    const comparable = livePrice != null && fromPrice != null;
+    const prevValue  = comparable ? pos.units * fromPrice : 0;
+    const dayChange  = comparable ? pos.units * (livePrice - fromPrice) : 0;
     dayBase += prevValue;
 
     const unrealisedPnl = value - invested;

@@ -259,7 +259,6 @@ export default function Transactions() {
                 key={tx._id}
                 tx={tx}
                 divided={i > 0}
-                badge
                 incoming={incoming}
                 subtitle={<>
                   {tx.account?.name}

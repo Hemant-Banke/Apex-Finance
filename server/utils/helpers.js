@@ -102,7 +102,22 @@ function resolveQuoteName({ symbol = '', shortname = '', longname = '' } = {}) {
   return isPlaceholder ? (longname.trim() || symbol) : short;
 }
 
+/**
+ * A number as a page or feed prints it — "-10,148.41", "12%", "3,68,608", "&nbsp;1,234 " —
+ * or null for blank, "-" and anything unparseable. Never 0 for "no figure": a missing
+ * value read as zero is a fact the source never stated.
+ */
+function parseNumber(v) {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (v == null) return null;
+  const t = String(v).replace(/&nbsp;|[,%\s]/g, '');
+  if (!t || t === '-') return null;
+  const n = parseFloat(t);
+  return Number.isFinite(n) ? n : null;
+}
+
 module.exports = {
+  parseNumber,
   midnight,
   toDateStr,
   todayMs,

@@ -20,6 +20,7 @@ const transactionRoutes = require('./routes/transactions');
 const dashboardRoutes = require('./routes/dashboard');
 const networthRoutes = require('./routes/networth');
 const marketRoutes = require('./routes/market');
+const marketsRoutes = require('./routes/markets');
 const categoryRoutes = require('./routes/categories');
 const importRoutes = require('./routes/import');
 const subscriptionRoutes = require('./routes/subscriptions');
@@ -51,6 +52,17 @@ mongoose.connection.once('open', async () => {
 
   refreshMf();
   setInterval(refreshMf, 24 * 60 * 60 * 1000).unref();
+
+  // Market flows (FII/DII, MF, participant OI) for the Markets page. The exchanges
+  // publish each evening and no upstream keeps more than a short window, so this runs
+  // hourly and the history ACCUMULATES in `marketflows`. Non-blocking, like the MF cache.
+  const indiaMarket = require('./services/indiaMarketService');
+  const refreshFlows = () => indiaMarket.refreshFlows()
+    .then(({ saved, sources }) => console.log(`Market flows refreshed — ${saved} day(s) written`, sources))
+    .catch(e => console.error('Market flow refresh failed:', e.message));
+
+  refreshFlows();
+  setInterval(refreshFlows, 60 * 60 * 1000).unref();
 });
 
 // Middleware
@@ -66,6 +78,7 @@ app.use('/api/subscriptions', subscriptionRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/networth', networthRoutes);
 app.use('/api/market', marketRoutes);
+app.use('/api/markets', marketsRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/import', importRoutes);
 

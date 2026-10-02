@@ -2,66 +2,17 @@ const express = require('express');
 const { protect } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { HttpError, badRequest, notFound } = require('../utils/httpError');
-const { DAY_MS, YF_HEADERS } = require('../utils/constants');
-const { mapQuoteType, resolveQuoteName, nowMs, toDateStr, todayMs, midnight } = require('../utils/helpers');
+const { DAY_MS } = require('../utils/constants');
+const { nowMs, toDateStr, todayMs, midnight } = require('../utils/helpers');
 const { isPurityAsset } = require('../utils/assetPricing');
+const { fxSymbol, normalizeCurrency } = require('../utils/currency');
 const {
-  fetchChart, closesByDay, lastOnOrBefore, fetchMetalPricePerGram, fetchFxRate,
+  fetchChart, closesByDay, lastOnOrBefore, fetchMetalPricePerGram, fetchFxRate, searchYahoo,
+  fetchHistoricPrices,
 } = require('../services/marketDataService');
 const mfService = require('../services/mfService');
+const sectorService = require('../services/sectorService');
 
-/** Yahoo's Morningstar-coded Indian mutual funds — replaced wholesale by AMFI. */
-const INDIAN_MF_SYMBOL = /^0P\w+\.(BO|NS)$/i;
-
-/** Type-ahead results, briefly. Users retype the same prefixes constantly. */
-const _yahooCache = new Map();
-const YAHOO_TTL_MS = 5 * 60 * 1000;
-
-/**
- * Yahoo's symbol search, with ONE retry.
- *
- * A first connection out of this process intermittently stalls for seconds while the
- * next is milliseconds — so a single tight-timeout attempt would hand the user an
- * empty result list for a perfectly good query ("AAPL" returned nothing). Retrying
- * once costs little and turns that into a hit.
- *
- * (Search is the one Yahoo endpoint that is not the chart API, so it is fetched here
- * rather than through marketDataService — it returns no prices.)
- */
-async function searchYahoo(q) {
-  const key = q.trim().toLowerCase();
-  const hit = _yahooCache.get(key);
-  if (hit && Date.now() - hit.at < YAHOO_TTL_MS) return hit.results;
-
-  const url = `https://query1.finance.yahoo.com/v1/finance/search`
-            + `?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
-
-  let data = null;
-  for (let attempt = 0; attempt < 2 && !data; attempt++) {
-    try {
-      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(3000) });
-      if (resp.ok) data = await resp.json();
-    } catch { /* stalled — try once more on a fresh connection */ }
-  }
-  if (!data) return [];
-
-  const results = (data.quotes || [])
-    .filter(x => x.symbol && x.quoteType !== 'INDEX')
-    // Indian mutual funds are served from AMFI, never Yahoo: Yahoo lists them as
-    // opaque Morningstar codes (0P…), reports every plan of a fund under one
-    // identical name, and mixes in foreign cross-listings. Drop them outright.
-    .filter(x => !INDIAN_MF_SYMBOL.test(x.symbol))
-    .map(x => ({
-      symbol:   x.symbol,
-      name:     resolveQuoteName(x),
-      type:     mapQuoteType(x.quoteType),
-      exchange: x.exchDisp || x.exchange || '',
-      currency: x.currency || '',
-    }));
-
-  _yahooCache.set(key, { at: Date.now(), results });
-  return results;
-}
 
 /**
  * How well a result answers the query. Yahoo hits and AMFI funds are ranked TOGETHER
@@ -93,21 +44,27 @@ function relevanceTo(query) {
 const router = express.Router();
 router.use(protect);
 
-// GET /api/market/search?q=QUERY
+// GET /api/market/search?q=QUERY[&indices=true]
 router.get('/search', asyncHandler(async (req, res) => {
   const { q = '' } = req.query;
   if (q.trim().length < 1) return res.json([]);
+  // `?indices=true` — the Markets page, which can show an index (the asset form cannot buy one).
+  const indices = req.query.indices === 'true';
 
-  // The two sources are independent — hit them CONCURRENTLY, or the user waits for
-  // Yahoo and AMFI back to back. Neither is allowed to sink the other: a failing
-  // source contributes nothing rather than failing the whole search.
-  const [quotes, funds] = await Promise.all([
-    searchYahoo(q).catch(() => []),
+  // The sources are independent — hit them CONCURRENTLY, or the user waits for them
+  // back to back. None is allowed to sink the others: a failing source contributes
+  // nothing rather than failing the whole search. The Nifty 500 match is local and
+  // guarantees the NSE listing of an Indian company Yahoo's ten rows may miss.
+  const [quotes, funds, nse] = await Promise.all([
+    searchYahoo(q, { indices }).catch(() => []),
     mfService.searchSchemes(q, 8).catch(() => []),
+    sectorService.searchUniverse(q, 8).catch(() => []),
   ]);
 
+  // One row per symbol — the Nifty 500 row wins, as it carries the company's sector.
+  const seen = new Set(nse.map(r => r.symbol));
   const score = relevanceTo(q);
-  const merged = [...quotes, ...funds]
+  const merged = [...nse, ...quotes.filter(r => !seen.has(r.symbol)), ...funds]
     .map((r, i) => ({ r, i, s: score(r) }))
     .sort((a, b) => (b.s - a.s) || (a.i - b.i))   // stable within equal relevance
     .map(({ r }) => r);
@@ -228,26 +185,68 @@ router.get('/ohlc', asyncHandler(async (req, res) => {
   res.json({ symbol, interval, candles });
 }));
 
-// GET /api/market/index-series?symbol=%5ENSEI&days=N
+// GET /api/market/index-series?symbol=%5ENSEI&days=N   (or symbol=_METAL:gold|silver | AMFI:<code>)
 // A day-by-day CLOSE series for a market index/benchmark — used by the growth view's
 // comparison overlay, so it needs one close per CALENDAR day (carried forward across
 // non-trading days), not OHLC candles: it gets re-based against the app's own
 // day-indexed growth series, which has no notion of a trading calendar.
 router.get('/index-series', asyncHandler(async (req, res) => {
-  const { symbol, days } = req.query;
-  if (!symbol) throw badRequest('symbol is required');
+  const { days } = req.query;
+  if (!req.query.symbol) throw badRequest('symbol is required');
+  // `INR:<symbol>` — the same instrument as an Indian investor holding it would see it:
+  // each day's native close times that day's rupee rate, so the series compounds the
+  // asset's own growth AND the currency's. The S&P 500 in dollars says how America did;
+  // in rupees it says what money parked there did for you.
+  const inr    = String(req.query.symbol).startsWith('INR:');
+  const symbol = inr ? String(req.query.symbol).slice(4) : String(req.query.symbol);
 
   const daysNum = Math.max(1, parseInt(days, 10) || 3650);
   const now     = nowMs();
 
-  const result = await fetchChart(symbol, {
-    period1: Math.floor((now - daysNum * DAY_MS) / 1000),
-    period2: Math.floor(now / 1000),
-    interval: '1d',
-  }, 10000);
-  if (!result) throw new HttpError(502, 'Index data unavailable');
+  // `_METAL:gold` / `_METAL:silver` — DOMESTIC metal, INR per gram, priced exactly as a
+  // physical-metal holding is (spot future × the day's rupee × the duty/GST premium).
+  // COMEX gold in dollars would chart the rupee's move as if it were gold's.
+  const metal = /^_METAL:(gold|silver)$/.exec(symbol)?.[1];
+  let closes;
+  if (mfService.isMfSymbol(symbol)) {
+    // An Indian fund — its NAV history from AMFI (cached), never Yahoo.
+    closes = await mfService.getNavHistory(mfService.schemeCodeOf(symbol), now - daysNum * DAY_MS, now);
+  } else if (metal) {
+    const from = now - daysNum * DAY_MS;
+    closes = (await fetchHistoricPrices([{ assetSymbol: symbol, assetType: metal }], from, now))[symbol] || {};
+    if (!Object.keys(closes).length) throw new HttpError(502, 'Metal prices unavailable');
+  } else {
+    const result = await fetchChart(symbol, {
+      period1: Math.floor((now - daysNum * DAY_MS) / 1000),
+      period2: Math.floor(now / 1000),
+      interval: '1d',
+    }, 10000);
+    if (!result) throw new HttpError(502, 'Index data unavailable');
+    closes = closesByDay(result);
 
-  const closes = closesByDay(result);
+    const currency = inr ? normalizeCurrency(result.meta?.currency) : undefined;
+    if (currency) {
+      const fx = await fetchChart(fxSymbol(currency), {
+        period1: Math.floor((now - (daysNum + 10) * DAY_MS) / 1000),
+        period2: Math.floor(now / 1000),
+        interval: '1d',
+      }, 10000);
+      const rates = fx ? closesByDay(fx) : {};
+      // A missing rate is never treated as 1 (see utils/currency): a day with no rate
+      // on or before it is dropped rather than charted as dollars read as rupees.
+      // One forward pass over both sorted series (the rate carried forward across days
+      // the currency market was shut), rather than a search per day.
+      const rateDays = Object.keys(rates).map(Number).sort((a, b) => a - b);
+      const converted = {};
+      let i = -1;
+      for (const day of Object.keys(closes).map(Number).sort((a, b) => a - b)) {
+        while (i + 1 < rateDays.length && rateDays[i + 1] <= day) i++;
+        if (i >= 0 && closes[day] != null) converted[day] = closes[day] * rates[rateDays[i]];
+      }
+      if (!Object.keys(converted).length) throw new HttpError(502, 'Exchange rate unavailable');
+      closes = converted;
+    }
+  }
   const seen    = Object.keys(closes).map(Number);
   if (!seen.length) return res.json([]);
 

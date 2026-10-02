@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Check, Sparkles, ArrowRight, Pencil, Plus, RotateCcw, AlertCircle } from 'lucide-react';
 import { transactionsAPI } from '../../lib/api';
-import { formatCurrency, formatDate, todayStr } from '../../lib/utils';
+import { formatCurrency, formatDate, todayStr, toDateInput } from '../../lib/utils';
 import { useCategoryNames } from '../../lib/categoryNames';
 import CategoryPicker from '../forms/CategoryPicker';
 import DatePicker, { DateRangePicker } from '../forms/DatePicker';
@@ -20,10 +20,6 @@ const TYPE_PILL_COLOR = {
   expense: 'var(--color-danger)',
   transfer: 'var(--color-chart-warm)',
 };
-
-function toDateInput(iso) {
-  return iso ? iso.split('T')[0] : TODAY;
-}
 
 export default function TransactionReview({ data, accounts, accountId, onBack, onDone }) {
   const toast = useToast();

@@ -6,9 +6,9 @@ import {
 } from 'recharts';
 import { TrendingUp, TrendingDown, Plus, Activity, CandlestickChart } from 'lucide-react';
 import { networthAPI, marketAPI } from '../../lib/api';
-import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS } from '../../lib/utils';
-import { BENCHMARK_INDICES } from '../../lib/constants';
-import ChartTooltip from './ChartTooltip';
+import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT as MONTHS } from '../../lib/utils';
+import { BENCHMARKS } from '../../lib/constants';
+import ChartTooltip, { TooltipPanel } from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
 
 // ── Default config ────────────────────────────────────────────────────────────
@@ -22,7 +22,6 @@ const DEFAULT_RANGES = [
   { label: 'Max', days: null },
 ];
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -164,14 +163,21 @@ function nextDayStr(dateStr) {
 
 // ── Benchmark comparison (growth view) ──────────────────────────────────────
 
-/** A stable colour per benchmark — its position in the curated list, not a hash,
- *  so the same index always gets the same colour across sessions. */
-const benchmarkColor = (symbol) => {
-  const i = BENCHMARK_INDICES.findIndex(b => b.symbol === symbol);
-  return CHART_COLORS[i >= 0 ? i % CHART_COLORS.length : 0];
-};
-const benchmarkLabel = (symbol) =>
-  BENCHMARK_INDICES.find(b => b.symbol === symbol)?.label ?? symbol;
+/**
+ * Colour and label lookups for the overlays. Colour is the benchmark's place in the
+ * SELECTION, not in the catalogue: the catalogue (indices, global markets, metals,
+ * bitcoin, the dollar) is longer than the eight-hue palette, and colouring by catalogue
+ * position would wrap — Gold and Nifty 50 both drawn gold the moment both were picked.
+ * By selection order, up to eight lines on one chart are always eight distinct hues.
+ * A row not yet picked previews the hue it WOULD take: the next free slot.
+ */
+const benchmarkLookups = (list, selected) => ({
+  colorOf: (symbol) => {
+    const i = selected.indexOf(symbol);
+    return CHART_COLORS[(i >= 0 ? i : selected.length) % CHART_COLORS.length];
+  },
+  labelOf: (symbol) => list.find(b => b.symbol === symbol)?.label ?? symbol,
+});
 
 /** The Recharts dataKey a benchmark's rebased series is merged into. */
 const cmpKey = (symbol) => `cmp:${symbol}`;
@@ -286,37 +292,29 @@ function OhlcTooltip({ active, payload, formatValue }) {
   const d    = payload[0].payload;
   const isUp = d.close >= d.open;
   const rows = [
-    { label: 'Open',  value: d.open,  color: 'rgba(255,255,255,0.75)' },
-    { label: 'High',  value: d.high,  color: '#22c55e' },
-    { label: 'Low',   value: d.low,   color: '#ef4444' },
-    { label: 'Close', value: d.close, color: isUp ? '#22c55e' : '#ef4444' },
+    { label: 'Open',  value: d.open,  color: 'var(--color-text-secondary)' },
+    { label: 'High',  value: d.high,  color: 'var(--color-success)' },
+    { label: 'Low',   value: d.low,   color: 'var(--color-danger)' },
+    { label: 'Close', value: d.close, color: isUp ? 'var(--color-success)' : 'var(--color-danger)' },
   ];
   return (
-    <div style={{
-      background: 'rgba(10,10,10,0.88)',
-      backdropFilter: 'blur(14px)',
-      WebkitBackdropFilter: 'blur(14px)',
-      border: '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 10,
-      overflow: 'hidden',
-      minWidth: 175,
-    }}>
-      <div style={{ padding: '6px 12px', background: 'rgba(255,255,255,0.05)', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(255,255,255,0.38)', margin: 0, fontFamily: 'var(--font-mono)' }}>
+    <TooltipPanel minWidth={175}>
+      <div style={{ padding: '6px 12px', background: 'var(--color-bg-elevated)', borderBottom: '1px solid var(--color-border-subtle)' }}>
+        <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', margin: 0, fontFamily: 'var(--font-mono)' }}>
           {formatOhlcDate(d.date)}
         </p>
       </div>
       <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {rows.map(({ label, value, color }) => (
           <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
-            <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.38)' }}>{label}</span>
+            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{label}</span>
             <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', color, whiteSpace: 'nowrap' }}>
               {formatValue(value)}
             </span>
           </div>
         ))}
       </div>
-    </div>
+    </TooltipPanel>
   );
 }
 
@@ -387,11 +385,10 @@ function SelectionLabel({ viewBox, pct, abs, pos, benchmarks = [], formatValue, 
     <foreignObject x={x} y={y} width={FRAME_W} height={FRAME_H} style={{ overflow: 'visible', pointerEvents: 'none' }}>
       <div style={{ display: 'flex', justifyContent: 'center' }}>
         <div style={{
-          background: 'rgba(10,10,10,0.9)',
-          backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--color-bg-popover)',
+          border: '1px solid var(--color-border-hover)',
           borderRadius: 9, padding: '6px 11px', whiteSpace: 'nowrap',
-          boxShadow: '0 8px 24px -10px rgba(0,0,0,0.7)',
+          boxShadow: 'var(--shadow-popover)',
         }}>
           <p style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'rgba(255,255,255,0.4)', margin: '0 0 3px', ...mono }}>
             Period change
@@ -452,6 +449,14 @@ function SelectionLabel({ viewBox, pct, abs, pos, benchmarks = [], formatValue, 
  *   ranges                  — array of {label, days} (default: DEFAULT_RANGES).
  *   defaultRange            — label string for the initial range (default '1Y').
  *   refreshKey              — increment this to trigger a data refetch without remounting.
+ *   benchmarks              — the overlay catalogue [{symbol, label}] (default:
+ *                             BENCHMARKS). Any symbol `/market/index-series`
+ *                             serves — including `_METAL:gold|silver`.
+ *   defaultView             — 'complete' | 'growth' — the view to open on.
+ *   defaultCompare          — symbols overlaid from the start (growth view).
+ *   viewLabels              — { complete, growth, hint? } names for the two views (a
+ *                             share's "complete" view is its Price) and the growth
+ *                             button's tooltip.
  *   growthCapable           — show the Complete / Growth toggle. Growth strips every
  *                             external inflow/outflow out of the series and reindexes
  *                             it to 100 at its own first day, so what is plotted is
@@ -475,6 +480,10 @@ export default function PriceGrapher({
   defaultRange     = '1Y',
   refreshKey       = 0,
   growthCapable    = false,
+  benchmarks       = BENCHMARKS,
+  defaultView      = 'complete',
+  defaultCompare   = [],
+  viewLabels       = { complete: 'Complete', growth: 'Growth' },
 }) {
   // ── Unique gradient IDs — prevents cross-instance bleed when multiple
   //    PriceGraphers share the same SVG defs namespace ────────────────────────
@@ -486,15 +495,17 @@ export default function PriceGrapher({
   const initRange = ranges.find(r => r.label === defaultRange) ?? ranges[ranges.length - 2] ?? ranges[0];
   const [range,       setRange]       = useState(initRange);
   const [chartMode,   setChartMode]   = useState('line');  // 'line' | 'candle'
-  const [view,        setView]        = useState('complete'); // 'complete' | 'growth'
+  const [view,        setView]        = useState(defaultView); // 'complete' | 'growth'
   const [data,        setData]        = useState([]);
   const [ohlcData,    setOhlcData]    = useState([]);
   const [loading,     setLoading]     = useState(!staticData);
 
   // ── Benchmark comparison (growth view only) ───────────────────────────────
   const [compareOpen,    setCompareOpen]    = useState(false);
-  const [compareSymbols, setCompareSymbols] = useState([]);       // selected symbols
+  const [compareSymbols, setCompareSymbols] = useState(defaultCompare); // selected symbols
   const [compareSeries,  setCompareSeries]  = useState({});       // symbol -> [{date,close}]
+  const { colorOf: benchmarkColor, labelOf: benchmarkLabel } = useMemo(
+    () => benchmarkLookups(benchmarks, compareSymbols), [benchmarks, compareSymbols]);
 
   const growth = growthCapable && view === 'growth';
 
@@ -683,7 +694,7 @@ export default function PriceGrapher({
       return null;
     };
 
-    const benchmarks = Object.keys(compareRebased).map(sym => {
+    const measured = Object.keys(compareRebased).map(sym => {
       const arr = compareRebased[sym];
       const a = edge(arr, lo, hi, 1);
       const b = edge(arr, hi, lo, -1);
@@ -698,22 +709,34 @@ export default function PriceGrapher({
       };
     }).filter(Boolean);
 
-    return { x1: displayData[lo].date, x2: displayData[hi].date, abs, pct, pos: abs >= 0, benchmarks };
-  }, [selStart, selEnd, displayData, compareRebased]);
+    return { x1: displayData[lo].date, x2: displayData[hi].date, abs, pct, pos: abs >= 0, benchmarks: measured };
+  }, [selStart, selEnd, displayData, compareRebased, benchmarkColor, benchmarkLabel]);
 
   // ── Line chart: Y domain + gradient stop at opening price ─────────────────
   const pad  = (maxVal - minVal) * 0.05 || Math.abs(maxVal) * 0.02 || 1;
   const yMin = minVal - pad;
   const yMax = maxVal + pad;
   // The green/red split must sit exactly on the opening-value reference line.
-  // SVG gradients map to the RENDERED PATH's bounding box ([minVal,maxVal]), not
-  // the padded axis domain — so compute the offset in data-range space, or the
-  // colour break drifts off the reference line by `pad`.
-  const dataRng = maxVal - minVal;
-  const stopPct  = dataRng > 0 ? (1 - (openVal - minVal) / dataRng) * 100 : 50;
+  // A gradient's 0–100% spans the bounding box of the ELEMENT it paints, not the
+  // axis domain, so each element needs its own offset:
+  //   - the stroke's box is the primary line's own [min, max]. Benchmark overlays
+  //     widen the axis but not this path, so measuring against the comparison-wide
+  //     range dragged the split below the reference line whenever an index fell
+  //     further than the primary series did.
+  //   - the fill's box runs from the line down to the Area's baseline, which Recharts
+  //     puts at the domain floor (clamped to 0 when the domain straddles it).
+  const primary  = data.map(d => d.value).filter(v => v != null);
+  const pMin     = primary.length ? Math.min(...primary) : 0;
+  const pMax     = primary.length ? Math.max(...primary) : 0;
+  const fillBase = yMax <= 0 ? yMax : Math.max(yMin, 0);
   // Green wins the exact open-line pixel: begin red a hair BELOW the split so a
   // value sitting on the previous close renders green, not a red/green blend.
-  const stopOffsetRed = `${Math.min(100, stopPct + 0.6).toFixed(2)}%`;
+  const splitAt = (lo, hi) => {
+    const pct = hi > lo ? (1 - (openVal - lo) / (hi - lo)) * 100 : 50;
+    return `${Math.max(0, Math.min(100, pct + 0.6)).toFixed(2)}%`;
+  };
+  const stopOffsetRed  = splitAt(pMin, pMax);
+  const fillOffsetRed  = splitAt(Math.min(pMin, fillBase), Math.max(pMax, fillBase));
 
   const strokeColor = isFlat ? '#C9A96A' : `url(#${pgStrokeId})`;
   const fillColor   = isFlat ? `url(#${pgFlatFillId})` : `url(#${pgFillId})`;
@@ -763,7 +786,7 @@ export default function PriceGrapher({
         key: sym, value: lastOf(cmpKey(sym)), color: benchmarkColor(sym),
       })),
     ].filter(s => s.value != null);
-  }, [comparing, chartData, compareRebased, clr]);
+  }, [comparing, chartData, compareRebased, clr, benchmarkColor]);
 
   const wrapStyle = showCard ? {
     background: 'var(--color-bg-card)',
@@ -817,15 +840,15 @@ export default function PriceGrapher({
                   className={`pill-item${view === 'complete' ? ' active' : ''}`}
                   style={{ fontSize: 11, padding: '3px 9px' }}
                 >
-                  Complete
+                  {viewLabels.complete}
                 </button>
                 <button
                   onClick={() => setView('growth')}
                   className={`pill-item${view === 'growth' ? ' active' : ''}`}
                   style={{ fontSize: 11, padding: '3px 9px' }}
-                  title="Growth of the money itself, with deposits and withdrawals removed"
+                  title={viewLabels.hint || 'Growth of the money itself, with deposits and withdrawals removed'}
                 >
-                  Growth
+                  {viewLabels.growth}
                 </button>
               </div>
               {growth && (
@@ -946,13 +969,13 @@ export default function PriceGrapher({
               dataKey="date"
               ticks={ohlcTicks}
               tickFormatter={d => formatOhlcTick(d, ohlcSpan)}
-              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false} dy={8}
             />
             <YAxis
               domain={[ohlcYMin, ohlcYMax]}
               tickFormatter={fmtY}
-              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
             />
@@ -999,8 +1022,8 @@ export default function PriceGrapher({
               {/* Fill gradient: tinted green above open, tinted red below */}
               <linearGradient id={pgFillId} x1="0" y1="0" x2="0" y2="1">
                 <stop offset="0%"            stopColor="#22c55e" stopOpacity={0.13} />
-                <stop offset={stopOffsetRed} stopColor="#22c55e" stopOpacity={0.02} />
-                <stop offset={stopOffsetRed} stopColor="#ef4444" stopOpacity={0.02} />
+                <stop offset={fillOffsetRed} stopColor="#22c55e" stopOpacity={0.02} />
+                <stop offset={fillOffsetRed} stopColor="#ef4444" stopOpacity={0.02} />
                 <stop offset="100%"          stopColor="#ef4444" stopOpacity={0.10} />
               </linearGradient>
               {/* Flat fill: neutral teal tint */}
@@ -1021,13 +1044,13 @@ export default function PriceGrapher({
               dataKey="date"
               ticks={ticks}
               tickFormatter={d => formatTick(d, lineSpan)}
-              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false} dy={8}
             />
             <YAxis
               domain={[yMin, yMax]}
               tickFormatter={growth ? fmtYIndex : fmtY}
-              tick={{ fill: '#626873', fontSize: 10, fontFamily: 'var(--font-mono)' }}
+              tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
             />
@@ -1155,6 +1178,7 @@ export default function PriceGrapher({
           selected={compareSymbols}
           onChange={setCompareSymbols}
           colorOf={benchmarkColor}
+          options={benchmarks}
         />
       )}
     </div>

@@ -1,6 +1,27 @@
-import { formatCurrency, formatPct, pnlColor } from '../../lib/utils';
+import { formatCurrency, formatPct, pnlColor, MONTHS_SHORT as MONTHS } from '../../lib/utils';
 
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+/**
+ * The surface every chart tooltip in the app sits on — the popover surface, SOLID. It
+ * used to be translucent glass with a backdrop blur, which over a coloured chart (the
+ * sector map above all) smeared the marks behind it into the panel, so a tooltip about a
+ * falling sector could look faintly green. Custom tooltips use this shell too, so there
+ * is one tooltip look, not two.
+ */
+export function TooltipPanel({ children, minWidth = 170, style }) {
+  return (
+    <div style={{
+      background: 'var(--color-bg-popover)',
+      border: '1px solid var(--color-border-hover)',
+      boxShadow: 'var(--shadow-popover)',
+      borderRadius: 10,
+      overflow: 'hidden',
+      minWidth,
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
 
 /** Format YYYY-MM-DD → "Mar 15, 2024"  |  YYYY-MM → "Mar 2024"  |  other → as-is */
 function formatDateLabel(str) {
@@ -34,26 +55,18 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
   const dateLabel = formatDateLabel(payload[0]?.payload?.date || label);
 
   return (
-    <div style={{
-      background: 'rgba(10, 10, 10, 0.88)',
-      backdropFilter: 'blur(14px)',
-      WebkitBackdropFilter: 'blur(14px)',
-      border: '1px solid rgba(255,255,255,0.07)',
-      borderRadius: 10,
-      overflow: 'hidden',
-      minWidth: 170,
-    }}>
+    <TooltipPanel>
       {dateLabel && (
         <div style={{
           padding: '6px 12px',
-          background: 'rgba(255,255,255,0.05)',
-          borderBottom: '1px solid rgba(255,255,255,0.06)',
+          background: 'var(--color-bg-elevated)',
+          borderBottom: '1px solid var(--color-border-subtle)',
         }}>
           <p style={{
             fontSize: 10,
             textTransform: 'uppercase',
             letterSpacing: '0.08em',
-            color: 'rgba(255,255,255,0.38)',
+            color: 'var(--color-text-muted)',
             margin: 0,
             fontFamily: 'var(--font-mono)',
           }}>
@@ -72,14 +85,14 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
 
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.42)', whiteSpace: 'nowrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
                 {valueLabel || p.name}
               </span>
               <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8, whiteSpace: 'nowrap' }}>
                 <span style={{
                   fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums',
                   fontFamily: 'var(--font-mono)',
-                  color: p.color || p.fill || 'rgba(255,255,255,0.88)',
+                  color: p.color || p.fill || 'var(--color-text-primary)',
                 }}>
                   {formatValue(p.value)}
                 </span>
@@ -96,6 +109,6 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
           );
         })}
       </div>
-    </div>
+    </TooltipPanel>
   );
 }

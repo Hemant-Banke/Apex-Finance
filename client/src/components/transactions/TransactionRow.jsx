@@ -25,7 +25,7 @@ import { useCategoryNames } from '../../lib/categoryNames';
  * deliberately read-only. Set it on any list where some rows are actionable and some
  * are not; a wholly read-only feed leaves it off and gives up no space.
  */
-export default function TransactionRow({ tx, subtitle, badge = false, incoming, onEdit, onDelete, reserveActions = false, divided = false }) {
+export default function TransactionRow({ tx, subtitle, incoming, onEdit, onDelete, reserveActions = false, divided = false }) {
   const { label } = useCategoryNames();
 
   // One action button's footprint (13px icon + 4px padding each side), so an empty
@@ -56,8 +56,6 @@ export default function TransactionRow({ tx, subtitle, badge = false, incoming, 
           {subtitle}
         </p>
       </div>
-
-      {badge && <span className="badge badge-default" style={{ marginRight: 12 }}>{tx.type}</span>}
 
       <span
         className={`figure text-sm ${getTransactionColor(tx.type)}`}

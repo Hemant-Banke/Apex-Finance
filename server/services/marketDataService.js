@@ -9,7 +9,7 @@
  */
 
 const { DAY_MS, IST_OFFSET_MS, YF_HEADERS } = require('../utils/constants');
-const { midnight, todayMs, toDateStr } = require('../utils/helpers');
+const { midnight, todayMs, toDateStr, mapQuoteType, resolveQuoteName } = require('../utils/helpers');
 const {
   METAL_SPOT_SYMBOLS, FX_SYMBOL, isPurityAsset, metalInrPerGram, purityFactor,
 } = require('../utils/assetPricing');
@@ -120,6 +120,9 @@ function _rateLookup(rateMap) {
 }
 
 const _round2 = (n) => Math.round(n * 100) / 100;
+
+/** Yahoo's spark endpoint rejects (400) any request naming more symbols than this. */
+const SPARK_MAX = 20;
 
 /** USD/troy-oz spot series → INR/gram series for pure (999) metal. */
 function _perGramSeries(spotMap, fxMap, assetType) {
@@ -322,12 +325,22 @@ async function fetchLatestPrices(holdings) {
     // drop prices that came from a different source entirely.
     if (!symbols.length) return settle();
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/spark`
-              + `?symbols=${encodeURIComponent(symbols.join(','))}&range=1d&interval=1d`;
-
-    const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(8000) });
-    if (!resp.ok) return settle();
-    const data = await resp.json();
+    // Spark answers at most SPARK_MAX symbols per request and 400s the whole request
+    // above that — so a book of twenty-odd holdings (plus its FX and metal spots) got NO
+    // live prices at all, fell back to the last close, and reported every day change as
+    // exactly zero. Batches go out concurrently; a batch that fails costs only its own.
+    const batches = [];
+    for (let i = 0; i < symbols.length; i += SPARK_MAX) batches.push(symbols.slice(i, i + SPARK_MAX));
+    const parts = await Promise.all(batches.map(async (batch) => {
+      const url = `https://query1.finance.yahoo.com/v8/finance/spark`
+                + `?symbols=${encodeURIComponent(batch.join(','))}&range=1d&interval=1d`;
+      try {
+        const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(8000) });
+        return resp.ok ? await resp.json() : null;
+      } catch { return null; }
+    }));
+    if (parts.every(d => !d)) return settle();
+    const data = Object.assign({}, ...parts.filter(Boolean));
 
     const quote = (sym) => {
       const price = _lastNonNull(data?.[sym]?.close || []);
@@ -493,10 +506,124 @@ async function fetchPriceOnDate({ assetSymbol, assetType, purity }, dateMs) {
   return { price: last.value, currency: meta[assetSymbol]?.currency || '' };
 }
 
+/**
+ * Yahoo's crumb-gated endpoints — `/v7/finance/quote`, `/v10/finance/quoteSummary`, the
+ * fundamentals timeseries — need a session: a cookie from fc.yahoo.com, then a crumb
+ * minted against it. Both are cached for hours and re-minted once on a 401.
+ *
+ * Two details that each cost an afternoon: the crumb endpoint answers **406** if the
+ * request says `Accept: application/json` (the crumb is plain text), and **429** to a full
+ * desktop-Chrome agent — so it is called with the short agent and nothing else.
+ */
+let _yahooSession = null;   // { cookie, crumb, at }
+const YAHOO_SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+async function _getYahooSession(force = false) {
+  if (!force && _yahooSession && Date.now() - _yahooSession.at < YAHOO_SESSION_TTL_MS) return _yahooSession;
+  try {
+    const ua = { 'User-Agent': YF_HEADERS['User-Agent'] };
+    const first = await fetch('https://fc.yahoo.com/', { headers: ua, redirect: 'manual', signal: AbortSignal.timeout(8000) });
+    const cookie = (first.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
+    if (!cookie) return null;
+    const resp = await fetch('https://query2.finance.yahoo.com/v1/test/getcrumb', {
+      headers: { ...ua, cookie }, signal: AbortSignal.timeout(8000),
+    });
+    const crumb = resp.ok ? (await resp.text()).trim() : '';
+    if (!crumb || crumb.includes('{')) return null;
+    _yahooSession = { cookie, crumb, at: Date.now() };
+    return _yahooSession;
+  } catch { return null; }
+}
+
+/**
+ * GET a crumb-gated Yahoo URL (without its `crumb` — this adds it) → parsed JSON, or null
+ * on any failure. One fresh session is minted on a 401 before giving up.
+ */
+async function fetchYahooAuthed(url, timeoutMs = 10000) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await _getYahooSession(attempt > 0);
+    if (!session) return null;
+    try {
+      const sep = url.includes('?') ? '&' : '?';
+      const resp = await fetch(`${url}${sep}crumb=${encodeURIComponent(session.crumb)}`, {
+        headers: { ...YF_HEADERS, cookie: session.cookie }, signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (resp.status === 401) continue;          // session expired — mint once more
+      if (!resp.ok) return null;
+      return await resp.json();
+    } catch { return null; }
+  }
+  return null;
+}
+
+/** Yahoo's Morningstar-coded Indian mutual funds — replaced wholesale by AMFI. */
+const INDIAN_MF_SYMBOL = /^0P\w+\.(BO|NS)$/i;
+
+/** Type-ahead results, briefly. Users retype the same prefixes constantly. */
+const _yahooCache = new Map();
+const YAHOO_TTL_MS = 5 * 60 * 1000;
+
+/**
+ * Yahoo's symbol search, with ONE retry.
+ *
+ * A first connection out of this process intermittently stalls for seconds while the
+ * next is milliseconds — so a single tight-timeout attempt would hand the user an
+ * empty result list for a perfectly good query ("AAPL" returned nothing). Retrying
+ * once costs little and turns that into a hit.
+ *
+ * (Lives here with every other Yahoo call; shared by the asset search and the Markets
+ * page's stock search.)
+ */
+/**
+ * Yahoo's instrument search. `indices` keeps INDEX hits (typed `index`) — wanted by the
+ * Markets page, which can SHOW an index; the asset form cannot BUY one, so it is off by default.
+ */
+async function searchYahoo(q, { indices = false } = {}) {
+  const key = `${indices ? 'i:' : ''}${q.trim().toLowerCase()}`;
+  const hit = _yahooCache.get(key);
+  if (hit && Date.now() - hit.at < YAHOO_TTL_MS) return hit.results;
+
+  const url = `https://query1.finance.yahoo.com/v1/finance/search`
+            + `?q=${encodeURIComponent(q)}&quotesCount=10&newsCount=0&listsCount=0`;
+
+  let data = null;
+  for (let attempt = 0; attempt < 2 && !data; attempt++) {
+    try {
+      const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(3000) });
+      if (resp.ok) data = await resp.json();
+    } catch { /* stalled — try once more on a fresh connection */ }
+  }
+  if (!data) return [];
+
+  const results = (data.quotes || [])
+    .filter(x => x.symbol && (indices || x.quoteType !== 'INDEX'))
+    // Indian mutual funds are served from AMFI, never Yahoo: Yahoo lists them as
+    // opaque Morningstar codes (0P…), reports every plan of a fund under one
+    // identical name, and mixes in foreign cross-listings. Drop them outright.
+    .filter(x => !INDIAN_MF_SYMBOL.test(x.symbol))
+    .map(x => ({
+      symbol:   x.symbol,
+      name:     resolveQuoteName(x),
+      // Yahoo files some Indian exchange-traded funds as EQUITY — sometimes named as one
+      // ("… ETF", "… BeES"), sometimes only as an asset manager's product ("HDFCAMC -
+      // HDFCSILVER"). Typed as a stock, the asset form would book a fund as a company and
+      // the Markets search would offer it a company page.
+      type:     x.quoteType === 'INDEX' ? 'index'
+              : /\b(ETF|BEES)\b|AMC\s*-\s/i.test(resolveQuoteName(x) || '') ? 'etf' : mapQuoteType(x.quoteType),
+      exchange: x.exchDisp || x.exchange || '',
+      currency: x.currency || '',
+    }));
+
+  _yahooCache.set(key, { at: Date.now(), results });
+  return results;
+}
+
 module.exports = {
   // The one door to Yahoo, plus the helpers for reading what comes back — routes use
   // these rather than assembling a chart URL of their own.
   fetchChart,
+  fetchYahooAuthed,
+  searchYahoo,
   closesByDay,
   lastOnOrBefore,
   fetchHistoricPrices,
