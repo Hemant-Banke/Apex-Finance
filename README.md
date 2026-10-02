@@ -1,8 +1,8 @@
 <div align="center">
-  <img src="assets/logo_insp.png" alt="Apex Logo" width="80" />
+  <img src="assets/logo_insp.png" alt="Apex" width="72" />
 
   <h1>Apex</h1>
-  <p><strong>A premium portfolio tracking experience.</strong><br/>Every transaction tells your financial story.</p>
+  <p><strong>A premium portfolio tracker.</strong><br/>Every transaction tells your financial story.</p>
 
   <p>
     <img src="https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=white" />
@@ -15,250 +15,103 @@
 
 ---
 
-## Overview
+Apex tracks your whole financial picture in one place: bank accounts, investments, loans, income and spending. It is built on one idea, **everything is a transaction**. You record what happened, and every balance, holding, chart and net-worth figure is worked out from those transactions.
 
-Apex is a non-traditional, premium portfolio tracking web application built around a single philosophy: **everything is a transaction**. Income, expenses, asset purchases and sales, transfers — all are recorded as transactions, and every balance, holding, and analytics view is computed from them in real-time.
+> The project is in active development.
 
-There are no manual balance fields to keep in sync. Your complete financial picture — net worth, investments, liabilities, income, expenses — emerges naturally from your transaction history.
+## A look inside
 
-**The Project is in Development**
+### Your whole picture, in one figure
+Net worth with its 1D/1W/1M/1Y moves, and exactly what it is made of.
 
----
+<img src="assets/screenshots/networth.png" alt="Net worth masthead" width="100%" />
 
-## Screenshots
+### Measure yourself against anything
+Every line rebased to the same start, labelled with its return where it ends. Global indices come in dollars **and in rupees**, so you see what the S&P 500 actually earned an Indian investor (+23.4%) and not just what it did in America (+14.2%).
 
-### Sign In
+<img src="assets/screenshots/benchmarks.png" alt="Growth chart against Gold and the S&P 500 in dollars and rupees" width="100%" />
 
-<img src="assets/Login_page.png" alt="Login page" width="100%" />
+<table>
+  <tr>
+    <td width="42%"><img src="assets/screenshots/compare.png" alt="Compare against dialog" /></td>
+    <td width="58%"><img src="assets/screenshots/search.png" alt="Find an asset" /></td>
+  </tr>
+  <tr>
+    <td><sub>Indian indices, global markets (in $ or ₹), gold, silver, bitcoin and the dollar.</sub></td>
+    <td><sub>One search for stocks, ETFs, mutual funds, crypto and metals, worldwide.</sub></td>
+  </tr>
+</table>
 
-A clean, dark split-screen auth experience. *"Apex Protects"* — every transaction is yours, isolated by JWT-authenticated accounts, zero data leakage between users.
+### What actually made the money
+Each holding's share of your return, in percentage points, adding up to the total. A 90% gain on a tiny position ranks below a 12% gain on half the book, because that is what it did for you.
 
----
+<img src="assets/screenshots/contribution.png" alt="Contribution to return" width="100%" />
 
-### Dashboard
+### The mix you have, not the one you chose
+Allocation at market value, with what each asset class cost, what it is worth now, and how far it has drifted.
 
-<img src="assets/Dashboard.png" alt="Dashboard" width="100%" />
+<img src="assets/screenshots/allocation.png" alt="Allocation" width="100%" />
 
-Your full financial picture at a glance. The dashboard surfaces net worth, total assets, liabilities, monthly income and expense in stat cards, then goes deeper with a live net-worth line graph, an income-vs-expense bar chart, and live asset price charts for every holding you own — all in one view.
+### Where the money comes and goes
+Income, spending and net cashflow on one axis, then every month as a line of the ledger.
 
----
+<img src="assets/screenshots/cashflow.png" alt="Cashflow" width="100%" />
 
-### Add Asset
+### Every account, ranked
+Each account's balance, its share of the total and its last 90 days.
 
-<img src="assets/Add_Asset_Form.png" alt="Add Asset Form" width="50%" align="right" />
+<img src="assets/screenshots/accounts.png" alt="Accounts" width="100%" />
 
-Search across stocks, ETFs, crypto, mutual funds, and commodities with live Yahoo Finance results. Popular symbols are surfaced up front, grouped by category — Indian stocks, US stocks, ETFs, crypto, commodities — so you rarely need to type. Select a symbol, enter the date and quantity, and the historical purchase price is filled in automatically. Manual and unlisted assets (real estate, FDs, EPF/NPS, physical gold, private equity) are also fully supported.
+### The market, not just your portfolio
+The Nifty 500 split into 26 sectors, sized by market cap and coloured by the move, and where foreign and domestic institutions put their money.
 
-<br clear="right"/>
+<img src="assets/screenshots/sectors.png" alt="Sector map" width="100%" />
 
----
+<img src="assets/screenshots/flows.png" alt="FII, DII and mutual fund flows" width="100%" />
 
-### Asset Prices — Candlestick & Line Charts
+### Every listed company, in full
+Twelve years of filings, analysts' targets against today's price, and earnings against expectations.
 
-<img src="assets/Asset_Prices.png" alt="Asset Prices chart" width="100%" />
+<img src="assets/screenshots/financials.png" alt="Company financials" width="100%" />
 
-Every holding gets a live price chart powered by Yahoo Finance. Switch between a smooth area/line view and full OHLC candlestick charts. Time ranges from intraday (1D with hourly bars) through to Max — which scales automatically to show yearly labels over a decade of history. The green/red gradient on the line chart is anchored to the period's opening price, not an arbitrary baseline.
-
----
+<img src="assets/screenshots/analysts.png" alt="Analysts and earnings" width="100%" />
 
 ## Features
 
-| Category | Details |
-|---|---|
-| **Portfolio** | Net worth tracking, holdings by account, asset allocation breakdown |
-| **Real-time Prices** | Yahoo Finance integration — live prices, historical OHLC, candlestick charts |
-| **Charts** | Net worth history, income vs expense, asset allocation pie, asset price line + candlestick |
-| **Transactions** | Income, expense, transfer, adjustment, buy, sell — all typed and categorised |
-| **Accounts** | Bank, brokerage, retirement, debt, wallet — each with its own balance and holdings history |
-| **Assets** | Stocks, ETFs, bonds, mutual funds, crypto, gold, commodities, EPF/NPS, FDs, real estate, private equity |
-| **Analytics** | Expense breakdown by category, income/expense trends, portfolio holdings donut |
-| **Auth** | JWT authentication, bcrypt-hashed passwords, per-user data isolation |
+- **Accounts:** bank, brokerage, retirement, wallet and debt accounts, each split into cash and investments.
+- **Transactions:** income, expense, transfer, adjustment, buy and sell, plus recurring schedules (SIPs, rent, salary).
+- **Assets:** stocks, ETFs, mutual funds, crypto, gold and silver, bonds, FDs, EPF/NPS, property and more. Foreign assets are converted to rupees at each day's exchange rate.
+- **Live prices:** Yahoo Finance for markets, AMFI for Indian mutual funds, domestic gold and silver prices.
+- **Net worth over time:** a daily history for the whole picture and for each account.
+- **Analytics:** profit and loss, each holding's contribution to your return, comparison against benchmarks (including global indices in rupees), cashflow and category breakdowns.
+- **Statement import:** upload a bank, broker or UPI statement (PDF, CSV, HTML or image) and review the transactions before saving. Claude reads statements the built-in parser can't, and categories learn from your history.
+- **Markets:** Indian indices, sectors, fund flows, and a page for every NSE company and other assets.
 
----
+## Getting started
 
-## Architecture
-
-### Philosophy
-
-> **Everything is a transaction.** Balances are never stored — they are always derived from the transaction ledger via MongoDB aggregation pipelines. Holdings are computed from buy/sell transactions using AVCO (Average Cost) costing. Net worth history is maintained as a pre-computed daily series updated incrementally on every write.
-
-### Stack
-
-| Layer | Technology |
-|---|---|
-| **Frontend** | React 19, Vite, React Router 7, Tailwind CSS 4, Recharts 3, Radix UI, Lucide |
-| **Backend** | Node.js, Express 4, Mongoose 8, MongoDB |
-| **Auth** | JWT (`jsonwebtoken`), bcryptjs, Helmet |
-| **Market Data** | Yahoo Finance (via server-side proxy) |
-| **Deployment** | Vercel (client), Render (server) |
-| **Dev DB** | `mongodb-memory-server` auto-fallback when no `MONGODB_URI` is set |
-
-### Data Model
-
-Three primary collections: `users`, `accounts`, `transactions`.
-
-```
-User
- └─ Account (bank | brokerage | retirement | debt | wallet | other)
-     └─ Transaction (income | expense | transfer | adjustment | buy | sell)
-```
-
-- **Account balance** = sum of cash-affecting transactions (income, expense, transfer, deposit, withdrawal, adjustment, buy, sell)
-- **Holdings** = aggregated from `buy`/`sell` transactions per symbol, AVCO cost basis
-- **Net worth** = Σ(asset account balances + holdings market value) − Σ(debt account balances)
-
-### Key Backend Patterns
-
-- MongoDB aggregation pipelines for balance calculation, holdings, net worth history, and analytics
-- `AccountHoldings` pre-computed store updated incrementally on every buy/sell (full rebuild on historical edits)
-- `DailyNetWorth` and `DailyAccountBalance` stores updated on every transaction write for O(1) history queries
-- Account deletion cascades to all transactions
-- All queries scoped to `req.user._id` — no cross-user data access possible
-
----
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- MongoDB (optional — falls back to in-memory MongoDB automatically)
-
-### 1. Clone
+You need Node.js 18+. MongoDB is optional: without it the server starts an in-memory database.
 
 ```bash
-git clone <repo-url>
-cd Apex
-```
-
-### 2. Server setup
-
-```bash
+# Server: http://localhost:5000
 cd server
-cp .env.example .env   # or create .env manually (see below)
+cp .env.example .env
 npm install
-npm run dev            # starts on http://localhost:5000
-```
+npm run dev
 
-**`server/.env`**
-
-```env
-MONGODB_URI=mongodb://localhost:27017/apex   # omit to use in-memory DB
-JWT_SECRET=your-secret-key-here
-JWT_EXPIRE=30d
-NODE_ENV=development
-```
-
-> If `MONGODB_URI` is not set, the server starts with an in-memory MongoDB instance automatically — no setup required for local development.
-
-### 3. Client setup
-
-```bash
+# Client: http://localhost:5173
 cd client
-cp .env.example .env   # or create .env manually
+cp .env.example .env
 npm install
-npm run dev            # starts on http://localhost:5173
+npm run dev
 ```
 
-**`client/.env`**
+Then open [http://localhost:5173](http://localhost:5173) and create an account. The `.env.example` files list every setting. Statement import by AI needs an Anthropic API key, and Google sign-in needs a Google client ID.
 
-```env
-VITE_API_URL=http://localhost:5000/api
-```
+## Stack
 
-### 4. Open the app
+React 19, Vite, Tailwind CSS 4 and Recharts on the front end. Node.js, Express and MongoDB on the back end. Hosted on Vercel and Render.
 
-Visit [http://localhost:5173](http://localhost:5173), create an account, and start tracking.
+## For developers
 
----
-
-## API Reference
-
-### Auth
-| Method | Endpoint | Description |
-|---|---|---|
-| `POST` | `/api/auth/register` | Create account |
-| `POST` | `/api/auth/login` | Sign in, receive JWT |
-| `GET` | `/api/auth/me` | Current user |
-
-### Accounts
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/accounts` | List all accounts |
-| `POST` | `/api/accounts` | Create account |
-| `GET` | `/api/accounts/:id` | Account detail + holdings |
-| `PUT` | `/api/accounts/:id` | Update account |
-| `DELETE` | `/api/accounts/:id` | Delete account + transactions |
-| `GET` | `/api/accounts/:id/holdings` | Holdings for account |
-| `GET` | `/api/accounts/:id/daily` | Daily cash balance history |
-
-### Transactions
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/transactions` | List (filterable by account, type, date, category) |
-| `POST` | `/api/transactions` | Create transaction |
-| `PUT` | `/api/transactions/:id` | Update transaction |
-| `DELETE` | `/api/transactions/:id` | Delete transaction |
-
-### Dashboard
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/dashboard/summary` | Net worth, assets, liabilities, monthly flows, recent transactions |
-| `GET` | `/api/dashboard/holdings` | All holdings across accounts |
-| `GET` | `/api/dashboard/asset-allocation` | Holdings grouped by asset type |
-| `GET` | `/api/dashboard/income-expense` | Monthly income/expense for N months |
-| `GET` | `/api/dashboard/expense-categories` | Expense breakdown by category |
-
-### Market Data
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/api/market/search?q=` | Symbol search (Yahoo Finance) |
-| `GET` | `/api/market/price?symbol=&date=` | Historical close price for a date |
-| `GET` | `/api/market/ohlc?symbol=&days=` | OHLC candle data (auto-selects 1h/1d/1wk interval) |
-
----
-
-## Transaction Types
-
-| Type | Effect |
-|---|---|
-| `income` | +cash |
-| `expense` | −cash |
-| `transfer` | −cash source account, +cash destination account |
-| `adjustment` | ±cash (set balance to exact amount) |
-| `buy` | −cash, +asset holding (book value unchanged) |
-| `sell` | +cash, −asset holding (book value unchanged) |
-
----
-
-## Project Structure
-
-```
-Apex/
-├── client/                  # React + Vite frontend
-│   └── src/
-│       ├── components/
-│       │   ├── charts/      # PriceGrapher, HoldingsDonut, AssetPricePanel, ChartTooltip
-│       │   ├── forms/       # TransactionForm
-│       │   ├── market/      # MarketSearch, AssetTransactionForm
-│       │   ├── layout/      # AppShell
-│       │   └── ui/          # Modal, ConfirmModal
-│       ├── context/         # AuthContext
-│       ├── lib/             # api.js (Axios client), utils.js
-│       └── pages/           # Dashboard, Analytics, Accounts, AccountDetail, Transactions
-│
-└── server/                  # Express backend
-    ├── config/              # MongoDB connection
-    ├── middleware/           # JWT auth
-    ├── models/              # User, Account, Transaction, AccountHoldings, DailyNetWorth
-    ├── routes/              # auth, accounts, transactions, dashboard, market, networth
-    ├── services/            # holdingsService, dailyValueService
-    └── utils/               # balance helpers
-```
-
----
-
-<div align="center">
-  <img src="assets/logo_insp.png" alt="Apex" width="36" /><br/>
-  <sub>Apex — Your complete financial picture.</sub>
-</div>
+- [`structure.md`](structure.md): every component, helper and file, one line each.
+- [`CLAUDE.md`](CLAUDE.md): architecture, data model and conventions.

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity } from 'lucide-react';
+import { Activity, ChartPie } from 'lucide-react';
 import { isManualSymbol } from '../../lib/constants';
 
 /**
@@ -40,7 +40,6 @@ const TYPE_TINT = {
 const TYPE_EMOJI = {
   stock:       '📈',
   etf:         '🧺',
-  mutual_fund: '📊',
   crypto:      '🪙',
   bond:        '📜',
   commodity:   '🛢️',
@@ -51,6 +50,9 @@ const TYPE_EMOJI = {
   currency:    '💱',
   other:       '💠',
 };
+
+// Types drawn with a line icon instead of an emoji (see the render below).
+const TYPE_GLYPH = { index: Activity, mutual_fund: ChartPie };
 
 // Curated per-symbol store — recognizable glyphs for the assets we surface most
 // (popular commodities, crypto, and every manual / unlisted option).
@@ -121,12 +123,14 @@ export default function AssetIcon({ symbol, type = 'other', size = 34 }) {
     );
   }
 
-  // An index is a yardstick, not a holding: a pulse line in its own tint, never an
-  // emoji (the old 📉 read as "this is falling" on every index, whatever it did).
-  if (type === 'index') {
+  // Drawn glyphs, in the type's own tint, for types an emoji misdescribes: an index is a
+  // yardstick (a pulse line; the old 📉 read as "falling" on every index, whatever it
+  // did), a fund is a portfolio split many ways (a pie; 📊 looked like any chart).
+  const Glyph = TYPE_GLYPH[type];
+  if (Glyph) {
     return (
       <div aria-hidden="true" style={{ ...shell, background: `color-mix(in srgb, ${tint} 14%, var(--color-bg-elevated))` }}>
-        <Activity size={Math.round(size * 0.5)} strokeWidth={2} color={tint} />
+        <Glyph size={Math.round(size * 0.5)} strokeWidth={2} color={tint} />
       </div>
     );
   }
