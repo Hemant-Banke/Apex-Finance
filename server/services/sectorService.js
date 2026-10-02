@@ -184,7 +184,7 @@ async function _sparkBatch(symbols) {
  * `marketDataService.fetchYahooAuthed` owns that, as the one door to Yahoo.
  */
 const CAPS_TTL_MS = 6 * 60 * 60 * 1000;
-let _caps = null;   // { at, bySymbol: { SYM: capInr }, ratios: { SYM: { pe, pb } } }
+let _caps = null;   // { at, bySymbol: { SYM: capInr }, ratios: { SYM: { pe, pb } }, floats: { SYM: fraction } }
 
 /**
  * Market cap per symbol, in rupees. Caps move slowly relative to what they are used for
@@ -199,13 +199,14 @@ async function _getCaps(symbols) {
   const fetchChunk = async (chunk) => {
     const url = `https://query2.finance.yahoo.com/v7/finance/quote`
               + `?symbols=${encodeURIComponent(chunk.map(yahooSym).join(','))}`
-              + `&fields=marketCap,trailingPE,priceToBook`;
+              + `&fields=marketCap,trailingPE,priceToBook,sharesOutstanding,floatShares`;
     return (await fetchYahooAuthed(url))?.quoteResponse?.result || null;
   };
 
   const results = await Promise.all(chunks.map(c => fetchChunk(c)));
   const bySymbol = {};
   const ratios = {};
+  const floats = {};
   for (const r of results.flat()) {
     if (!r?.symbol || !(r.marketCap > 0)) continue;
     const sym = r.symbol.replace(/\.NS$/, '');
@@ -213,10 +214,12 @@ async function _getCaps(symbols) {
     // Valuation ratios ride along for free on the same call — the stock page compares a
     // company's P/E with its sector's median, which needs every peer's.
     ratios[sym] = { pe: r.trailingPE > 0 ? r.trailingPE : null, pb: r.priceToBook > 0 ? r.priceToBook : null };
+    // Free-float fraction, for index weights (NSE weighs by float, not full cap).
+    if (r.floatShares > 0 && r.sharesOutstanding > 0) floats[sym] = Math.min(1, r.floatShares / r.sharesOutstanding);
   }
   // Half the universe or better, or it is not a sizing — keep the last good one.
   if (Object.keys(bySymbol).length < symbols.length / 2) return _caps?.bySymbol || null;
-  _caps = { at: Date.now(), bySymbol, ratios };
+  _caps = { at: Date.now(), bySymbol, ratios, floats };
   return bySymbol;
 }
 
@@ -366,6 +369,70 @@ async function getPeers(symbol) {
   };
 }
 
+const _lists = new Map();   // list file → { at, symbols }
+
+/** An NSE constituent list's symbols, cached for a day (yesterday's kept on failure). */
+async function _listSymbols(file) {
+  const hit = _lists.get(file);
+  if (hit && Date.now() - hit.at < UNIVERSE_TTL_MS) return hit.symbols;
+  const rows = _csv(await _get(LIST_URL(file), { as: 'text', timeoutMs: 10000 }));
+  const symbols = rows.filter(r => r.Symbol).map(r => r.Symbol);
+  if (!symbols.length) return hit?.symbols || null;
+  _lists.set(file, { at: Date.now(), symbols });
+  return symbols;
+}
+
+/**
+ * What an index is made of: every member with its weight, sector and returns, and the
+ * index's split by sector — from the same quotes and caps as the sector map. Weights are
+ * by FREE-FLOAT cap, as NSE weighs (full cap where a float is missing), so they track the
+ * official ones closely; `sized` says 'float', 'cap' or 'equal' when caps are missing.
+ */
+async function getComposition(listFile) {
+  const [symbols, data] = await Promise.all([_listSymbols(listFile), getSectors()]);
+  if (!symbols?.length || !data.stocks?.length) return null;
+
+  const bySym = new Map(data.stocks.map(st => [st.symbol, st]));
+  const members = symbols.map(sym => bySym.get(sym)).filter(Boolean);
+  if (!members.length) return null;
+
+  const floats = _caps?.floats || {};
+  const sized = data.sized === 'cap' && members.some(m => floats[m.symbol]) ? 'float' : data.sized;
+  const w = (m) => (m.weight || 0) * (sized === 'float' ? (floats[m.symbol] ?? 1) : 1);
+  const total = members.reduce((a, m) => a + w(m), 0);
+  const labelOf = Object.fromEntries(data.sectors.map(sec => [sec.key, sec.label]));
+  const holdings = members.map(m => {
+    const weight = total ? (w(m) / total) * 100 : null;
+    return {
+      symbol: m.symbol, name: m.name, sector: labelOf[m.sector] || m.sector,
+      weight: round(weight, 2),
+      chg1d: m.chg1d, chg1m: m.chg1m, chg1y: m.chg1y,
+      // Points of the index's day move this member accounts for.
+      contrib1d: weight != null && m.chg1d != null ? round((weight * m.chg1d) / 100, 3) : null,
+    };
+  }).sort((a, b) => (b.weight || 0) - (a.weight || 0));
+
+  const groups = {};
+  for (const m of members) (groups[m.sector] ??= []).push({ ...m, weight: w(m) });
+  const sectors = Object.entries(groups).map(([key, ms]) => {
+    const r = _weighted(ms);
+    return {
+      name: labelOf[key] || key, count: ms.length,
+      weight: round((ms.reduce((a, m) => a + m.weight, 0) / total) * 100, 2),
+      chg1d: round(r.chg1d), chg1y: round(r.chg1y),
+    };
+  }).sort((a, b) => b.weight - a.weight);
+
+  return {
+    sized,
+    count: symbols.length,
+    covered: members.length,
+    top10: round(holdings.slice(0, 10).reduce((a, h) => a + (h.weight || 0), 0), 1),
+    holdings,
+    sectors,
+  };
+}
+
 /**
  * Nifty 500 companies matching a query, as search results — matched LOCALLY against the
  * cached constituent list (no quotes, no network once the list is loaded). Yahoo's
@@ -388,4 +455,4 @@ async function searchUniverse(q, limit = 8) {
     .map(u => ({ symbol: `${u.symbol}.NS`, name: u.name, type: 'stock', exchange: 'NSE', currency: 'INR', sector: u.label }));
 }
 
-module.exports = { getSectors, getPeers, searchUniverse, _csv, _weighted };
+module.exports = { getSectors, getPeers, getComposition, searchUniverse, _csv, _weighted };

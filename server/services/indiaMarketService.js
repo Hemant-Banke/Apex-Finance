@@ -73,6 +73,26 @@ const ASSETS = [
  * Yahoo also carries in full. Metals open the domestic per-gram page. The G-Sec index
  * has no history anywhere we can chart, so it opens nothing.
  */
+/**
+ * Indices that have an asset page, by the symbol that page is opened with: the name NSE's
+ * board knows them by (valuation, breadth) and the constituent list NSE publishes.
+ */
+const NSE_INDICES = {
+  '^NSEI':             { nse: 'NIFTY 50',           list: 'ind_nifty50list' },
+  '^CNX100':           { nse: 'NIFTY 100',          list: 'ind_nifty100list' },
+  '^NSMIDCP':          { nse: 'NIFTY NEXT 50',      list: 'ind_niftynext50list' },
+  '^CRSLDX':           { nse: 'NIFTY 500',          list: 'ind_nifty500list' },
+  '^NSEMDCP50':        { nse: 'NIFTY MIDCAP 50',    list: 'ind_niftymidcap50list' },
+  'NIFTYMIDCAP150.NS': { nse: 'NIFTY MIDCAP 150',   list: 'ind_niftymidcap150list' },
+  'NIFTYSMLCAP250.NS': { nse: 'NIFTY SMALLCAP 250', list: 'ind_niftysmallcap250list' },
+  '^NSEBANK':          { nse: 'NIFTY BANK',         list: 'ind_niftybanklist' },
+  '^CNXIT':            { nse: 'NIFTY IT',           list: 'ind_niftyitlist' },
+  '^CNXAUTO':          { nse: 'NIFTY AUTO',         list: 'ind_niftyautolist' },
+  '^CNXPHARMA':        { nse: 'NIFTY PHARMA',       list: 'ind_niftypharmalist' },
+  '^CNXFMCG':          { nse: 'NIFTY FMCG',         list: 'ind_niftyfmcglist' },
+  '^CNXMETAL':         { nse: 'NIFTY METAL',        list: 'ind_niftymetallist' },
+};
+
 const _viewSymbol = (q) => (q.kind === 'metal' ? `_METAL:${q.metal}` : (q.view || q.yahoo || null));
 
 /**
@@ -148,6 +168,8 @@ async function _indexBoard(fresh = false) {
       chg1y:    yearAgo ? parseNumber(r.perChange365d) : null,
       pe:       parseNumber(r.pe),
       pb:       parseNumber(r.pb),
+      dy:       parseNumber(r.dy),
+      unchanged: parseNumber(r.unchanged),
       advances: parseNumber(r.advances),
       declines: parseNumber(r.declines),
       yearHigh: parseNumber(r.yearHigh),
@@ -279,6 +301,22 @@ async function getOverview({ fresh = false } = {}) {
     // Which sections came back empty because a SOURCE failed, as opposed to having no
     // data — the page names the missing source rather than drawing a blank.
     unavailable: [!board && 'nse', !Object.values(yahoo).some(s => Object.keys(s).length) && 'yahoo'].filter(Boolean),
+  };
+}
+
+/**
+ * An NSE index's own figures off the board — valuation (P/E, P/B, dividend yield) and
+ * breadth among its members — plus its constituent list file. Null for anything else.
+ */
+async function getIndexStats(symbol, { fresh = false } = {}) {
+  const def = NSE_INDICES[symbol];
+  if (!def) return null;
+  const n = (await _indexBoard(fresh))?.byName?.[def.nse] || null;
+  return {
+    nseName: def.nse,
+    list: def.list,
+    pe: n?.pe || null, pb: n?.pb || null, dy: n?.dy || null,
+    breadth: n ? { advances: n.advances, declines: n.declines, unchanged: n.unchanged } : null,
   };
 }
 
@@ -510,6 +548,7 @@ async function getFlows(sessions = 60, { fresh = false } = {}) {
 
 module.exports = {
   getOverview,
+  getIndexStats,
   getFlows,
   refreshFlows,
   // Shared with sectorService, which reads the same sources the same way.

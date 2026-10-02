@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, Search } from 'lucide-react';
+import { ArrowUpRight, RefreshCw, Search } from 'lucide-react';
 import { marketsAPI, marketAPI } from '../lib/api';
 import { formatPct, pnlColor, formatCount } from '../lib/utils';
-import { formatLevel, MARKET_RANGES, toChartSeries, viewPathFor } from '../lib/markets';
+import { assetPath, formatLevel, MARKET_RANGES, toChartSeries, viewPathFor } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import { useToast } from '../context/ToastContext';
 import Spinner from '../components/ui/Spinner';
@@ -112,10 +112,12 @@ export default function Markets() {
           market went with them — a flat Nifty over 2,700 advancers and 6,800 decliners
           is a falling market wearing a calm face. */}
       {nifty && (
-        <Masthead
+        <Masthead to={nifty.symbol ? assetPath(nifty.symbol) : undefined} title="Open Nifty 50"
           lead={
             <>
-              <p className="eyebrow" style={{ marginBottom: 12 }}>Nifty 50</p>
+              <p className="eyebrow" style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 5 }}>
+                Nifty 50 {nifty.symbol && <ArrowUpRight size={12} style={{ opacity: 0.7 }} />}
+              </p>
               <h1 className="display-number" style={{ fontSize: 'clamp(1.6rem, 4vw, 2rem)', color: 'var(--color-text-primary)' }}>
                 {formatLevel(nifty.last)}
               </h1>

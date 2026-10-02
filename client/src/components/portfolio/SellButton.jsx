@@ -7,7 +7,7 @@ import { ArrowUpRight } from 'lucide-react';
  * the portfolio's book — so the two cannot drift into looking like different actions.
  *
  * It reveals in two stages rather than one. At rest the row is quiet; hovering the row
- * brings the button up as a tinted outline; hovering the BUTTON fills it. That second
+ * brings the button up as a soft tint; hovering the BUTTON fills it. That second
  * stage is what separates "there is an action here" from "you are about to sell
  * something", which a flat outline that appeared and then did nothing never did.
  *
@@ -35,8 +35,8 @@ export default function SellButton({ onClick, label = 'Sell', title }) {
         letterSpacing: '0.02em', lineHeight: 1,
         color: 'var(--color-danger)',
         background: 'color-mix(in srgb, var(--color-danger) 13%, transparent)',
-        border: '1px solid color-mix(in srgb, var(--color-danger) 30%, transparent)',
-        transition: 'background 0.15s ease, border-color 0.15s ease, color 0.15s ease',
+        border: 'none',
+        transition: 'background 0.15s ease, color 0.15s ease',
       }}
     >
       <ArrowUpRight size={12} strokeWidth={2.4} />

@@ -6,7 +6,7 @@
 - `auth/OAuthButtons.jsx` — Google / Apple sign-in buttons for the login page.
 
 ### charts
-- `charts/PriceGrapher.jsx` — The one price/value chart (net worth, accounts, markets, stocks) with benchmark overlays and drag-to-measure.
+- `charts/PriceGrapher.jsx` — The one price/value chart (net worth, accounts, markets, stocks) with benchmark overlays and drag-to-measure; `axisFormat` for non-rupee prices.
 - `charts/ChartTooltip.jsx` — Shared solid chart tooltip (+ `TooltipPanel`), with % change from window start.
 - `charts/CompareIndexDialog.jsx` — Picker for benchmark overlays on a chart.
 - `charts/CashflowChart.jsx` — Monthly income/expense bars + net cashflow line; used on Analytics and the Dashboard.
@@ -41,16 +41,22 @@
 
 ### portfolio
 - `portfolio/HoldingsTable.jsx` — Sortable holdings book (qty, cost, price, value, P&L, weight).
-- `portfolio/AllocationBar.jsx` — Allocation as a stacked bar.
+- `portfolio/HoldingLink.jsx` — A holding's name linked to its company/asset page (plain text if self-priced).
+- `portfolio/AllocationBar.jsx` — Allocation as a stacked bar (`showValue={false}` when slices are not money).
 - `portfolio/ContributionBreakdown.jsx` — Per-holding contribution to return over a window.
 - `portfolio/SellButton.jsx` — The shared sell affordance on holding rows.
 - `portfolio/SellHoldingModal.jsx` — Dialog to sell an owned position.
 - `portfolio/PositionCard.jsx` — "Your position" card (worth + gain/today on the left; qty, avg cost, invested on the right) for the stock and asset pages.
 
 ### stock
-- `stock/PricePerformance.jsx` — `StatGrid`, `RangeBar`, `Performance` for stock/asset pages.
-- `stock/CompanyFinancials.jsx` — Annual/quarterly results, debt and cash-flow chart + table.
-- `stock/Ownership.jsx` — Shareholding pattern over 12 quarters.
+- `stock/PricePerformance.jsx` — `StatGrid`, `RangeBar`, `Performance` for stock/asset pages (`benchLabel={null}` drops the benchmark rows).
+- `asset/IndexProfile.jsx` — NSE index valuation, breadth, sector split and members with day contribution.
+- `asset/FundProfile.jsx` — Fund house, category, plan/option, ISIN and sibling plans.
+- `asset/MetalProfile.jsx` — Gold/silver price by purity, world price, domestic premium, gold-silver ratio.
+- `asset/ReturnSplit.jsx` — A rupee return split into asset-in-own-currency and the currency's move.
+- `asset/HoldingExperience.jsx` — Monthly SIP outcomes (XIRR) and rolling 1Y/3Y returns vs benchmark.
+- `stock/CompanyFinancials.jsx` — Annual/quarterly results, debt and cash-flow chart + table (`money` from `companyMoney`).
+- `stock/Ownership.jsx` — Shareholding pattern over 12 quarters; abroad, insiders/institutions + largest holders.
 
 ### transactions
 - `transactions/TransactionRow.jsx` — The one transaction row used in every list.
@@ -62,7 +68,7 @@
 - `ui/Modal.jsx` — Portaled titled dialog; nests.
 - `ui/ConfirmModal.jsx` — Confirmation dialog (replaces `confirm()`).
 - `ui/Popover.jsx` — Portaled floating panel used by all pickers.
-- `ui/Masthead.jsx` — Page headline figure + component band (`MastheadFigure`).
+- `ui/Masthead.jsx` — Page headline figure + component band (`MastheadFigure`); `to` makes it a link.
 - `ui/SectionHeader.jsx` — Eyebrow/title/action header above a block.
 - `ui/Delta.jsx` — Signed change chip with arrow (`invert` for spending).
 - `ui/DivergingBar.jsx` — Signed bar from a shared zero.
@@ -85,7 +91,7 @@
 - `Transactions.jsx` — Full transaction list with filters and paging.
 - `Analytics.jsx` — Cashflow, categories, holdings, contribution, allocation.
 - `Markets.jsx` — Indian market overview, growth chart, sectors, flows.
-- `Stock.jsx` — One NSE company in full.
+- `Stock.jsx` — One company in full; `/markets/stocks/:nse` and `/markets/world/:yahoo` (`global` prop).
 - `Asset.jsx` — Price page for any non-NSE-equity instrument.
 - `Settings.jsx` — Subscriptions and custom categories.
 
@@ -122,7 +128,7 @@
 - `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`.
 - `currency.js` — FX symbol + currency normalisation.
 - `recurrence.js` — `FREQUENCIES`, `occurrencesBetween`.
-- `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`.
+- `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `holdingExperience` (SIP + rolling, shared by stock and asset pages).
 
 ### Server lib (`server/lib/`)
 - `llmService.js` — All Claude calls: extraction (text/image) and categorisation.
@@ -197,7 +203,7 @@
 - `categoryProfileService.js` — Learn/predict categories from user history.
 - `oauthService.js` — Verify Google/Apple identity tokens.
 - `indiaMarketService.js` — NSE indices, asset classes, breadth, flows.
-- `sectorService.js` — Nifty 500 sector map, market caps, peers.
-- `stockService.js` — One NSE company: price, risk, financials, valuation.
+- `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights).
+- `stockService.js` — One company (NSE, or abroad with `global`): price, risk, financials, valuation, holders, peers, SIP/rolling.
 - `screenerService.js` — Screener.in filings and shareholding.
-- `assetService.js` — Price page data for non-NSE instruments.
+- `assetService.js` — Price page data for non-NSE instruments, plus per-kind `profile`, `currencyLens` and `experience`.

@@ -220,6 +220,10 @@ body {
 .quote-tile-link { color: inherit; text-decoration: none; cursor: pointer; }
 .quote-tile-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); transform: translateY(-1px); }
 .quote-tile-link:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 2px; }
+.masthead-link { display: block; color: inherit; text-decoration: none; border-radius: var(--radius-lg); }
+.masthead-link > .card { transition: border-color 0.15s ease, transform 0.15s ease; }
+.masthead-link:hover > .card { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); transform: translateY(-1px); }
+.masthead-link:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 2px; }
 
 /* Gilt card — a fine champagne top-rule, like the gilt edge of a private-bank
    statement. The signature applied to a card. Reserved for headline surfaces. */
@@ -622,13 +626,12 @@ select.input-field {
 .backlink:focus-visible { outline: 2px solid var(--color-accent-dim); outline-offset: 3px; border-radius: 4px; }
 
 /* Sell — the second stage of the two-stage reveal. The row brings the button up as a
-   tinted outline; hovering the button itself fills it, so "there is an action here" and
+   soft tint; hovering the button itself fills it, so "there is an action here" and
    "you are about to sell something" are visibly different states. Muted per the house
    rule for tinted buttons rather than a saturated red fill. */
 .sell-button:hover,
 .sell-button:focus-visible {
   background: color-mix(in srgb, var(--color-danger) 68%, #0B0D10) !important;
-  border-color: color-mix(in srgb, var(--color-danger) 45%, transparent) !important;
   color: var(--color-text-primary) !important;
 }
 

@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useCallback, useMemo, useId } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, useId } from 'react';
+import { createPortal } from 'react-dom';
 import {
   AreaChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
   ReferenceLine, ReferenceArea, CartesianGrid, ComposedChart, Bar,
@@ -349,9 +350,9 @@ function useAnimatedValue(target, duration = 380) {
 // ── Drag-selection summary label ───────────────────────────────────────────────
 
 /**
- * Floating summary for a drag-selected range, drawn inside the chart SVG at the
- * top-centre of the selection. Recharts injects `viewBox` (the selected band's
- * pixel box); `chartW` clamps it so the box never spills past the chart edge.
+ * Floating summary for a drag-selected range, at the top-centre of the selection.
+ * Recharts injects `viewBox` (the selected band's pixel box); the box itself is HTML,
+ * portalled into the chart's wrapper (`host`) and clamped to its width.
  *
  * When benchmarks are on the chart it measures ALL of them over the same window, not
  * just the primary line. Dragging a range with three indices overlaid used to answer
@@ -365,68 +366,84 @@ function useAnimatedValue(target, duration = 380) {
  */
 const SEL_ROW_H = 15;
 
-function SelectionLabel({ viewBox, pct, abs, pos, benchmarks = [], formatValue, chartW }) {
-  if (!viewBox) return null;
-  // A wide frame centred on the selection; the box inside sizes to its content
-  // (nowrap) so full, un-condensed numbers extend it instead of overflowing. It grows
-  // downward with the benchmark rows, so the frame has to grow with them too or the
-  // foreignObject clips the last line away.
-  const FRAME_W = 300;
-  const FRAME_H = 60 + (benchmarks.length ? 12 + benchmarks.length * SEL_ROW_H : 0);
-  const centre  = viewBox.x + viewBox.width / 2 - FRAME_W / 2;
-  const maxX    = (chartW || viewBox.x + viewBox.width) - FRAME_W - 4;
-  const x       = Math.max(4, Math.min(centre, maxX));
-  const y       = (viewBox.y ?? 0) + 6;
+// HTML in a portal over the chart, not inside the SVG: there, the series painted over it
+// whenever benchmark lines were on the chart.
+function SelectionLabel(props) {
+  if (!props.viewBox || !props.host) return null;
+  return <SelectionBox {...props} />;
+}
+
+function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, name }) {
+  const boxRef = useRef(null);
+  const centre = viewBox.x + viewBox.width / 2;
+  // Centre on the selection, clamped inside the chart — needs the box's own width, so it
+  // is placed after layout.
+  useLayoutEffect(() => {
+    const el = boxRef.current;
+    const w = el.offsetWidth, W = host.clientWidth;
+    el.style.left = `${Math.max(4, Math.min(centre - w / 2, W - w - 4))}px`;
+    el.style.visibility = 'visible';
+  });
   const color   = pos ? '#22c55e' : '#ef4444';
   const sign    = pos ? '+' : '−';
   const mono    = { fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)' };
+  const muted   = 'rgba(255,255,255,0.62)';
+  const head    = { fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'rgba(255,255,255,0.4)', ...mono };
 
-  return (
-    <foreignObject x={x} y={y} width={FRAME_W} height={FRAME_H} style={{ overflow: 'visible', pointerEvents: 'none' }}>
-      <div style={{ display: 'flex', justifyContent: 'center' }}>
-        <div style={{
-          background: 'var(--color-bg-popover)',
-          border: '1px solid var(--color-border-hover)',
-          borderRadius: 9, padding: '6px 11px', whiteSpace: 'nowrap',
-          boxShadow: 'var(--shadow-popover)',
-        }}>
-          <p style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.09em', color: 'rgba(255,255,255,0.4)', margin: '0 0 3px', ...mono }}>
-            Period change
-          </p>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: 15, fontWeight: 700, color, lineHeight: 1, ...mono }}>
-              {sign}{Math.abs(pct).toFixed(2)}%
-            </span>
-            <span style={{ fontSize: 12, fontWeight: 500, color, lineHeight: 1, ...mono }}>
-              {sign}{formatValue(Math.abs(abs))}
-            </span>
-          </div>
-
-          {benchmarks.length > 0 && (
-            <div style={{ marginTop: 7, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.09)' }}>
-              {benchmarks.map(b => {
-                const ahead = b.gap >= 0;
-                return (
-                  <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, height: SEL_ROW_H }}>
-                    <span style={{ width: 6, height: 6, borderRadius: 2, background: b.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.62)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                      {b.label}
-                    </span>
-                    <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,0.62)', width: 58, textAlign: 'right', ...mono }}>
-                      {b.pct >= 0 ? '+' : '−'}{Math.abs(b.pct).toFixed(2)}%
-                    </span>
-                    {/* The answer: how far ahead of this index you finished the window. */}
-                    <span style={{ fontSize: 10.5, fontWeight: 600, color: ahead ? '#22c55e' : '#ef4444', width: 64, textAlign: 'right', ...mono }}>
-                      {ahead ? '+' : '−'}{Math.abs(b.gap).toFixed(2)} pp
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+  return createPortal(
+    <div ref={boxRef} style={{
+      position: 'absolute', top: (viewBox.y ?? 0) + 6, left: 0, zIndex: 5, pointerEvents: 'none',
+      visibility: 'hidden',
+    }}>
+      <div style={{
+        background: 'var(--color-bg-popover)',
+        border: '1px solid var(--color-border-hover)',
+        borderRadius: 9, padding: '6px 11px', whiteSpace: 'nowrap',
+        boxShadow: 'var(--shadow-popover)',
+      }}>
+        <p style={{ ...head, margin: '0 0 3px' }}>{name ? `${name} · period change` : 'Period change'}</p>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color, lineHeight: 1, ...mono }}>
+            {sign}{Math.abs(pct).toFixed(2)}%
+          </span>
+          <span style={{ fontSize: 12, fontWeight: 500, color, lineHeight: 1, ...mono }}>
+            {sign}{formatValue(Math.abs(abs))}
+          </span>
         </div>
+
+        {benchmarks?.length > 0 && (
+          <div style={{ marginTop: 7, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.09)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: SEL_ROW_H }}>
+              <span style={{ ...head, flex: 1 }} />
+              <span style={{ ...head, width: 58, textAlign: 'right' }}>Return</span>
+              <span style={{ ...head, width: 64, textAlign: 'right' }}>Gap</span>
+            </div>
+            {benchmarks.map(b => {
+              const ahead = b.gap >= 0;
+              return (
+                <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, height: SEL_ROW_H }}>
+                  <span style={{ width: 6, height: 6, borderRadius: 2, background: b.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 10.5, color: muted, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {b.label}
+                  </span>
+                  <span style={{ fontSize: 10.5, color: muted, width: 58, textAlign: 'right', ...mono }}>
+                    {b.pct >= 0 ? '+' : '−'}{Math.abs(b.pct).toFixed(2)}%
+                  </span>
+                  <span style={{ fontSize: 10.5, fontWeight: 600, color: ahead ? '#22c55e' : '#ef4444', width: 64, textAlign: 'right', ...mono }}>
+                    {ahead ? '+' : '−'}{Math.abs(b.gap).toFixed(2)} pp
+                  </span>
+                </div>
+              );
+            })}
+            {/* The gap is a fact about the main line, so the key says whose it is. */}
+            <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.4)', margin: '5px 0 0' }}>
+              Gap = {name || 'this line'}’s return − each line’s, in points
+            </p>
+          </div>
+        )}
       </div>
-    </foreignObject>
+    </div>,
+    host,
   );
 }
 
@@ -445,6 +462,7 @@ function SelectionLabel({ viewBox, pct, abs, pos, benchmarks = [], formatValue, 
  *   formatValue(n)          — number formatter (default: formatCurrency).
  *   showCard                — wraps in a card (default true). Set false for embed use.
  *   height                  — chart pixel height (default 280).
+ *   axisFormat              — y-axis tick formatter for the price view (default: compact ₹).
  *   emptyText               — shown when there's no data.
  *   ranges                  — array of {label, days} (default: DEFAULT_RANGES).
  *   defaultRange            — label string for the initial range (default '1Y').
@@ -473,6 +491,7 @@ export default function PriceGrapher({
   title            = null,
   valueLabel       = 'Value',
   formatValue      = formatCurrency,
+  axisFormat       = fmtY,
   showCard         = true,
   height           = 280,
   emptyText        = 'No data available',
@@ -974,7 +993,7 @@ export default function PriceGrapher({
             />
             <YAxis
               domain={[ohlcYMin, ohlcYMax]}
-              tickFormatter={fmtY}
+              tickFormatter={axisFormat}
               tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
@@ -1049,7 +1068,7 @@ export default function PriceGrapher({
             />
             <YAxis
               domain={[yMin, yMax]}
-              tickFormatter={growth ? fmtYIndex : fmtY}
+              tickFormatter={growth ? fmtYIndex : axisFormat}
               tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
               width={56} tickCount={5}
@@ -1147,7 +1166,8 @@ export default function PriceGrapher({
                     pos={selection.pos}
                     benchmarks={selection.benchmarks}
                     formatValue={effFormatValue}
-                    chartW={chartAreaRef.current?.clientWidth || 0}
+                    host={chartAreaRef.current}
+                    name={valueLabel !== 'Value' ? valueLabel : null}
                   />
                 )}
               />

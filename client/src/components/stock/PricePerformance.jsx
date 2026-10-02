@@ -97,10 +97,10 @@ export function Performance({ perf, name, fmt = rupeeLevel, sub = "The share's r
             {cols.map(([k, l]) => <span key={k} className="col-head" style={{ textAlign: 'right' }}>{l}</span>)}
           </div>
           {row(name, x => x?.stock, pnlColor)}
-          {row(benchLabel, x => x?.nifty, pnlColor)}
+          {benchLabel && row(benchLabel, x => x?.nifty, pnlColor)}
           {/* The row the comparison exists for — in points, because the gap between two
               returns is not itself a return. */}
-          {row('Gap', x => (x?.stock != null && x?.nifty != null ? x.stock - x.nifty : null), gapColor)}
+          {benchLabel && row('Gap', x => (x?.stock != null && x?.nifty != null ? x.stock - x.nifty : null), gapColor)}
         </div>
       </div>
       {(r['3y']?.stockCagr != null || r['5y']?.stockCagr != null) && (
@@ -108,7 +108,7 @@ export function Performance({ perf, name, fmt = rupeeLevel, sub = "The share's r
           Annualised: {['3y', '5y'].filter(k => r[k]?.stockCagr != null).map(k => (
             <span key={k} style={{ marginRight: 14 }}>
               {k.toUpperCase()} <span className="figure" style={{ color: pnlColor(r[k].stockCagr) }}>{formatPct(r[k].stockCagr, 1)}</span>
-              <span> a year vs the {benchLabel}&apos;s </span><span className="figure">{formatPct(r[k].niftyCagr, 1)}</span>
+              {benchLabel && r[k].niftyCagr != null && <><span> a year vs the {benchLabel}&apos;s </span><span className="figure">{formatPct(r[k].niftyCagr, 1)}</span></>}
             </span>
           ))}
         </p>

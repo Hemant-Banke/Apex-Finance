@@ -17,6 +17,7 @@ import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import TransactionRow from '../components/transactions/TransactionRow';
 import AllocationBar from '../components/portfolio/AllocationBar';
 import AssetIcon from '../components/market/AssetIcon';
+import HoldingLink from '../components/portfolio/HoldingLink';
 
 // The net-worth series runs to T-1 (asset prices are not final until the close), so these
 // measure settled day over settled day. Labelling the first one "today" would be a claim
@@ -160,7 +161,7 @@ function Movers({ holdings }) {
             <div className="flex items-center gap-3" style={{ minWidth: 0, flex: 1 }}>
               <AssetIcon symbol={h.symbol} type={h.type} size={28} />
               <div style={{ minWidth: 0 }}>
-                <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>{h.name}</p>
+                <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}><HoldingLink h={h}>{h.name}</HoldingLink></p>
                 <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
                   {formatCurrency(h.price)}
                 </p>

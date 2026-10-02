@@ -137,7 +137,7 @@ export const marketsAPI = {
   // `fresh` — the Markets refresh button: bypass the server's caches (it throttles).
   overview: (fresh)              => api.get('/markets/overview', { params: fresh ? { fresh: true } : {} }),
   sectors:  (fresh)              => api.get('/markets/sectors',  { params: fresh ? { fresh: true } : {} }),
-  stock:    (symbol, fresh)      => api.get(`/markets/stocks/${encodeURIComponent(symbol)}`, { params: fresh ? { fresh: true } : {} }),
+  stock:    (symbol, fresh, global) => api.get(`/markets/stocks/${encodeURIComponent(symbol)}`, { params: { ...(fresh ? { fresh: true } : {}), ...(global ? { global: true } : {}) } }),
   asset:    (symbol, fresh)      => api.get(`/markets/assets/${encodeURIComponent(symbol)}`, { params: fresh ? { fresh: true } : {} }),
   flows:    (sessions = 60, fresh) => api.get('/markets/flows',  { params: { sessions, ...(fresh ? { fresh: true } : {}) } }),
 };

@@ -20,12 +20,17 @@
  * ALL money in the response is ₹ CRORE (the unit Indian results are filed in), per-share
  * figures are ₹, ratios are plain numbers, percentages are percent. Every block is
  * optional: the page draws what came back.
+ *
+ * A company listed ABROAD (`global: true`, a Yahoo symbol such as AAPL or 7203.T) gets the
+ * same page from Yahoo alone: statements from its fundamentals timeseries, holders from
+ * `quoteSummary`, peers from Yahoo's "often compared" list, measured against its home
+ * index. Its money is in native units of its own currency (`money` says which).
  */
 
 const { DAY_MS } = require('../utils/constants');
 const { toDateStr } = require('../utils/helpers');
 const { notFound } = require('../utils/httpError');
-const { round, pctChange, toSorted, windowReturns } = require('../utils/series');
+const { round, pctChange, toSorted, windowReturns, holdingExperience } = require('../utils/series');
 const { fetchChart, closesByDay, fetchYahooAuthed } = require('./marketDataService');
 const sectorService = require('./sectorService');
 const screenerService = require('./screenerService');
@@ -149,15 +154,18 @@ function _shapeFinancials(co) {
       operatingMargin: isBank || !(r.revenue > 0) || r.operatingProfit == null ? null : round((r.operatingProfit / r.revenue) * 100, 1),
       interestCover: !isBank && r.interest > 0 && r.operatingProfit != null ? round(r.operatingProfit / r.interest, 1) : null,
     };
-    if (annual) {
-      const avgEquity = r.equity != null && prev?.equity != null ? (r.equity + prev.equity) / 2 : null;
+    // Balance sheet and cash flow: every annual row, and quarters where they are filed (abroad).
+    if (annual || r.debt != null || r.equity != null || r.ocf != null) {
       Object.assign(out, {
         debt: r.debt ?? null, equity: r.equity ?? null, ocf: r.ocf ?? null, fcf: r.fcf ?? null,
         debtToEquity: !isBank && r.debt != null && r.equity > 0 ? round(r.debt / r.equity, 2) : null,
-        // Return on the AVERAGE equity of the year — profit is earned across the year, on
-        // the capital that was there through it, not on the closing balance alone.
-        roe: avgEquity > 0 && r.netIncome != null ? round((r.netIncome / avgEquity) * 100, 1) : null,
       });
+    }
+    if (annual) {
+      // Return on the AVERAGE equity of the year — profit is earned across the year, on
+      // the capital that was there through it, not on the closing balance alone.
+      const avgEquity = r.equity != null && prev?.equity != null ? (r.equity + prev.equity) / 2 : null;
+      out.roe = avgEquity > 0 && r.netIncome != null ? round((r.netIncome / avgEquity) * 100, 1) : null;
     }
     return out;
   });
@@ -220,7 +228,7 @@ function _ownership(co) {
 
 const MODULES = [
   'price', 'assetProfile', 'summaryDetail', 'defaultKeyStatistics', 'financialData',
-  'earnings', 'recommendationTrend', 'calendarEvents',
+  'earnings', 'recommendationTrend', 'calendarEvents', 'majorHoldersBreakdown', 'institutionOwnership',
 ].join(',');
 
 async function _quoteSummary(ysym) {
@@ -228,20 +236,113 @@ async function _quoteSummary(ysym) {
   return qs?.quoteSummary?.result?.[0] || {};
 }
 
+// ── Abroad (Yahoo only) ────────────────────────────────────────────────────────
+
+/** A foreign listing's home index, by Yahoo exchange suffix. US (no suffix) is the S&P 500. */
+const HOME_INDEX = {
+  T: ['^N225', 'Nikkei 225'], HK: ['^HSI', 'Hang Seng'], L: ['^FTSE', 'FTSE 100'], DE: ['^GDAXI', 'DAX'],
+  F: ['^GDAXI', 'DAX'], PA: ['^FCHI', 'CAC 40'], AS: ['^AEX', 'AEX'], SW: ['^SSMI', 'SMI'],
+  TO: ['^GSPTSE', 'S&P/TSX'], AX: ['^AXJO', 'ASX 200'], KS: ['^KS11', 'KOSPI'], SS: ['000001.SS', 'Shanghai Composite'],
+  SZ: ['399001.SZ', 'Shenzhen Component'], SI: ['^STI', 'Straits Times'], TW: ['^TWII', 'Taiwan Weighted'],
+  MI: ['FTSEMIB.MI', 'FTSE MIB'], MC: ['^IBEX', 'IBEX 35'], SA: ['^BVSP', 'Bovespa'],
+};
+const homeIndex = (ysym) => {
+  const hit = HOME_INDEX[/\.([A-Z]+)$/.exec(ysym)?.[1]];
+  return hit ? { symbol: hit[0], label: hit[1] } : { symbol: '^GSPC', label: 'S&P 500' };
+};
+
+const FIN_FIELDS = {
+  TotalRevenue: 'revenue', NetIncome: 'netIncome', OperatingIncome: 'operatingProfit', DilutedEPS: 'eps',
+  InterestExpense: 'interest', TotalDebt: 'debt', StockholdersEquity: 'equity',
+  OperatingCashFlow: 'ocf', FreeCashFlow: 'fcf',
+};
+
+/** Annual and quarterly statements from Yahoo's fundamentals timeseries, in the Screener row shape. */
+async function _yahooFinancials(ysym) {
+  const now = Math.floor(Date.now() / 1000);
+  const types = Object.keys(FIN_FIELDS).flatMap(f => [`annual${f}`, `quarterly${f}`]);
+  const url = `https://query2.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries/${encodeURIComponent(ysym)}`
+            + `?type=${types.join(',')}&period1=${now - 6 * 365 * 86400}&period2=${now}`;
+  const res = (await fetchYahooAuthed(url))?.timeseries?.result || [];
+  const rows = { annual: {}, quarterly: {} };
+  let currency = null;
+  for (const r of res) {
+    const type = r.meta?.type?.[0];
+    const m = /^(annual|quarterly)(.+)$/.exec(type || '');
+    if (!m || !FIN_FIELDS[m[2]]) continue;
+    for (const pt of r[type] || []) {
+      if (!pt?.asOfDate || pt.reportedValue?.raw == null) continue;
+      (rows[m[1]][pt.asOfDate] ??= { date: pt.asOfDate })[FIN_FIELDS[m[2]]] = pt.reportedValue.raw;
+      currency ??= pt.currencyCode || null;
+    }
+  }
+  const sorted = (o) => Object.values(o).filter(r => r.revenue != null || r.netIncome != null).sort((a, b) => a.date.localeCompare(b.date));
+  const annual = sorted(rows.annual), quarterly = sorted(rows.quarterly);
+  return annual.length || quarterly.length ? { kind: 'company', consolidated: true, currency, annual, quarterly } : null;
+}
+
+/** Who holds a foreign company: insiders and institutions, and the largest institutional holders. */
+function _holders(q) {
+  const mh = q.majorHoldersBreakdown, list = q.institutionOwnership?.ownershipList || [];
+  if (!mh && !list.length) return null;
+  return {
+    kind: 'holders',
+    insiders: round(fraction(raw(mh?.insidersPercentHeld))),
+    institutions: round(fraction(raw(mh?.institutionsPercentHeld))),
+    institutionsFloat: round(fraction(raw(mh?.institutionsFloatPercentHeld))),
+    institutionsCount: raw(mh?.institutionsCount),
+    asof: raw(list[0]?.reportDate) ? toDateStr(raw(list[0].reportDate) * 1000) : null,
+    top: list.map(o => ({
+      name: o.organization, pct: round(fraction(raw(o.pctHeld))), value: raw(o.value),
+      change: round(fraction(raw(o.pctChange)), 1),
+    })).filter(o => o.name && o.pct >= 0.01),
+  };
+}
+
+/** Yahoo's "often compared with" list, valued and priced the same way as the company. */
+async function _yahooPeers(ysym) {
+  const rec = await fetchYahooAuthed(`https://query2.finance.yahoo.com/v6/finance/recommendationsbysymbol/${encodeURIComponent(ysym)}`);
+  const syms = [ysym, ...(rec?.finance?.result?.[0]?.recommendedSymbols || []).map(r => r.symbol).filter(Boolean).slice(0, 7)];
+  if (syms.length < 2) return null;
+  const [quotes, charts] = await Promise.all([
+    fetchYahooAuthed(`https://query2.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(syms.join(','))}&fields=marketCap,trailingPE,priceToBook,longName,shortName,currency,quoteType`),
+    Promise.all(syms.map(sym => fetchChart(sym, { range: '1y', interval: '1d' }, 10000).catch(() => null))),
+  ]);
+  const byS = Object.fromEntries((quotes?.quoteResponse?.result || []).map(r => [r.symbol, r]));
+  const items = syms.map((sym, i) => {
+    const qt = byS[sym];
+    if (!qt || (qt.quoteType && qt.quoteType !== 'EQUITY')) return null;
+    const w = windowReturns(toSorted(closesByDay(charts[i])), ['1m', '1y']);
+    return {
+      symbol: sym, name: qt.longName || qt.shortName || sym, currency: qt.currency || null,
+      cap: qt.marketCap > 0 ? qt.marketCap : null,
+      pe: qt.trailingPE > 0 ? round(qt.trailingPE) : null, pb: qt.priceToBook > 0 ? round(qt.priceToBook) : null,
+      chg1m: round(w['1m']), chg1y: round(w['1y']), self: sym === ysym,
+    };
+  }).filter(Boolean).sort((a, b) => (b.cap || 0) - (a.cap || 0));
+  if (items.length < 2) return null;
+  return { label: 'Often compared', rank: items.findIndex(p => p.self) + 1, count: items.length, items };
+}
+
 // ── Assembly ───────────────────────────────────────────────────────────────────
 
-async function getStock(symbol, { fresh = false } = {}) {
-  const hit = _memo.get(symbol);
+async function getStock(symbol, { fresh = false, global = false } = {}) {
+  const key = `${global ? 'g' : 'n'}:${symbol}`;
+  const hit = _memo.get(key);
   if (hit && Date.now() - hit.at < (fresh ? 30 * 1000 : TTL_MS)) return hit.data;
 
-  const ysym = `${symbol}.NS`;
-  const [chart, index, q, co, peers] = await Promise.all([
+  const ysym = global ? symbol : `${symbol}.NS`;
+  const bench = global ? homeIndex(ysym) : { symbol: '^NSEI', label: 'Nifty 50' };
+  const [chart, index, q, co, peers, yPeers] = await Promise.all([
     fetchChart(ysym, { range: '5y', interval: '1d' }, 12000),
-    fetchChart('^NSEI', { range: '5y', interval: '1d' }, 12000),
+    fetchChart(bench.symbol, { range: '5y', interval: '1d' }, 12000),
     _quoteSummary(ysym),
-    screenerService.getCompany(symbol).catch(() => null),
-    sectorService.getPeers(symbol).catch(() => null),
+    (global ? _yahooFinancials(ysym) : screenerService.getCompany(symbol)).catch(() => null),
+    global ? null : sectorService.getPeers(symbol).catch(() => null),
+    global ? _yahooPeers(ysym).catch(() => null) : null,
   ]);
+  // Abroad, money stays in native units; at home it is ₹ crore.
+  const money = global ? (v) => (v == null ? null : v) : crore;
 
   const stock = toSorted(closesByDay(chart));
   if (stock.length < 2 && !q.price) throw notFound(`No market data for ${symbol}`);
@@ -256,14 +357,23 @@ async function getStock(symbol, { fresh = false } = {}) {
 
   const targetMean = raw(fd.targetMeanPrice);
   const trend = q.recommendationTrend?.trend?.find(t => t.period === '0m') || null;
+  const trendTotal = trend ? ['strongBuy', 'buy', 'hold', 'sell', 'strongSell'].reduce((a, k) => a + (trend[k] || 0), 0) : 0;
+  // Yahoo sends `{}` for "no analysts", which is truthy — count what is actually there.
+  const analystCount = raw(fd.numberOfAnalystOpinions) || trendTotal || 0;
 
   const data = {
     symbol,
     name: price.longName || price.shortName || chart?.meta?.longName || symbol,
     asof: stock.length ? toDateStr(stock[stock.length - 1][0]) : null,
+    global,
+    exchange: price.exchangeName || chart?.meta?.fullExchangeName || (global ? null : 'NSE'),
+    benchmark: bench,
+    money: global
+      ? { unit: 'unit', currency: price.currency || chart?.meta?.currency || null, financialCurrency: fd.financialCurrency || co?.currency || price.currency || null }
+      : { unit: 'crore', currency: 'INR', financialCurrency: 'INR' },
 
     profile: {
-      sector: peers?.sector?.label || null,          // OUR sector — the one the map uses
+      sector: peers?.sector?.label || ap.sectorDisp || ap.sector || null,   // OUR sector at home — the one the map uses
       industry: ap.industryDisp || ap.industry || null,
       description: ap.longBusinessSummary || null,
       website: ap.website || null,
@@ -278,26 +388,26 @@ async function getStock(symbol, { fresh = false } = {}) {
       changePct: round(sRet['1d']),
       dayHigh: raw(sd.dayHigh), dayLow: raw(sd.dayLow),
       volume: raw(sd.volume), avgVolume: raw(sd.averageVolume),
-      marketCap: crore(raw(price.marketCap) ?? raw(sd.marketCap)),
+      marketCap: money(raw(price.marketCap) ?? raw(sd.marketCap)),
     },
 
     valuation: {
       pe: round(raw(sd.trailingPE)), forwardPe: round(raw(ks.forwardPE) ?? raw(sd.forwardPE)),
       pb: round(raw(ks.priceToBook)),
-      evEbitda: isBank ? null : round(raw(ks.enterpriseToEbitda)), ev: isBank ? null : crore(raw(ks.enterpriseValue)),
+      evEbitda: isBank ? null : round(raw(ks.enterpriseToEbitda)), ev: isBank ? null : money(raw(ks.enterpriseValue)),
       eps: round(raw(ks.trailingEps)), bookValue: round(raw(ks.bookValue)),
       dividendYield: round(fraction(raw(sd.dividendYield))), payoutRatio: round(fraction(raw(sd.payoutRatio))),
       sectorMedianPe: round(peers?.medianPe), sectorMedianPb: round(peers?.medianPb),
     },
 
-    health: fin ? { ..._health(fin, isBank), cash: crore(raw(fd.totalCash)) } : null,
+    health: fin ? { ..._health(fin, isBank), cash: money(raw(fd.totalCash)) } : null,
 
-    analysts: fd.numberOfAnalystOpinions ? {
-      count: raw(fd.numberOfAnalystOpinions),
-      key: fd.recommendationKey || null,
+    analysts: analystCount > 0 || targetMean != null ? {
+      count: analystCount || null,
+      key: fd.recommendationKey && fd.recommendationKey !== 'none' ? fd.recommendationKey : null,
       targetMean: round(targetMean), targetHigh: round(raw(fd.targetHighPrice)), targetLow: round(raw(fd.targetLowPrice)),
       upside: round(pctChange(targetMean, last), 1),
-      trend: trend && { strongBuy: trend.strongBuy, buy: trend.buy, hold: trend.hold, sell: trend.sell, strongSell: trend.strongSell },
+      trend: trendTotal > 0 && { strongBuy: trend.strongBuy, buy: trend.buy, hold: trend.hold, sell: trend.sell, strongSell: trend.strongSell },
     } : null,
 
     earnings: {
@@ -315,7 +425,7 @@ async function getStock(symbol, { fresh = false } = {}) {
     },
 
     financials: fin && { kind: co.kind, consolidated: co.consolidated, ...fin },
-    ownership: _ownership(co),
+    ownership: global ? _holders(q) : _ownership(co),
 
     performance: {
       returns: Object.fromEntries(['1d', '1w', '1m', '3m', '6m', 'ytd', '1y', '3y', '5y'].map(k => [k, {
@@ -325,7 +435,9 @@ async function getStock(symbol, { fresh = false } = {}) {
       ...(stock.length > 30 && nifty.length > 30 ? _risk(stock, nifty) : {}),
     },
 
-    peers: peers && {
+    experience: holdingExperience(stock, nifty),
+
+    peers: yPeers || peers && {
       sector: { ...peers.sector, cap: crore(peers.sector?.cap) }, rank: peers.rank, count: peers.peers.length,
       items: peers.peers.map(p => ({
         symbol: p.symbol, name: p.name, cap: crore(p.cap), pe: round(p.pe), pb: round(p.pb),
@@ -334,7 +446,7 @@ async function getStock(symbol, { fresh = false } = {}) {
     },
   };
 
-  _memo.set(symbol, { at: Date.now(), data });
+  _memo.set(key, { at: Date.now(), data });
   return data;
 }
 

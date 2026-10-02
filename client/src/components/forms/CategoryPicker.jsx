@@ -1,5 +1,6 @@
 import { useEffect, useReducer } from 'react';
 import { categoriesAPI } from '../../lib/api';
+import { invalidateCategories } from '../../lib/categoryNames';
 import TypePicker from './TypePicker';
 
 // Module-level cache so we don't refetch categories on every mount.
@@ -37,6 +38,7 @@ export default function CategoryPicker({ value, onChange, transactionType, disab
     if (level === 'primary') updated.primary.push(cat);
     else updated.secondary[parent] = [...(updated.secondary[parent] || []), cat];
     _cache[transactionType] = updated;
+    invalidateCategories();  // rows and the import review name categories from the shared taxonomy
     bump();
     return toOption(cat);
   }

@@ -16,6 +16,7 @@ import PriceGrapher from '../components/charts/PriceGrapher';
 import ImportModal from '../components/import/ImportModal';
 import Button from '../components/ui/Button';
 import AssetIcon from '../components/market/AssetIcon';
+import HoldingLink from '../components/portfolio/HoldingLink';
 import { assetTypeLabel } from '../lib/constants';
 import { toCreatePayload } from '../lib/undo';
 import Card from '../components/ui/Card';
@@ -438,7 +439,7 @@ export default function AccountDetail() {
                   <AssetIcon symbol={h.symbol} name={h.name} type={h.type} size={30} />
                   <div style={{ minWidth: 0 }}>
                     <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
-                      {h.name}
+                      <HoldingLink h={h}>{h.name}</HoldingLink>
                     </p>
                     <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
                       <span className="figure">{h.symbol}</span> · {assetTypeLabel(h.type)}

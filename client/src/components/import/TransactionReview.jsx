@@ -288,10 +288,29 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         background: 'var(--color-bg-input)', border: '1px solid var(--color-border)',
         boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.22)',
       }}>
-        <div style={{ minWidth: 0 }}>
-          <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {bankName}{accountName ? ` · ${accountName}` : ''}
-          </p>
+        <div style={{ minWidth: 0, flex: '1 1 260px' }}>
+          {/* Source, then how well it was read — the badges describe the parse, so they sit on its line. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 }}>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--color-text-primary)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+              {bankName}{accountName ? ` · ${accountName}` : ''}
+            </p>
+            <ConfidenceBadge summary={confidence} />
+            {aiParsed && (
+              <span
+                title="Parsed by AI — check dates, amounts and categories before importing."
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
+                  padding: '3px 8px', borderRadius: 999,
+                  fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em',
+                  color: 'var(--color-accent)',
+                  background: 'var(--color-accent-muted)',
+                  border: '1px solid var(--color-accent-dim)',
+                  cursor: 'default',
+                }}>
+                <Sparkles size={10} /> AI-generated
+              </span>
+            )}
+          </div>
           {/* Editable date-range filter — "from – to" with an edit affordance */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 3 }}>
             <DateRangePicker
@@ -358,85 +377,60 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         </div>
       </div>
 
-      {/* Select all row — the AI-generated badge rides along here as a pill rather
-          than a full-width banner, which cost a whole row of vertical space. The
-          caution it carried lives on as its tooltip. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', marginBottom: 4, flexShrink: 0 }}>
-        <Checkbox
-          checked={allSelected}
-          indeterminate={!allSelected && !noneSelected}
-          onChange={v => toggleAll(v)}
-        />
-        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-          {selected.length} of {visibleRows.length} selected{isFiltered ? ` · ${rows.length - visibleRows.length} outside range` : ''}
-        </span>
-
-        {/* Bulk switch for the statement's trades. A broker statement's buys are
-            normally funded from the very account being imported, so settling them all
-            against cash is one click rather than one per row. Applies to buys AND
-            sells: a buy deducts its cost, a sell adds its proceeds. */}
-        {assetRowCount > 0 && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
-            <Checkbox
-              tone="plain"
-              checked={allAssetsSettled}
-              indeterminate={someAssetsSettled && !allAssetsSettled}
-              onChange={v => setAllAssetsSettled(v)}
-            />
-            <span
-              onClick={() => setAllAssetsSettled(!allAssetsSettled)}
-              className="text-xs"
-              style={{ color: 'var(--color-text-secondary)', cursor: 'pointer' }}
-              title="Buys deduct their cost from this account’s cash; sells add their proceeds."
-            >
-              Settle {assetRowCount} asset {assetRowCount === 1 ? 'trade' : 'trades'} with cash
-            </span>
-          </div>
-        )}
-
-        <span style={{ flex: 1 }} />
-
-        {/* One figure for the whole parse, beside the AI pill — that pill raises the
-            question of how much to trust this, and on its own never answered it. */}
-        <ConfidenceBadge summary={confidence} />
-
-        {aiParsed && (
-          <span
-            title="Parsed by AI — check dates, amounts and categories before importing."
-            style={{
-              display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
-              padding: '3px 8px', borderRadius: 999,
-              fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.04em',
-              color: 'var(--color-accent)',
-              background: 'var(--color-accent-muted)',
-              border: '1px solid var(--color-accent-dim)',
-              cursor: 'default',
-            }}>
-            <Sparkles size={10} /> AI-generated
-          </span>
-        )}
-        {/* A statement misses things — a cash payment, a transfer the bank never
-            printed. Adding it here beats importing and then hunting for the form. */}
-        <button type="button" onClick={addRow}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-          <Plus size={12} /> Add transaction
-        </button>
-
-        <BackLink onClick={onBack} style={{ fontSize: '0.75rem', flexShrink: 0 }}>
-          Upload a different file
-        </BackLink>
-      </div>
-
-      {/* Transaction rows — the only scrollable region; the modal itself stays fixed */}
+      {/* The list, headed by its own controls: what is selected and what to do with it. */}
       <div style={{
         border: '1px solid var(--color-border)',
         borderRadius: 'var(--radius)',
-        overflow: 'hidden',
         flex: '1 1 auto',
         minHeight: 180,
-        maxHeight: 'min(42vh, 380px)',
+        maxHeight: 'min(46vh, 420px)',
         overflowY: 'auto',
       }}>
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 2,
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: 18, rowGap: 8,
+          padding: '9px 14px',
+          background: 'var(--color-bg-secondary)',
+          borderBottom: '1px solid var(--color-border)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <Checkbox
+              checked={allSelected}
+              indeterminate={!allSelected && !noneSelected}
+              onChange={v => toggleAll(v)}
+            />
+            <span className="text-xs" style={{ color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+              {selected.length} of {visibleRows.length} selected{isFiltered ? ` · ${rows.length - visibleRows.length} outside range` : ''}
+            </span>
+          </div>
+
+          {/* Bulk switch for the statement's trades: a buy deducts its cost, a sell adds its proceeds. */}
+          {assetRowCount > 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+              <Checkbox
+                tone="plain"
+                checked={allAssetsSettled}
+                indeterminate={someAssetsSettled && !allAssetsSettled}
+                onChange={v => setAllAssetsSettled(v)}
+              />
+              <span
+                onClick={() => setAllAssetsSettled(!allAssetsSettled)}
+                className="text-xs"
+                style={{ color: 'var(--color-text-secondary)', cursor: 'pointer', whiteSpace: 'nowrap' }}
+                title="Buys deduct their cost from this account’s cash; sells add their proceeds."
+              >
+                Settle {assetRowCount} {assetRowCount === 1 ? 'trade' : 'trades'} with cash
+              </span>
+            </div>
+          )}
+
+          {/* A statement misses things — a cash payment, a transfer the bank never printed. */}
+          <button type="button" onClick={addRow}
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-accent)', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, padding: 0, fontFamily: 'inherit' }}>
+            <Plus size={12} /> Add transaction
+          </button>
+        </div>
+
         {visibleRows.map((row, i) => (
           <ReviewRow
             key={row.id}
@@ -459,20 +453,25 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         <p className="text-xs" style={{ color: 'var(--color-danger)', marginTop: 12, flexShrink: 0 }}>{error}</p>
       )}
 
-      {/* Import button */}
-      <button
-        type="button"
-        onClick={handleImport}
-        disabled={submitting || !selected.length}
-        className="btn-primary"
-        style={{ width: '100%', padding: '11px 18px', marginTop: 16, flexShrink: 0 }}
-      >
-        {submitting ? (
-          <><div className="spinner" style={{ width: 15, height: 15, borderWidth: 2 }} /><span>Importing…</span></>
-        ) : (
-          <><span>Import {selected.length} transaction{selected.length !== 1 ? 's' : ''}</span><ArrowRight size={14} /></>
-        )}
-      </button>
+      {/* Back and forward, side by side */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 18, marginTop: 16, flexShrink: 0 }}>
+        <BackLink onClick={onBack} style={{ fontSize: '0.75rem', flexShrink: 0, alignSelf: 'center' }}>
+          Upload a different file
+        </BackLink>
+        <button
+          type="button"
+          onClick={handleImport}
+          disabled={submitting || !selected.length}
+          className="btn-primary"
+          style={{ flex: 1, padding: '11px 18px' }}
+        >
+          {submitting ? (
+            <><div className="spinner" style={{ width: 15, height: 15, borderWidth: 2 }} /><span>Importing…</span></>
+          ) : (
+            <><span>Import {selected.length} transaction{selected.length !== 1 ? 's' : ''}</span><ArrowRight size={14} /></>
+          )}
+        </button>
+      </div>
     </div>
   );
 }

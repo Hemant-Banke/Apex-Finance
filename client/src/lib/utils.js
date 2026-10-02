@@ -64,6 +64,16 @@ export function formatCrore(cr, { signed = false } = {}) {
   return `${sign}₹${a.toLocaleString('en-IN', { maximumFractionDigits: 0 })} Cr`;
 }
 
+/** A large amount in a foreign currency, compacted the international way: "$109.4B", "¥13.5T". */
+export function formatCompactNative(amount, currency) {
+  if (amount == null || isNaN(amount)) return '—';
+  try {
+    return new Intl.NumberFormat('en-US', currency ? { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 2 } : { notation: 'compact', maximumFractionDigits: 2 }).format(amount);
+  } catch {
+    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(amount);
+  }
+}
+
 /** Formatter that condenses only when the magnitude is large (≥ ₹1L). */
 export function compactIfLarge(amount, formatValue = formatCurrency) {
   return Math.abs(amount) >= 1_00_000 ? formatCompact(amount) : formatValue(amount);

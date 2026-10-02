@@ -80,6 +80,11 @@ function App() {
               <AppShell><Stock /></AppShell>
             </ProtectedRoute>
           } />
+          <Route path="/markets/world/:symbol" element={
+            <ProtectedRoute>
+              <AppShell><Stock global /></AppShell>
+            </ProtectedRoute>
+          } />
           <Route path="/markets/assets/:symbol" element={
             <ProtectedRoute>
               <AppShell><Asset /></AppShell>

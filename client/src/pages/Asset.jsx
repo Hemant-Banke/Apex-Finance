@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { marketsAPI, marketAPI, dashboardAPI } from '../lib/api';
-import { formatPct, pnlColor, dayLabel } from '../lib/utils';
-import { formatLevel, MARKET_RANGES, toChartSeries } from '../lib/markets';
+import { formatPct, pnlColor, dayLabel, formatCurrency } from '../lib/utils';
+import { formatLevel, axisFormatFor, MARKET_RANGES, toChartSeries } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
@@ -14,6 +14,11 @@ import PriceGrapher from '../components/charts/PriceGrapher';
 import AssetIcon from '../components/market/AssetIcon';
 import { RangeBar, Performance } from '../components/stock/PricePerformance';
 import PositionCard from '../components/portfolio/PositionCard';
+import IndexProfile from '../components/asset/IndexProfile';
+import FundProfile from '../components/asset/FundProfile';
+import MetalProfile from '../components/asset/MetalProfile';
+import ReturnSplit from '../components/asset/ReturnSplit';
+import HoldingExperience from '../components/asset/HoldingExperience';
 
 /**
  * Any instrument that is not an NSE company — an index, gold or silver, a coin, a US
@@ -22,9 +27,9 @@ import PositionCard from '../components/portfolio/PositionCard';
  * It is the price half of the company page, in the same order and drawn by the same
  * components: what it is worth and how it moved today, your own position if you hold it,
  * the chart (its growth view already against its benchmark, "+" for any other), then
- * returns over every window against that benchmark and the risk measures. What it lacks
- * is what only a company has — filings, valuation, analysts, owners — and it does not
- * pretend otherwise with empty sections.
+ * returns over every window against that benchmark and the risk measures. Then what each
+ * kind is asked about: an index's valuation and members, a fund's scheme and plans, a
+ * metal's purities and rupee split, and for all of them SIP and rolling returns.
  *
  * Every price is printed in the instrument's own unit (`levelFormatter`): an index in
  * points, gold in ₹ a gram, Apple in dollars. Your position is in rupees, because that
@@ -73,8 +78,12 @@ export default function Asset() {
     : marketAPI.indexSeries(symbol, days).then(r => toChartSeries(r.data, growth))), [symbol]);
   const fetchOHLC = useCallback((days) => marketAPI.ohlc(symbol, days).then(r => r.data?.candles || []), [symbol]);
 
-  // Every benchmark but itself — the Nifty's page does not offer to compare it with the Nifty.
-  const benchmarks = useMemo(() => BENCHMARKS.filter(b => b.symbol !== symbol), [symbol]);
+  // Every benchmark but itself, plus the payload's own (a fund's category index) if the catalogue lacks it.
+  const bench = data?.benchmark;
+  const benchmarks = useMemo(() => {
+    const list = BENCHMARKS.filter(b => b.symbol !== symbol);
+    return bench && !list.some(b => b.symbol === bench.symbol) ? [bench, ...list] : list;
+  }, [symbol, bench]);
 
   if (error) {
     return (
@@ -88,7 +97,7 @@ export default function Asset() {
   }
   if (!data || data.symbol !== symbol) return <Spinner />;
 
-  const { quote, performance: perf, benchmark } = data;
+  const { quote, performance: perf, benchmark, profile, currencyLens: lens } = data;
   const fmt = levelFormatter(data.currency, data.unit);
   const typeLabel = TYPE_LABELS[data.type] || 'Instrument';
   const ticker = displaySymbol(data.symbol);
@@ -107,7 +116,7 @@ export default function Asset() {
       <Masthead
         lead={
           <div className="flex items-center" style={{ gap: 16 }}>
-            <AssetIcon symbol={data.symbol} name={data.name} type={data.type} size={44} />
+            <AssetIcon symbol={data.symbol} name={data.name} type={data.type} size={44} nudge={false} />
             <div>
               <p className="eyebrow" style={{ marginBottom: 10 }}>{data.type === 'index' ? 'Level' : data.type === 'mutual_fund' ? 'NAV' : 'Price'}</p>
               <h1 className="display-number" style={{ fontSize: 'clamp(1.6rem, 4vw, 2rem)', color: 'var(--color-text-primary)' }}>
@@ -129,7 +138,7 @@ export default function Asset() {
         band={
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 20, alignItems: 'start' }}>
             <MastheadFigure label="1 year" value={r1y?.stock != null ? formatPct(r1y.stock, 1) : '—'} accent={pnlColor(r1y?.stock)}
-              sub={r1y?.nifty != null ? <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{benchmark.label} {formatPct(r1y.nifty, 1)}</p> : null} />
+              sub={r1y?.nifty != null && benchmark ? <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{benchmark.label} {formatPct(r1y.nifty, 1)}</p> : null} />
             <MastheadFigure label="From 52-week high" value={perf.fromHigh != null ? formatPct(perf.fromHigh, 1) : '—'} accent={pnlColor(perf.fromHigh)} />
             <MastheadFigure label="Volatility (1Y)" value={perf.volatility != null ? `${perf.volatility.toFixed(1)}%` : '—'} />
             <div style={{ minWidth: 0 }}>
@@ -144,16 +153,25 @@ export default function Asset() {
         positions={positions.map(h => ({ qty: h.qty, invested: h.invested, value: h.value, pnl: h.unrealisedPnl, dayChange: h.dayChange }))} />
 
       <PriceGrapher key={data.symbol} title={typeLabel === 'Index' ? 'Level' : 'Price'} valueLabel={data.type === 'mutual_fund' ? 'NAV' : 'Close'}
-        formatValue={fmt} fetchData={fetchPrice} fetchOHLC={isYahoo(data.symbol) ? fetchOHLC : null}
+        formatValue={fmt} axisFormat={axisFormatFor(data.currency)} fetchData={fetchPrice} fetchOHLC={isYahoo(data.symbol) ? fetchOHLC : null}
         ranges={MARKET_RANGES} defaultRange="1Y"
-        growthCapable benchmarks={benchmarks} defaultCompare={[benchmark.symbol]}
+        growthCapable benchmarks={benchmarks} defaultCompare={benchmark ? [benchmark.symbol] : []}
         viewLabels={{ complete: data.type === 'index' ? 'Level' : 'Price', growth: 'vs market', hint: 'Indexed to 100 at the start of the range, against the benchmarks you add' }}
         emptyText="No price history for this instrument" />
 
       {perf?.returns && (
-        <Performance perf={perf} name={data.name} fmt={fmt} benchLabel={benchmark.label}
-          sub={`Its return over each window, against the ${benchmark.label}${data.currency && data.currency !== 'INR' ? ` · in ${data.currency}` : ''}`} />
+        <Performance perf={perf} name={data.name} fmt={fmt} benchLabel={benchmark?.label ?? null}
+          sub={`Its return over each window${benchmark ? `, against the ${benchmark.label}` : ''}${data.currency && data.currency !== 'INR' ? ` · in ${data.currency}` : ''}`} />
       )}
+
+      {profile?.kind === 'index' && <IndexProfile p={profile} name={data.name} changePct={quote.changePct} />}
+      {profile?.kind === 'metal' && <MetalProfile p={profile} name={data.name} />}
+      {lens && (
+        <ReturnSplit split={lens.split} currency={lens.currency} assetLabel={data.name}
+          sub={`What it did in ${lens.currency}, what the rupee did against the ${lens.currency}, and what that made for a rupee investor. Today it is about ${formatCurrency(lens.inrPrice)} in rupees.`} />
+      )}
+      <HoldingExperience exp={data.experience} name={data.name} benchmark={benchmark} currency={data.currency} />
+      {profile?.kind === 'fund' && <FundProfile p={profile} benchmark={benchmark} />}
     </div>
   );
 }

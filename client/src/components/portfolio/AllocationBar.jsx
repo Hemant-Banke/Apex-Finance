@@ -14,8 +14,9 @@ import { assetTypeLabel } from '../../lib/constants';
  * Props:
  *   items — [{ type|name, value, weight }] already sorted, largest first
  *   total — the whole, for the legend's amounts
+ *   showValue — print each slice's rupee amount (off where `value` is not money)
  */
-export default function AllocationBar({ items = [], height = 10 }) {
+export default function AllocationBar({ items = [], height = 10, showValue = true }) {
   const visible = items.filter(i => i.value > 0);
   if (!visible.length) return null;
 
@@ -64,9 +65,11 @@ export default function AllocationBar({ items = [], height = 10 }) {
             <span className="figure text-xs" style={{ color: 'var(--color-text-muted)' }}>
               {s.weight.toFixed(1)}%
             </span>
-            <span className="figure text-xs" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>
-              {compactIfLarge(s.value, formatCurrency)}
-            </span>
+            {showValue && (
+              <span className="figure text-xs" style={{ color: 'var(--color-text-muted)', opacity: 0.7 }}>
+                {compactIfLarge(s.value, formatCurrency)}
+              </span>
+            )}
           </div>
         ))}
       </div>

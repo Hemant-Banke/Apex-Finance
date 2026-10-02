@@ -4,6 +4,8 @@
  * formatting live in lib/utils with every other page's.
  */
 
+import { formatCrore, formatCompactNative, formatNativeCurrency, axisCompact } from './utils';
+
 /** The look-back windows NSE reports every index over, and the field each one reads. */
 export const WINDOWS = [
   { key: '1d', label: '1D', field: 'chg1d', long: 'today' },
@@ -43,11 +45,37 @@ export function formatLevel(v, currency) {
   return currency ? `${n} ${currency}` : n;
 }
 
+/** A compact y-axis tick in a price's own unit: ₹ (null → the chart's default), index points, or a foreign currency. */
+export const axisFormatFor = (currency) => (currency === 'INR' ? undefined
+  : (v) => formatCompactNative(v, currency || undefined));
+
 /** A rupee price at market precision — the `fmt` for share prices. */
 export const rupeeLevel = (v) => formatLevel(v, 'INR');
 
 /** The company page for an NSE symbol. Under /markets so the sidebar keeps Markets lit. */
 export const stockPath = (symbol) => `/markets/stocks/${encodeURIComponent(symbol)}`;
+
+/** The company page for a stock listed abroad, by its Yahoo symbol (AAPL, 7203.T). */
+export const globalStockPath = (symbol) => `/markets/world/${encodeURIComponent(symbol)}`;
+
+/**
+ * Formatters for a company page's money (`data.money`): ₹ crore at home, the company's
+ * own currency compacted abroad. `big` is the quote currency (market cap, EV); `fin` the
+ * currency its statements are filed in, which can differ for a cross-listing.
+ */
+export function companyMoney(m) {
+  const home = !m || m.unit === 'crore';
+  const fin = m?.financialCurrency || m?.currency;
+  return {
+    home,
+    unitLabel: home ? '₹ crore' : fin,
+    big:      home ? (v) => formatCrore(v) : (v) => formatCompactNative(v, m.currency),
+    fin:      home ? (v) => formatCrore(v) : (v) => formatCompactNative(v, fin),
+    axis:     home ? (v) => axisCompact(v) : (v) => formatCompactNative(v),
+    price:    home ? (v) => formatLevel(v, 'INR') : (v) => (v == null ? '—' : formatNativeCurrency(v, m.currency)),
+    perShare: home ? (v) => (v == null ? '—' : `₹${v.toFixed(2)}`) : (v) => (v == null ? '—' : formatNativeCurrency(v, fin)),
+  };
+}
 
 /** The price page for any other instrument — an index, a metal, a coin, a fund. */
 export const assetPath = (symbol) => `/markets/assets/${encodeURIComponent(symbol)}`;
@@ -55,7 +83,7 @@ export const assetPath = (symbol) => `/markets/assets/${encodeURIComponent(symbo
 /**
  * Where picking a security in Markets takes you, or null if it has no market to show.
  *
- * An NSE-listed company has a full company page; everything else with a price history
+ * A listed company (NSE or abroad) has a full company page; everything else with a price history
  * gets the asset page. Physical gold and silver are the DOMESTIC metal price per gram —
  * the same figure the holding is valued at — whatever the user named the holding. A
  * self-priced asset (an FD, a flat) has no market at all.
@@ -67,7 +95,10 @@ export function viewPathFor(sec) {
   }
   if (sec.isManual) return null;
   const nse = sec.type === 'stock' && nseSymbolOf(sec.symbol);
-  return nse ? stockPath(nse) : assetPath(sec.symbol);
+  if (nse) return stockPath(nse);
+  // A company listed abroad gets the company page too; a BSE listing stays on the price page.
+  if (sec.type === 'stock' && !/\.BO$/i.test(sec.symbol)) return globalStockPath(sec.symbol);
+  return assetPath(sec.symbol);
 }
 
 /**

@@ -33,15 +33,17 @@ router.get('/sectors', asyncHandler(async (req, res) => {
   res.json(await sectorService.getSectors(fresh(req)));
 }));
 
-// @route GET /api/markets/stocks/:symbol
-// One NSE-listed company in full for its page: quote, price history against the Nifty 50,
+// @route GET /api/markets/stocks/:symbol[?global=true]
+// One company in full for its page: quote, price history against its home index,
 // computed performance and risk, valuation, financials, analysts, ownership and peers.
+// `global` takes a Yahoo symbol listed abroad (AAPL, 7203.T); otherwise an NSE symbol.
 router.get('/stocks/:symbol', asyncHandler(async (req, res) => {
   const symbol = String(req.params.symbol || '').toUpperCase();
-  // NSE symbols are letters, digits, '&' and '-' ("M&M", "BAJAJ-AUTO"). Anything else is
-  // not a symbol, and must not reach a URL we build.
-  if (!/^[A-Z0-9&-]{1,20}$/.test(symbol)) throw badRequest('Not an NSE symbol');
-  res.json(await stockService.getStock(symbol, fresh(req)));
+  const global = req.query.global === 'true';
+  // NSE symbols are letters, digits, '&' and '-' ("M&M"); Yahoo's add '.' for the exchange.
+  // Anything else is not a symbol, and must not reach a URL we build.
+  if (!(global ? /^[A-Z0-9&.-]{1,24}$/ : /^[A-Z0-9&-]{1,20}$/).test(symbol)) throw badRequest('Not a stock symbol');
+  res.json(await stockService.getStock(symbol, { ...fresh(req), global }));
 }));
 
 // @route GET /api/markets/assets/:symbol

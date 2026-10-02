@@ -550,6 +550,22 @@ async function getSchemes(schemeCodes = []) {
   return Object.fromEntries(docs.map(d => [d.schemeCode, d]));
 }
 
+/**
+ * The other live plans of the same fund (Direct/Regular × Growth/IDCW) — same fund house,
+ * same identifying name. Local Mongo only; a plan with no NAV in a month is closed.
+ */
+async function getSiblingPlans(schemeCode) {
+  const self = await MfScheme.findOne({ schemeCode }).lean();
+  if (!self) return [];
+  const id = idTokens(self.name).join(' ');
+  const cutoff = new Date(Date.now() - 30 * DAY_MS);
+  return (await _findCandidates(idTokens(self.name)))
+    .filter(d => d.schemeCode !== schemeCode && d.fundHouse === self.fundHouse
+      && idTokens(d.name).join(' ') === id && d.navDate && d.navDate >= cutoff)
+    .map(d => ({ symbol: toMfSymbol(d.schemeCode), name: d.name, nav: d.nav, navDate: d.navDate }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // ─── Resolution (statement import) ───────────────────────────────────────────
 
 /**
@@ -628,5 +644,6 @@ module.exports = {
   getNavOn,
   getLatestNavs,
   getSchemes,
+  getSiblingPlans,
   resolveScheme,
 };

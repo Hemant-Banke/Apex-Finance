@@ -15,6 +15,7 @@ import { categoriesAPI } from './api';
 
 let _all = null;          // { [code]: { name, emoji, parent, level } }
 let _loading = null;      // in-flight promise, so concurrent mounts share one fetch
+let _gen = 0;             // bumped on invalidate, so a stale in-flight fetch cannot win
 const _subscribers = new Set();
 
 function indexTaxonomy(data) {
@@ -34,13 +35,18 @@ async function loadCategories() {
   if (_all) return _all;
   if (_loading) return _loading;
 
-  _loading = categoriesAPI.getAll()
-    .then(res => { _all = indexTaxonomy(res.data); return _all; })
-    .catch(() => { _all = {}; return _all; })
-    .finally(() => {
+  const gen = _gen;
+  const req = categoriesAPI.getAll()
+    .then(res => indexTaxonomy(res.data))
+    .catch(() => ({}))
+    .then(map => {
+      if (gen !== _gen) return loadCategories();
+      _all = map;
       _loading = null;
       _subscribers.forEach(fn => fn());
+      return _all;
     });
+  _loading = req;
 
   return _loading;
 }
@@ -50,10 +56,15 @@ export function getCategoryMap() {
   return loadCategories();
 }
 
-/** Forget the cache — call after a category is created, renamed or removed. */
+/** Refetch after a category is created, renamed or removed. Mounted readers keep the old
+ *  names until the new taxonomy lands, then re-render with it. */
 export function invalidateCategories() {
+  _gen += 1;
+  _loading = null;
+  const stale = _all;
   _all = null;
-  _subscribers.forEach(fn => fn());
+  loadCategories();
+  _all = _all || stale;
 }
 
 /**

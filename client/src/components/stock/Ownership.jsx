@@ -2,7 +2,9 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import ChartTooltip from '../charts/ChartTooltip';
-import { CHART_COLORS, pnlColor, fiscalQuarter, monthLabel, formatPoints, formatCount } from '../../lib/utils';
+import { CHART_COLORS, pnlColor, fiscalQuarter, monthLabel, formatPoints, formatCount, formatPct, dayLabel } from '../../lib/utils';
+import ShowMore from '../ui/ShowMore';
+import AllocationBar from '../portfolio/AllocationBar';
 
 /**
  * Who owns the company, and which way that is moving — the quarterly shareholding pattern
@@ -32,7 +34,8 @@ const GROUPS = {
 
 const pts = (v) => formatPoints(v, 2, 'pts');
 
-export default function Ownership({ ownership }) {
+export default function Ownership({ ownership, money }) {
+  if (ownership?.kind === 'holders') return <Holders o={ownership} money={money} />;
   if (!ownership?.groups?.length) return null;
   const { groups, history, shareholders, shareholdersY1, since, asof } = ownership;
   // Government holdings under half a percent are noise on a shared axis; the table keeps them.
@@ -101,6 +104,49 @@ export default function Ownership({ ownership }) {
             <> · <span className="figure" style={{ color: pnlColor(holdersGrowth) }}>{holdersGrowth > 0 ? '+' : '−'}{Math.abs(holdersGrowth).toFixed(1)}%</span> on a year ago — {holdersGrowth >= 0 ? 'a widening' : 'a narrowing'} retail base</>
           )}
         </p>
+      )}
+    </Card>
+  );
+}
+
+/** A company listed abroad: no SEBI pattern, so insiders vs institutions and the largest institutional holders. */
+function Holders({ o, money }) {
+  const rest = o.insiders != null && o.institutions != null ? Math.max(0, 100 - o.insiders - o.institutions) : null;
+  const split = [
+    o.institutions != null && { name: 'Institutions', value: o.institutions, weight: o.institutions },
+    o.insiders != null && { name: 'Insiders', value: o.insiders, weight: o.insiders },
+    rest != null && { name: 'Everyone else', value: rest, weight: rest },
+  ].filter(Boolean);
+  const grid = '1.6fr 80px 110px 84px';
+  return (
+    <Card>
+      <SectionHeader eyebrow="Ownership" size="sm"
+        sub={`Who holds the shares${o.institutionsCount ? ` · ${formatCount(o.institutionsCount)} institutions` : ''}${o.asof ? ` · filings to ${dayLabel(o.asof, true)}` : ''}`}
+        style={{ marginBottom: 18 }} />
+      {split.length > 0 && <AllocationBar showValue={false} items={split} />}
+      {o.institutionsFloat != null && (
+        <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 12 }}>
+          Institutions hold <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>{o.institutionsFloat.toFixed(1)}%</span> of the shares that actually trade.
+        </p>
+      )}
+      {o.top?.length > 0 && (
+        <div style={{ overflowX: 'auto', marginTop: 20 }}>
+          <div style={{ minWidth: 460 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, paddingBottom: 9, borderBottom: '1px solid var(--color-border-subtle)' }}>
+              <span className="col-head">Largest holders</span>
+              {['Stake', 'Worth', 'Last change'].map(h => <span key={h} className="col-head" style={{ textAlign: 'right' }}>{h}</span>)}
+            </div>
+            <ShowMore items={o.top} initial={6} noun="holders" render={(h) => (
+              <div key={h.name} style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '10px 0', borderBottom: '1px solid var(--color-border-subtle)', alignItems: 'baseline' }}>
+                <span className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>{h.name}</span>
+                <span className="figure text-xs" style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{h.pct != null ? `${h.pct.toFixed(2)}%` : '—'}</span>
+                <span className="figure text-xs" style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{money ? money.big(h.value) : '—'}</span>
+                {/* The holder's own position change last filing, not the stock's. */}
+                <span className="figure text-xs" style={{ textAlign: 'right', color: h.change ? pnlColor(h.change) : 'var(--color-text-muted)' }}>{formatPct(h.change, 1)}</span>
+              </div>
+            )} />
+          </div>
+        </div>
       )}
     </Card>
   );

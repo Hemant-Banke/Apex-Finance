@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import Card from './Card';
 
 /**
@@ -18,8 +19,8 @@ import Card from './Card';
  *            the lead rather than pinned to its first line)
  *   band   — the components of the figure; omitted entirely when there are none
  */
-export default function Masthead({ lead, action, band }) {
-  return (
+export default function Masthead({ lead, action, band, to, title }) {
+  const card = (
     <Card gilt flush>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -40,6 +41,8 @@ export default function Masthead({ lead, action, band }) {
       )}
     </Card>
   );
+  // `to` makes the whole headline a link, e.g. the Markets masthead opening the Nifty's page.
+  return to ? <Link to={to} title={title} className="masthead-link">{card}</Link> : card;
 }
 
 /**

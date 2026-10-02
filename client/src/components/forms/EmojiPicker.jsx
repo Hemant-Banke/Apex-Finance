@@ -57,6 +57,8 @@ const GROUPS = [
     items: [
       ['🏥', 'hospital medical health'], ['💊', 'medicine pharmacy'], ['🩺', 'doctor checkup'],
       ['🦷', 'dentist'], ['🎓', 'education school college tuition'], ['📚', 'books study'],
+      ['👨‍👩‍👧', 'family home household'], ['👪', 'family parents kids'], ['🧓', 'parents elders family'],
+      ['💑', 'partner spouse couple family'], ['🧒', 'kids children family allowance'],
       ['👶', 'baby child kids'], ['🐾', 'pet dog cat vet'], ['💇', 'salon haircut grooming'],
       ['🧴', 'personal care toiletries'], ['👕', 'clothes apparel shopping'], ['👟', 'shoes'],
       ['🛍️', 'shopping retail'], ['🎁', 'gift present'], ['❤️', 'charity donation love'],

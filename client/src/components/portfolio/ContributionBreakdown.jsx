@@ -8,6 +8,7 @@ import ShowMore from '../ui/ShowMore';
 import SegmentedControl from '../ui/SegmentedControl';
 import DivergingBar from '../ui/DivergingBar';
 import AssetIcon from '../market/AssetIcon';
+import HoldingLink from './HoldingLink';
 
 /**
  * What actually made the money — and what took it away.
@@ -163,7 +164,7 @@ export default function ContributionBreakdown() {
                     : <AssetIcon symbol={r.symbol} name={r.name} type={r.type} size={26} />}
 
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <p className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}>{r.name}</p>
+                    <p className="text-sm truncate" style={{ color: 'var(--color-text-secondary)' }}>{r.rest ? r.name : <HoldingLink h={r}>{r.name}</HoldingLink>}</p>
                     {/* A price that fell back to book cost is not a market opinion, and
                         the row says so where it happened rather than in a footnote
                         about holdings the reader then has to go and identify. */}

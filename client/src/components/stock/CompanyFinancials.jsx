@@ -5,9 +5,8 @@ import SectionHeader from '../ui/SectionHeader';
 import SegmentedControl from '../ui/SegmentedControl';
 import ShowMore from '../ui/ShowMore';
 import ChartTooltip from '../charts/ChartTooltip';
-import {
-  CHART_COLORS, formatCrore, formatPct, pnlColor, axisCompact, fiscalYear, fiscalQuarter,
-} from '../../lib/utils';
+import { CHART_COLORS, formatPct, pnlColor, fiscalYear, fiscalQuarter } from '../../lib/utils';
+import { companyMoney } from '../../lib/markets';
 
 /**
  * How the BUSINESS has done, as opposed to the share — from the company's own filings.
@@ -28,15 +27,13 @@ import {
  * balance sheet exists.
  *
  * Every figure is computed on the server from the filings (`stockService`); this only
- * lays them out. Money is ₹ crore. Growth is year on year in both views — a quarter
+ * lays them out. Money is ₹ crore at home, the company's own currency abroad (`money`). Growth is year on year in both views — a quarter
  * against the same quarter a year earlier, never the one before it.
  */
 
-const cr = (v) => formatCrore(v);
 const signed = (v) => (v == null ? '—' : formatPct(v, 1));
 const pct = (v) => (v == null ? '—' : `${v.toFixed(1)}%`);
 const times = (v, d = 1) => (v == null ? '—' : `${v.toFixed(d)}×`);
-const rupees = (v) => (v == null ? '—' : `₹${v.toFixed(2)}`);
 
 /** Each column: label, the row field, how it prints, and whether its colour is gain/loss. */
 const col = (label, field, fmt, toned = false) => ({ label, field, fmt, toned });
@@ -45,8 +42,10 @@ const col = (label, field, fmt, toned = false) => ({ label, field, fmt, toned })
  * The views, per measure and period. `bars` are the chart's two series (one unit, one
  * axis); `cols` the table; `note` the honest caveat where the filing does not exist.
  */
-function viewFor(measure, period, isBank) {
-  const q = period === 'quarterly';
+function viewFor(measure, period, isBank, { fin: cr, perShare: rupees }, quarterlyBooks) {
+  // Abroad, quarters file a balance sheet and cash flow, so they get the annual views.
+  const q = period === 'quarterly' && !quarterlyBooks;
+  const noRoe = period === 'quarterly';
   if (measure === 'pl') return {
     bars: [['revenue', 'Revenue'], ['netIncome', 'Net profit']],
     cols: [
@@ -72,7 +71,7 @@ function viewFor(measure, period, isBank) {
       note: 'Balance sheets are published half-yearly, so a quarter has no debt figure. What each quarter does show is what the debt costs — interest — and how many times operating profit covers it.',
     } : {
       bars: [['equity', "Shareholders' equity"], ['debt', 'Borrowings']],
-      cols: [col('Equity', 'equity', cr), col('Borrowings', 'debt', cr), col('Debt / equity', 'debtToEquity', v => times(v, 2)), col('ROE', 'roe', pct), col('Interest cover', 'interestCover', times)],
+      cols: [col('Equity', 'equity', cr), col('Borrowings', 'debt', cr), col('Debt / equity', 'debtToEquity', v => times(v, 2)), ...(noRoe ? [] : [col('ROE', 'roe', pct)]), col('Interest cover', 'interestCover', times)],
     };
   }
 
@@ -98,14 +97,24 @@ const MEASURES = [
 ];
 const PERIODS = [{ key: 'annual', label: 'Annual' }, { key: 'quarterly', label: 'Quarterly' }];
 
-export default function CompanyFinancials({ financials }) {
+/** Period labels: India's April–March fiscal year at home; abroad, the year a period ends in. */
+const homeLabels = { year: fiscalYear, quarterShort: (d) => fiscalQuarter(d)?.short || d, quarterLong: (d) => fiscalQuarter(d)?.fq || d };
+const globalLabels = {
+  year: (d) => `FY${String(d).slice(2, 4)}`,
+  quarterShort: (d) => fiscalQuarter(d)?.short || d,
+  quarterLong: (d) => fiscalQuarter(d)?.months || d,
+};
+
+export default function CompanyFinancials({ financials, money = companyMoney() }) {
   const [period, setPeriod] = useState('annual');
   const [measure, setMeasure] = useState('pl');
   if (!financials?.annual?.length && !financials?.quarterly?.length) return null;
 
   const isBank = financials.kind === 'bank';
-  const view = viewFor(measure, period, isBank);
-  const label = period === 'annual' ? (d) => fiscalYear(d) : (d) => fiscalQuarter(d)?.short || d;
+  const quarterlyBooks = financials.quarterly?.some(r => r.debt != null || r.ocf != null);
+  const view = viewFor(measure, period, isBank, money, quarterlyBooks);
+  const L = money.home ? homeLabels : globalLabels;
+  const label = period === 'annual' ? L.year : L.quarterShort;
 
   const rows = (financials[period] || []).map(r => ({
     ...r,
@@ -119,7 +128,7 @@ export default function CompanyFinancials({ financials }) {
       <SectionHeader
         eyebrow="Company performance"
         size="sm"
-        sub={`${financials.consolidated ? 'Consolidated' : 'Standalone'} filings · ₹ crore · growth is year on year`}
+        sub={`${financials.consolidated ? 'Consolidated' : 'Standalone'} filings · ${money.unitLabel} · growth is year on year`}
         style={{ marginBottom: 16 }}
         action={<SegmentedControl ariaLabel="Period" value={period} onChange={setPeriod} options={PERIODS} />}
       />
@@ -130,9 +139,9 @@ export default function CompanyFinancials({ financials }) {
       <ResponsiveContainer width="100%" height={220}>
         <BarChart data={chartRows} barGap={3} margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
           <XAxis dataKey="date" tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} dy={8} interval="preserveStartEnd" />
-          <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} width={46} tickFormatter={v => axisCompact(v)} />
+          <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} width={46} tickFormatter={money.axis} />
           <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} isAnimationActive={false}
-            content={<ChartTooltip formatValue={v => formatCrore(v)} />} />
+            content={<ChartTooltip formatValue={money.fin} />} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 10 }} iconType="circle" iconSize={7} />
           {view.bars.map(([key, name], i) => (
             <Bar key={key} dataKey={key} name={name} fill={CHART_COLORS[i === 0 ? 1 : 0]} radius={[4, 4, 0, 0]} maxBarSize={30} isAnimationActive={false} />
@@ -157,7 +166,7 @@ export default function CompanyFinancials({ financials }) {
           <ShowMore items={[...rows].reverse()} initial={5} noun={period === 'annual' ? 'years' : 'quarters'} render={(r) => (
             <div key={r.date} style={{ display: 'grid', gridTemplateColumns: grid, gap: 12, padding: '10px 0', borderBottom: '1px solid var(--color-border-subtle)', alignItems: 'baseline' }}>
               <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                {period === 'annual' ? fiscalYear(r.date) : fiscalQuarter(r.date)?.fq || r.date}
+                {period === 'annual' ? L.year(r.date) : L.quarterLong(r.date)}
               </span>
               {view.cols.map(c => (
                 <span key={c.field} className="figure text-xs" style={{

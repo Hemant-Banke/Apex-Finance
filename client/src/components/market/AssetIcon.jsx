@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Activity, ChartPie } from 'lucide-react';
+import { Activity, Bitcoin, ChartPie } from 'lucide-react';
 import { isManualSymbol } from '../../lib/constants';
 
 /**
@@ -51,15 +51,23 @@ const TYPE_EMOJI = {
   other:       '💠',
 };
 
+const EMOJI_FONT = '"Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif';
+
 // Types drawn with a line icon instead of an emoji (see the render below).
 const TYPE_GLYPH = { index: Activity, mutual_fund: ChartPie };
+
+// Symbols with a drawn glyph of their own, in their own colour.
+const SYMBOL_GLYPH = {
+  'BTC-USD': { Icon: Bitcoin, tint: '#f7931a' },
+  'BTC-INR': { Icon: Bitcoin, tint: '#f7931a' },
+};
 
 // Curated per-symbol store — recognizable glyphs for the assets we surface most
 // (popular commodities, crypto, and every manual / unlisted option).
 const SYMBOL_EMOJI = {
-  'BTC-USD': '🟠', 'ETH-USD': '🔷', 'SOL-USD': '🟣', 'BNB-USD': '🟡',
+  'ETH-USD': '🔷', 'SOL-USD': '🟣', 'BNB-USD': '🟡',
   'GC=F': '🥇', 'SI=F': '🥈', 'CL=F': '🛢️', '_METAL:gold': '🥇', '_METAL:silver': '🥈',
-  'BTC-INR': '🟠', 'USDINR=X': '💵',
+  'USDINR=X': '💵',
   'REAL-ESTATE': '🏠', 'FIXED-DEPOSIT': '🏦', 'EPF-NPS': '🛡️',
   'PHYS-GOLD': '🥇', 'PHYS-SILVER': '🥈', 'PRIVATE-EQUITY': '📊',
   'UNLISTED-BOND': '📜', 'OTHER-ASSET': '💠',
@@ -73,7 +81,7 @@ const TICKER_TYPES = new Set(['stock', 'etf', 'mutual_fund']);
 // Build a logo.dev URL for a symbol per its docs:
 //   stocks/ETFs → /ticker/:symbol   (kept whole incl. exchange suffix, e.g.
 //                 `RELIANCE.NS` — logo.dev resolves Indian tickers by `.NS`)
-//   crypto      → /crypto/:symbol   (lowercase, quote suffix like `-USD` stripped)
+//   crypto      → /crypto/:symbol   (lowercase, quote suffix like `-USD`/`-INR` stripped)
 // fallback=404 → logo.dev 404s (instead of a generic placeholder) when it has no
 // logo, so `onError` fires and we drop to the themed emoji glyph.
 function logoSrc(symbol, type, px) {
@@ -83,7 +91,7 @@ function logoSrc(symbol, type, px) {
   if (isManualSymbol(symbol) || symbol.startsWith('AMFI:')) return null;
   const q = `token=${LOGODEV_TOKEN}&size=${px}&format=png&fallback=404`;
   if (type === 'crypto') {
-    const coin = symbol.replace(/-USDT?$/i, '').trim().toLowerCase();
+    const coin = symbol.replace(/-[A-Z]{3,4}$/i, '').trim().toLowerCase();
     if (coin) return `https://img.logo.dev/crypto/${encodeURIComponent(coin)}?${q}`;
   }
   if (TICKER_TYPES.has(type)) {
@@ -93,7 +101,8 @@ function logoSrc(symbol, type, px) {
   return null;
 }
 
-export default function AssetIcon({ symbol, type = 'other', size = 34 }) {
+// `nudge` shifts the emoji and index/fund glyphs 2px right; detail-page mastheads turn it off.
+export default function AssetIcon({ symbol, type = 'other', size = 34, nudge = true }) {
   // Track the symbol whose logo failed (rather than a bare boolean) so switching
   // to a new symbol re-attempts its logo without a stale "broken" state.
   const [failedSym, setFailedSym] = useState(null);
@@ -126,11 +135,14 @@ export default function AssetIcon({ symbol, type = 'other', size = 34 }) {
   // Drawn glyphs, in the type's own tint, for types an emoji misdescribes: an index is a
   // yardstick (a pulse line; the old 📉 read as "falling" on every index, whatever it
   // did), a fund is a portfolio split many ways (a pie; 📊 looked like any chart).
-  const Glyph = TYPE_GLYPH[type];
+  const own = SYMBOL_GLYPH[symbol];
+  const Glyph = own?.Icon || TYPE_GLYPH[type];
   if (Glyph) {
+    const hue = own?.tint || tint;
     return (
-      <div aria-hidden="true" style={{ ...shell, background: `color-mix(in srgb, ${tint} 14%, var(--color-bg-elevated))` }}>
-        <Glyph size={Math.round(size * 0.5)} strokeWidth={2} color={tint} />
+      <div aria-hidden="true" style={{ ...shell, background: `color-mix(in srgb, ${hue} 14%, var(--color-bg-elevated))` }}>
+        <Glyph size={Math.round(size * 0.5)} strokeWidth={2} color={hue}
+          style={{ marginLeft: nudge && !own ? 2 : 0 }} />
       </div>
     );
   }
@@ -142,10 +154,12 @@ export default function AssetIcon({ symbol, type = 'other', size = 34 }) {
       style={{
         ...shell,
         background: `color-mix(in srgb, ${tint} 14%, var(--color-bg-elevated))`,
-        fontSize: Math.round(size * 0.5),
       }}
     >
-      {glyph}
+      {/* The emoji font alone, so the line's baseline is the glyph's own and it centres the same in any context. */}
+      <span style={{ display: 'block', fontFamily: EMOJI_FONT, fontSize: Math.round(size * 0.5), lineHeight: 1, height: '1em', textAlign: 'center', padding: nudge ? '0 0 0 2px' : 0 }}>
+        {glyph}
+      </span>
     </div>
   );
 }

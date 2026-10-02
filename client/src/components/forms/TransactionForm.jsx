@@ -6,6 +6,7 @@ import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
 import TypePicker from './TypePicker';
 import DatePicker from './DatePicker';
+import SegmentedControl from '../ui/SegmentedControl';
 import RecurrenceFields from './RecurrenceFields';
 import { emptyRecurrence } from '../../lib/recurrence';
 import { ArrowRight, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, SlidersHorizontal } from 'lucide-react';
@@ -64,10 +65,27 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
   // Adjustment preview (only meaningful when we have the live account cash balance)
   const currentCash     = account?.cashBalance ?? account?.balance ?? null;
   const adjustedAmount  = parseFloat(form.amount) || 0;
-  const afterAdjustment = currentCash !== null ? currentCash + adjustedAmount : null;
+  // Editing an adjustment: today's cash already includes it, so the base is cash without it.
+  const baseCash        = currentCash === null ? null
+    : currentCash - (isEdit && transaction.type === 'adjustment' ? transaction.amount : 0);
+  const afterAdjustment = baseCash !== null ? baseCash + adjustedAmount : null;
+
+  // An adjustment can be entered as the change, or as the balance it should leave behind.
+  const [adjMode, setAdjMode] = useState('delta');
+  const [target, setTarget]   = useState('');
+  const byTarget = isAdjustment && adjMode === 'target' && baseCash !== null;
+  const setTargetBalance = v => {
+    setTarget(v);
+    set({ amount: v === '' ? '' : String(Math.round((parseFloat(v) - baseCash) * 100) / 100) });
+  };
+  const switchAdjMode = mode => {
+    if (mode === 'target') setTarget(form.amount === '' ? '' : String(afterAdjustment));
+    setAdjMode(mode);
+  };
 
   const handleSubmit = async e => {
     e.preventDefault();
+    if (isAdjustment && adjustedAmount === 0) { setError('The balance is already at that figure'); return; }
     setSaving(true);
     setError('');
     try {
@@ -98,7 +116,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
         await transactionsAPI.create(data);
       }
 
-      if (!isEdit) { setForm(EMPTY_FORM); setRecur(emptyRecurrence()); }
+      if (!isEdit) { setForm(EMPTY_FORM); setRecur(emptyRecurrence()); setTarget(''); }
       onSuccess?.();
     } catch (err) {
       setError(
@@ -121,7 +139,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
           const on = form.type === k;
           return (
             <button key={k} type="button"
-              onClick={() => set({
+              onClick={() => { setAdjMode('delta'); set({
                 type: k,
                 // The figure SURVIVES the switch. Someone who typed 1,240 and then
                 // realised it was an expense, not a transfer, meant to change the type
@@ -132,7 +150,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
                 // belongs to one type's taxonomy, so an expense code on an income row
                 // is not a classification the server would accept.
                 category: '',
-              })}
+              }); }}
               style={{
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                 padding: '10px 4px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
@@ -149,18 +167,27 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
         })}
       </div>
 
+      {isAdjustment && baseCash !== null && (
+        <SegmentedControl
+          ariaLabel="Enter the adjustment as"
+          options={[{ key: 'delta', label: 'Change by' }, { key: 'target', label: 'Set balance to' }]}
+          value={adjMode}
+          onChange={switchAdjMode}
+        />
+      )}
+
       {/* Hero amount — the figure the whole slip is about */}
       <div className="txn-amount">
         <span className="txn-amount-mark">₹</span>
         <input
           type="number" step="any" min={isAdjustment ? undefined : '0'}
-          value={form.amount}
-          onChange={e => set({ amount: e.target.value })}
+          value={byTarget ? target : form.amount}
+          onChange={e => (byTarget ? setTargetBalance(e.target.value) : set({ amount: e.target.value }))}
           placeholder="0.00" required autoFocus
           className="txn-amount-input"
         />
         {isAdjustment && (
-          <span className="txn-amount-hint">+ adds · − subtracts</span>
+          <span className="txn-amount-hint">{byTarget ? 'final cash balance' : '+ adds · − subtracts'}</span>
         )}
       </div>
 
@@ -179,12 +206,20 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
       )}
 
       {/* Adjustment preview */}
-      {isAdjustment && currentCash !== null && (
+      {isAdjustment && baseCash !== null && (
         <div style={{ padding: '11px 14px', borderRadius: 'var(--radius-sm)', background: 'var(--color-bg-input)', border: '1px solid var(--color-border)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.2)', display: 'flex', flexDirection: 'column', gap: 6 }}>
           <div className="flex justify-between">
             <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Current cash</span>
-            <span className="figure text-xs" style={{ color: 'var(--color-text-secondary)' }}>{formatCurrency(currentCash)}</span>
+            <span className="figure text-xs" style={{ color: 'var(--color-text-secondary)' }}>{formatCurrency(baseCash)}</span>
           </div>
+          {byTarget && form.amount !== '' && (
+            <div className="flex justify-between">
+              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Adjustment</span>
+              <span className="figure text-xs" style={{ color: 'var(--color-text-secondary)' }}>
+                {adjustedAmount > 0 ? '+' : adjustedAmount < 0 ? '−' : ''}{formatCurrency(Math.abs(adjustedAmount))}
+              </span>
+            </div>
+          )}
           {form.amount !== '' && (
             <div className="flex justify-between" style={{ paddingTop: 6, borderTop: '1px solid var(--color-border-subtle)' }}>
               <span className="text-xs" style={{ color: 'var(--color-text-secondary)', fontWeight: 500 }}>After adjustment</span>
