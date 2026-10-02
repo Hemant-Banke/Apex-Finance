@@ -24,8 +24,9 @@ import { formatSigned, formatPct, pnlColor, compactIfLarge } from '../../lib/uti
  *   amount — false to show the percentage only
  *   invert — colour a RISE as bad and a fall as good (spending, liabilities)
  *   size   — 'sm' | 'md'
+ *   stacked — the percentage on its own line beneath the amount
  */
-export default function Delta({ value = 0, pct = null, amount = true, compact = false, invert = false, size = 'sm' }) {
+export default function Delta({ value = 0, pct = null, amount = true, compact = false, invert = false, size = 'sm', stacked = false }) {
   const color = pnlColor(invert ? -value : value);
   const Arrow = value > 0 ? ArrowUpRight : value < 0 ? ArrowDownRight : Minus;
   const px    = size === 'md' ? '0.875rem' : '0.75rem';
@@ -33,6 +34,18 @@ export default function Delta({ value = 0, pct = null, amount = true, compact = 
   const money = compact
     ? formatSigned(value, compactIfLarge)
     : formatSigned(value);
+
+  if (stacked && amount && pct != null) {
+    return (
+      <span className="figure" style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, color, fontSize: px, fontWeight: 500 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+          <Arrow size={size === 'md' ? 15 : 13} strokeWidth={2} style={{ flexShrink: 0 }} />
+          {money}
+        </span>
+        <span style={{ opacity: 0.75, fontWeight: 400 }}>{formatPct(pct)}</span>
+      </span>
+    );
+  }
 
   return (
     <span

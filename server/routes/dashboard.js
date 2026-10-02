@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
 const DailyNetWorth = require('../models/DailyNetWorth');
@@ -6,11 +7,14 @@ const DailyAccountBalance = require('../models/DailyAccountBalance');
 const AccountHoldings = require('../models/AccountHoldings');
 const { protect } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
+const { badRequest } = require('../utils/httpError');
 const { holdingsToArray } = require('../services/holdingsService');
 const { getPortfolio, getContribution, allocationByType } = require('../services/portfolioService');
+const { getProfile } = require('../services/portfolioProfileService');
 const { t1Str, t1Ms } = require('../utils/helpers');
 const { DAY_MS } = require('../utils/constants');
 
+const { spendClass } = require('../utils/spendClass');
 const router = express.Router();
 router.use(protect);
 
@@ -39,6 +43,15 @@ function netWorthChange(doc, daysAgo) {
     pct: past > 0 ? (abs / past) * 100 : null,
     partial,
   };
+}
+
+// Months from the user's first income/expense to now, so a window never pads empty months.
+async function monthsAvailable(userId) {
+  const first = await Transaction.findOne({ user: userId, type: { $in: ['income', 'expense'] } })
+    .sort({ date: 1 }).select('date').lean();
+  if (!first) return 1;
+  const f = new Date(first.date), now = new Date();
+  return Math.max(1, (now.getFullYear() - f.getFullYear()) * 12 + (now.getMonth() - f.getMonth()) + 1);
 }
 
 const startOfMonthsAgo = (n) => {
@@ -165,9 +178,13 @@ router.get('/summary', asyncHandler(async (req, res) => {
 // The book marked to market: per-holding value, unrealised & realised P&L, day change,
 // weight — plus the same rolled up, and allocation by asset type at MARKET VALUE.
 // Values are the last settled close (T-1), matching the stores.
+// `?account=<id>` scopes it to one account (the account page's holdings).
 router.get('/portfolio', asyncHandler(async (req, res) => {
-  const { holdings, totals } = await getPortfolio(req.user._id, { live: false });
-  res.json({ holdings, totals, allocation: allocationByType(holdings) });
+  const { account } = req.query;
+  if (account && !mongoose.Types.ObjectId.isValid(account)) throw badRequest('Invalid account id');
+  const { holdings, totals } = await getPortfolio(req.user._id, { live: false, account: account || null });
+  const profile = await getProfile(holdings).catch((e) => { console.error(e); return null; });
+  res.json({ holdings, totals, allocation: allocationByType(holdings), profile });
 }));
 
 // @route   GET /api/dashboard/contribution?days=N
@@ -181,10 +198,13 @@ router.get('/portfolio', asyncHandler(async (req, res) => {
 // figure derived from it is lifetime by construction. See `getContribution`.
 router.get('/contribution', asyncHandler(async (req, res) => {
   const days = Math.max(0, Math.min(parseInt(req.query.days) || 0, 3650));
+  const { account } = req.query;
+  if (account && !mongoose.Types.ObjectId.isValid(account)) throw badRequest('Invalid account id');
   const to   = t1Ms();
   res.json(await getContribution(req.user._id, {
     fromMs: days ? to - days * DAY_MS : null,
     toMs:   to,
+    account: account || null,
   }));
 }));
 
@@ -228,7 +248,7 @@ router.get('/holdings', asyncHandler(async (req, res) => {
 // no transactions must still plot as a zero, or the chart silently closes the gap and
 // draws a spend-free month as if it never happened.
 router.get('/income-expense', asyncHandler(async (req, res) => {
-  const months = Math.max(1, Math.min(parseInt(req.query.months) || 6, 60));
+  const months = Math.min(Math.max(1, Math.min(parseInt(req.query.months) || 6, 60)), await monthsAvailable(req.user._id));
 
   const rows = await Transaction.aggregate([
     { $match: {
@@ -278,7 +298,7 @@ router.get('/income-expense', asyncHandler(async (req, res) => {
 // same six months cost last time. Grouping by { category, month } gets both out of a
 // single aggregation, and the month buckets double as the category's own series.
 router.get('/categories', asyncHandler(async (req, res) => {
-  const months = Math.max(1, Math.min(parseInt(req.query.months) || 1, 60));
+  const months = Math.min(Math.max(1, Math.min(parseInt(req.query.months) || 1, 60)), await monthsAvailable(req.user._id));
   const type   = req.query.type === 'income' ? 'income' : 'expense';
 
   const rows = await Transaction.aggregate([
@@ -330,6 +350,32 @@ router.get('/categories', asyncHandler(async (req, res) => {
   res.json([...byCategory.values()]
     .filter(c => c.total > 0)
     .sort((a, b) => b.total - a.total));
+}));
+
+// @route   GET /api/dashboard/spending-profile?months=N
+// Monthly averages of income and spending, spending split essential / discretionary / other
+// (utils/spendClass) — the inputs the FIRE page plans from. Averaged over ACTIVE months.
+router.get('/spending-profile', asyncHandler(async (req, res) => {
+  const months = Math.min(Math.max(1, Math.min(parseInt(req.query.months) || 12, 60)), await monthsAvailable(req.user._id));
+  const rows = await Transaction.aggregate([
+    { $match: { user: req.user._id, type: { $in: ['income', 'expense'] }, date: { $gte: startOfMonthsAgo(months - 1) } } },
+    { $group: {
+      _id: { type: '$type', category: '$category', m: { $dateToString: { format: '%Y-%m', date: '$date' } } },
+      total: { $sum: '$amount' },
+    } },
+  ]);
+  const active = new Set(rows.map(r => r._id.m)).size || 1;
+  const sum = { income: 0, expense: 0, essential: 0, discretionary: 0, other: 0 };
+  for (const r of rows) {
+    sum[r._id.type] += r.total;
+    if (r._id.type === 'expense') sum[spendClass(r._id.category)] += r.total;
+  }
+  const avg = (v) => v / active;
+  res.json({
+    months, activeMonths: active,
+    income: avg(sum.income), expense: avg(sum.expense),
+    essential: avg(sum.essential), discretionary: avg(sum.discretionary), other: avg(sum.other),
+  });
 }));
 
 module.exports = router;

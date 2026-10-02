@@ -32,7 +32,7 @@ const { DAY_MS }              = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder }             = require('../utils/tsHelpers');
 const { buildAccountTxnsMap, externalFlowImpact, isFlatUnits } = require('../utils/transactionHelpers');
-const { accruedPrice }        = require('../utils/assetPricing');
+const { accruedPrice, isRateAsset } = require('../utils/assetPricing');
 // Subscriptions materialise into transactions at the start of every `ensureUpToToday`.
 // One-way dependency: subscriptionService must NOT require this module back.
 const subscriptionService     = require('./subscriptionService');
@@ -262,10 +262,20 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
     }
   }
 
-  const pricesBySymbol = await fetchPrices(
-    [...assetsSeen.values()],
-    Number.isFinite(minAssetStart) ? minAssetStart : today,
-  );
+  const assetList = [...assetsSeen.values()];
+  const fromMs    = Number.isFinite(minAssetStart) ? minAssetStart : today;
+  const quoted    = assetList.filter(a => !isRateAsset(a.assetType));
+  const missing   = (prices) => quoted.filter(a => !prices[a.assetSymbol]);
+
+  // A cold first connection can come back empty; one retry before trusting it.
+  const pricesBySymbol = await fetchPrices(assetList, fromMs);
+  if (missing(pricesBySymbol).length) {
+    const retry = await fetchPrices(missing(pricesBySymbol), fromMs);
+    for (const [sym, series] of Object.entries(retry)) pricesBySymbol[sym] ??= series;
+  }
+  // Nothing quoted came back at all: the fetch failed, which says nothing about value.
+  const fetchFailed = quoted.length > 0 && missing(pricesBySymbol).length === quoted.length;
+  if (fetchFailed) console.warn(`[extendStores] no prices for user ${userId}; holding asset values flat`);
 
   await Promise.all(acctDocs.map(async (d) => {
     const aid      = d.account.toString();
@@ -288,7 +298,12 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
       const assetStart = docStart + assetTS.length * DAY_MS; // prevT
       if (assetStart <= t1) {
         const holdings = holdingsByAcct[aid];
-        if (holdings) {
+        const hasQuoted = holdings?.some(h => !isRateAsset(h.assetType));
+        if (holdings && fetchFailed && hasQuoted && assetTS.length) {
+          // Hold the last settled value rather than write book cost into the store for good.
+          const days = Math.round((t1 - assetStart) / DAY_MS) + 1;
+          newAssetTS = assetTS.concat(Array(Math.max(0, days)).fill(assetTS[assetTS.length - 1]));
+        } else if (holdings) {
           const calibTxns = holdings.map(h => ({
             type:         '_assetcalibration',
             assetSymbol:  h.assetSymbol,

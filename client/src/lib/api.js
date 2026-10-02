@@ -76,6 +76,8 @@ export const accountsAPI = {
   getDaily: (id, days, growth) => api.get(`/accounts/${id}/daily`, {
     params: { ...(days ? { days } : {}), ...(growth ? { growth: 'true' } : {}) },
   }),
+  // Cash/debt account profile: monthly flows, categories, recurring, saving potential.
+  getCashflow: (id, months) => api.get(`/accounts/${id}/cashflow`, { params: { months } }),
   create: (data) => api.post('/accounts', data),
   update: (id, data) => api.put(`/accounts/${id}`, data),
   delete: (id) => api.delete(`/accounts/${id}`)
@@ -102,14 +104,17 @@ export const dashboardAPI = {
   getSummary:          ()       => api.get('/dashboard/summary'),
   // The book marked to market — value, unrealised/realised P&L, day change, weight,
   // and allocation by market value. This is what anything about PERFORMANCE reads.
-  getPortfolio:        ()       => api.get('/dashboard/portfolio'),
+  // `{ account }` scopes it to one account.
+  getPortfolio:        (params) => api.get('/dashboard/portfolio', { params }),
   // The raw book at cost. Only for callers that just need the instrument list.
   getHoldings:         ()       => api.get('/dashboard/holdings'),
   // days omitted / 0 = the whole history
-  getContribution:     (days)   => api.get('/dashboard/contribution', { params: { days } }),
+  getContribution:     (days, account) => api.get('/dashboard/contribution', { params: { days, ...(account && { account }) } }),
   getIncomeExpense:    (months) => api.get('/dashboard/income-expense',    { params: { months } }),
   // Category totals for one direction — where it goes, and where it comes from.
-  getCategoryTotals:   (type, months) => api.get('/dashboard/categories', { params: { type, months } })
+  getCategoryTotals:   (type, months) => api.get('/dashboard/categories', { params: { type, months } }),
+  // Monthly income / spending averages, spending split essential / discretionary / other.
+  getSpendingProfile:  (months) => api.get('/dashboard/spending-profile', { params: { months } })
 };
 
 // Subscriptions — recurring transactions (SIPs, streaming, rent…). Each due

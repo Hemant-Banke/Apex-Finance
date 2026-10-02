@@ -13,6 +13,7 @@ import Checkbox from '../ui/Checkbox';
 import ConfidenceBadge from './ConfidenceBadge';
 import BackLink from '../ui/BackLink';
 import { useToast } from '../../context/ToastContext';
+import SegmentedControl from '../ui/SegmentedControl';
 
 const TODAY = todayStr();
 
@@ -571,25 +572,11 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                 <label className="label">Type</label>
                 {/* The pill row fills the field's remaining height, so it lines up
                     with the inputs beside it whatever they measure. */}
-                <div style={{ display: 'flex', gap: 4, flex: 1 }}>
-                  {['income','expense','transfer'].map(t => {
-                    const c = TYPE_PILL_COLOR[t];
-                    const on = row.type === t;
-                    return (
-                      <button key={t} type="button" onClick={() => onChange({ type: t, category: '' })}
-                        style={{
-                          flex: 1, padding: '0 4px', fontSize: '0.6875rem', fontWeight: 600, textTransform: 'capitalize',
-                          borderRadius: 'var(--radius-sm)', cursor: 'pointer', fontFamily: 'inherit',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1px solid ${on ? c : 'var(--color-border)'}`,
-                          background: on ? `color-mix(in srgb, ${c} 15%, transparent)` : 'var(--color-bg-elevated)',
-                          color: on ? c : 'var(--color-text-muted)',
-                        }}>
-                        {t}
-                      </button>
-                    );
-                  })}
-                </div>
+                <SegmentedControl block ariaLabel="Type" value={row.type} style={{ flex: 1 }}
+                  onChange={t => onChange({ type: t, category: '' })}
+                  options={['income', 'expense', 'transfer'].map(t => ({
+                    key: t, label: t.charAt(0).toUpperCase() + t.slice(1), tone: TYPE_PILL_COLOR[t],
+                  }))} />
               </div>
               <div className="field">
                 <label className="label">Date</label>

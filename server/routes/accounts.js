@@ -17,6 +17,7 @@ const txService           = require('../services/transactionService');
 const dvService           = require('../services/dailyValueService');
 const { holdingsToArray } = require('../services/holdingsService');
 const subService          = require('../services/subscriptionService');
+const { getCashflow }     = require('../services/cashflowService');
 
 const router = express.Router();
 router.use(protect);
@@ -83,6 +84,14 @@ router.get('/:id/holdings', asyncHandler(async (req, res) => {
 
   const holdingsDoc = await AccountHoldings.findOne({ account: account._id, user: req.user._id }).lean();
   res.json(holdingsToArray(holdingsDoc?.holdings));
+}));
+
+// @route   GET /api/accounts/:id/cashflow?months=N
+// The account's cashflow profile for a cash or debt account page (see cashflowService).
+router.get('/:id/cashflow', asyncHandler(async (req, res) => {
+  const account = await findAccount(req);
+  const months  = Math.max(3, Math.min(parseInt(req.query.months) || 12, 24));
+  res.json(await getCashflow(req.user._id, account, months));
 }));
 
 // @route   GET /api/accounts/:id/daily?days=N&fetchLatestBal=true&growth=true

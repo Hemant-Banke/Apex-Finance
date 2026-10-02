@@ -17,6 +17,7 @@ const {
   isBaseCurrency, fxSymbol, normalizeCurrency, distinctCurrencies,
 } = require('../utils/currency');
 const mfService = require('./mfService');
+const priceCache = require('./priceCacheService');
 
 /**
  * Crypto trades round the clock, so its "daily close" is whatever the price was at
@@ -62,17 +63,56 @@ function closesByDay(result) {
   return out;
 }
 
-/**
- * Fetch daily close prices for one symbol, in its NATIVE currency.
- * Returns { [dayMs]: price } keyed by UTC-midnight ms, so the values align with the
- * day indices used by buildAssetTS.
- */
-async function _fetchHistoricForSymbol(assetSymbol, assetType, startMs, endMs) {
+/** One range straight from Yahoo, native currency; null when the request failed. */
+async function _fetchRangeRaw(assetSymbol, assetType, startMs, endMs) {
   const result = await fetchChart(assetSymbol, {
     period1: Math.floor(_adjustDateForYF(startMs, assetType) / 1000),
     period2: Math.floor((_adjustDateForYF(endMs, assetType) + DAY_MS) / 1000), // +1 day buffer
-  });
-  return closesByDay(result);
+  }, 12000);
+  return result ? { closes: closesByDay(result), currency: result.meta?.currency || null } : null;
+}
+
+/**
+ * Daily closes for one symbol, in its NATIVE currency, keyed by UTC-midnight ms so they
+ * align with buildAssetTS's day indices. Served from the local price cache; Yahoo is
+ * asked only for days the cache does not yet hold.
+ */
+function _fetchHistoricForSymbol(assetSymbol, assetType, startMs, endMs) {
+  return priceCache.getCloses(assetSymbol, assetType, startMs, endMs, _fetchRangeRaw);
+}
+
+/**
+ * Native daily closes over [startMs, endMs] from the cache, plus today's live price when the
+ * window reaches today (the 60s live memo; omitted if the quote fails).
+ */
+async function fetchDailyCloses(symbol, startMs, endMs, { assetType = 'stock' } = {}) {
+  const closes = await _fetchHistoricForSymbol(symbol, assetType, startMs, endMs);
+  const today = todayMs();
+  if (endMs >= today) {
+    const live = await _nativeLive(symbol);
+    if (live != null) closes[today] = live;
+  }
+  return closes;
+}
+
+// Native live quotes, memoised apart from `fetchLatestPrices`, whose memo can hold an INR figure.
+const _nativeMemo = new Map();
+async function _nativeLive(symbol) {
+  const hit = _nativeMemo.get(symbol);
+  if (hit && Date.now() - hit.at < 60 * 1000) return hit.price;
+  const price = (await fetchQuoteMeta([symbol]))[symbol]?.price ?? null;
+  if (price != null) _nativeMemo.set(symbol, { at: Date.now(), price });
+  return price ?? hit?.price ?? null;
+}
+
+/** A symbol's quote currency: the cached one, else Yahoo's chart meta; null if neither knows. */
+async function quoteCurrency(symbol) {
+  return (await priceCache.getCurrency(symbol)) || (await fetchQuoteMeta([symbol]))[symbol]?.currency || null;
+}
+
+/** Top up every cached symbol to the last settled close. Runs on a timer from index.js. */
+function refreshPriceCache() {
+  return priceCache.refreshAll(_fetchRangeRaw);
 }
 
 /** The last value in a day-keyed series on or before `dayMs`, with its day. */
@@ -256,11 +296,26 @@ function _readCache(symbols, today) {
   return { fresh, stale };
 }
 
-function _writeCache(prices, today) {
+function _writeCache(prices, today, prevs = {}) {
   const at = Date.now();
   for (const [sym, price] of Object.entries(prices)) {
-    if (price != null) _liveCache.set(sym, { price, at, day: today });
+    if (price != null) _liveCache.set(sym, { price, prev: prevs[sym] ?? null, at, day: today });
   }
+}
+
+/**
+ * The previous SESSION's close behind each live quote, on the same basis as the price
+ * (INR where it was converted). Read after `fetchLatestPrices`; a day change measured
+ * against it is the latest session's move, weekends and holidays included.
+ */
+function latestPreviousCloses(symbols) {
+  const today = toDateStr(todayMs());
+  const out = {};
+  for (const sym of symbols) {
+    const hit = _liveCache.get(sym);
+    if (hit?.day === today && hit.prev != null) out[sym] = hit.prev;
+  }
+  return out;
 }
 
 /**
@@ -303,8 +358,8 @@ async function fetchLatestPrices(holdings) {
    * whatever this attempt could not reach. A quote from a few minutes ago is a real
    * market price; book cost is not.
    */
-  const settle = (fetched = {}) => {
-    _writeCache({ ...mfPrices, ...fetched }, today);
+  const settle = (fetched = {}, prevs = {}) => {
+    _writeCache({ ...mfPrices, ...fetched }, today, prevs);
     return { ...stale, ...fresh, ...mfPrices, ...fetched };
   };
 
@@ -346,6 +401,9 @@ async function fetchLatestPrices(holdings) {
       const price = _lastNonNull(data?.[sym]?.close || []);
       return price != null ? Math.round(price * 100) / 100 : null;
     };
+    // The close of the session before the quote's own — Yahoo's, so both ends match.
+    const prevClose = (sym) => data?.[sym]?.chartPreviousClose ?? data?.[sym]?.previousClose ?? null;
+    const prevs = {};
 
     // Listed assets, converted to INR when quoted in a foreign currency. A
     // foreign holding whose FX rate is missing is omitted rather than passed
@@ -355,9 +413,18 @@ async function fetchLatestPrices(holdings) {
       const price = quote(h.assetSymbol);
       if (price == null) continue;
       const currency = normalizeCurrency(h.currency);
-      if (!currency) { out[h.assetSymbol] = price; continue; }
+      const prev = prevClose(h.assetSymbol);
+      if (!currency) {
+        out[h.assetSymbol] = price;
+        if (prev != null) prevs[h.assetSymbol] = _round2(prev);
+        continue;
+      }
+      // One rate for both ends, so the day's move is the asset's, not the rupee's.
       const fx = quote(fxSymbol(currency));
-      if (fx != null) out[h.assetSymbol] = _round2(price * fx);
+      if (fx != null) {
+        out[h.assetSymbol] = _round2(price * fx);
+        if (prev != null) prevs[h.assetSymbol] = _round2(prev * fx);
+      }
     }
 
     // Metals: INR per gram of PURE metal, keyed by each holding's own symbol.
@@ -368,10 +435,12 @@ async function fetchLatestPrices(holdings) {
         if (!isPurityAsset(h.assetType)) continue;
         const perGram = metalInrPerGram(quote(METAL_SPOT_SYMBOLS[h.assetType]), usdInr, h.assetType);
         if (perGram != null) out[h.assetSymbol] = _round2(perGram);
+        const prevGram = metalInrPerGram(prevClose(METAL_SPOT_SYMBOLS[h.assetType]), usdInr, h.assetType);
+        if (prevGram != null) prevs[h.assetSymbol] = _round2(prevGram);
       }
     }
 
-    return settle(out);
+    return settle(out, prevs);
   } catch {
     return settle();
   }
@@ -628,8 +697,12 @@ module.exports = {
   lastOnOrBefore,
   fetchHistoricPrices,
   fetchLatestPrices,
+  latestPreviousCloses,
   fetchMetalPricePerGram,
   fetchFxRate,
   fetchQuoteMeta,
   fetchPriceOnDate,
+  refreshPriceCache,
+  fetchDailyCloses,
+  quoteCurrency,
 };

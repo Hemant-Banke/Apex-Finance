@@ -13,6 +13,7 @@ import AccountDetail from './pages/AccountDetail';
 import Transactions from './pages/Transactions';
 import Analytics from './pages/Analytics';
 import Markets from './pages/Markets';
+import Plan from './pages/Plan';
 import Stock from './pages/Stock';
 import Asset from './pages/Asset';
 import Settings from './pages/Settings';
@@ -68,6 +69,11 @@ function App() {
           <Route path="/analytics" element={
             <ProtectedRoute>
               <AppShell><Analytics /></AppShell>
+            </ProtectedRoute>
+          } />
+          <Route path="/plan" element={
+            <ProtectedRoute>
+              <AppShell><Plan /></AppShell>
             </ProtectedRoute>
           } />
           <Route path="/markets" element={

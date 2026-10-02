@@ -23,6 +23,7 @@ export default function Sparkline({
   height = 26,
   tone = 'var(--color-accent)',
   title,
+  fluid = false,   // stretch to the container's width (no end dot, which would distort)
 }) {
   const gradientId = useId();
   if (!values || values.length < 2) return null;
@@ -44,7 +45,8 @@ export default function Sparkline({
 
   return (
     <svg
-      width={width} height={height} viewBox={`0 0 ${width} ${height}`}
+      width={fluid ? '100%' : width} height={height} viewBox={`0 0 ${width} ${height}`}
+      preserveAspectRatio={fluid ? 'none' : undefined}
       style={{ display: 'block', flexShrink: 0, overflow: 'visible' }}
       role="img"
       aria-label={title || 'Balance trend'}
@@ -59,10 +61,10 @@ export default function Sparkline({
         </linearGradient>
       </defs>
       <path d={area} fill={`url(#${gradientId})`} />
-      <path d={line} fill="none" stroke={tone} strokeWidth="1.5"
+      <path d={line} fill="none" stroke={tone} strokeWidth="1.5" vectorEffect="non-scaling-stroke"
         strokeLinecap="round" strokeLinejoin="round" opacity="0.85" />
       {/* Where the line has got TO is the figure beside it — the dot ties the two. */}
-      <circle cx={lastX} cy={lastY} r="2" fill={tone} />
+      {!fluid && <circle cx={lastX} cy={lastY} r="2" fill={tone} />}
     </svg>
   );
 }

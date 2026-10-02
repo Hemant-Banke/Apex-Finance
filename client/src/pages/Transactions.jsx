@@ -31,7 +31,7 @@ import CategoryMultiPicker from '../components/forms/CategoryMultiPicker';
 import ImportModal from '../components/import/ImportModal';
 import AssetIcon from '../components/market/AssetIcon';
 import {
-  ArrowLeftRight, Upload, Search, X, Plus, CalendarRange, SlidersHorizontal, Download, Trash2,
+  ArrowLeftRight, Upload, Search, X, Plus, CalendarRange, SlidersHorizontal, Download, Trash2, ChevronDown,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -321,7 +321,9 @@ export default function Transactions() {
   const shownWin = insights?.window || win;
   const windowFrom = shownWin.from ?? shownWin.startDate ?? '';
   const windowTo = shownWin.to ?? shownWin.endDate ?? '';
-  const calFrom = windowFrom || insights?.first || today;
+  // Never earlier than the first transaction: months before the record are padding, not thrift.
+  const since = insights?.since || insights?.first;
+  const calFrom = windowFrom && since ? (windowFrom > since ? windowFrom : since) : (windowFrom || since || today);
   const calTo = windowTo || today;
   const days = Math.max(1, Math.round((msOf(calTo) - msOf(calFrom)) / DAY) + 1);
   const periodLabel = period === 'custom'
@@ -412,8 +414,8 @@ export default function Transactions() {
         action={
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <SegmentedControl options={PERIODS} value={period} ariaLabel="Period"
-              onChange={(k) => { setPeriod(k); setDay(null); }} />
-            <DateRangePicker
+              onChange={(k) => { setPeriod(k); setDay(null); }}>
+              <DateRangePicker
               value={custom}
               max={today}
               onChange={(v) => {
@@ -423,19 +425,13 @@ export default function Transactions() {
               }}
               trigger={({ toggle: open }) => (
                 <button type="button" onClick={open} title="Custom range" aria-label="Custom range"
-                  className="text-xs font-medium"
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 7, cursor: 'pointer',
-                    border: '1px solid ' + (period === 'custom' ? 'var(--color-accent-dim)' : 'var(--color-border-subtle)'),
-                    background: period === 'custom' ? 'var(--color-accent-dim)' : 'transparent',
-                    color: period === 'custom' ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                  }}>
-                  {/* The icon sits in a text-height box, so this matches the period chips exactly. */}
-                  <span style={{ display: 'inline-flex', alignItems: 'center', height: '1rem' }}><CalendarRange size={13} /></span>
-                  {period === 'custom' && periodLabel}
+                  role="radio" aria-checked={period === 'custom'}
+                  className={`pill-item${period === 'custom' ? ' active' : ''}`}>
+                  <span className="pill-label"><CalendarRange size={13} />{period === 'custom' && periodLabel}</span>
                 </button>
               )}
             />
+            </SegmentedControl>
           </div>
         }
         band={s && (
@@ -562,6 +558,8 @@ export default function Transactions() {
         {/* Count / selection bar */}
         <div className="flex items-center justify-between" style={{
           gap: 12, padding: '10px 24px', borderTop: '1px solid var(--color-border-subtle)',
+          // Tall enough for the Delete/Cancel pills, so selecting does not change the bar's height.
+          minHeight: 54, boxSizing: 'border-box',
           background: selecting ? 'var(--color-accent-dim)' : 'transparent',
         }}>
           <div className="flex items-center" style={{ gap: 14 }}>
@@ -585,9 +583,12 @@ export default function Transactions() {
             )}
           </div>
           {selecting ? (
-            <div className="flex items-center" style={{ gap: 6 }}>
-              <Button variant="danger" size="sm" icon={Trash2} onClick={() => setBulkConfirm(true)}>Delete</Button>
-              <Button variant="secondary" size="sm" onClick={() => setSelected(new Set())}>Cancel</Button>
+            <div className="pill-group">
+              <button type="button" onClick={() => setSelected(new Set())} className="pill-item">Cancel</button>
+              <button type="button" onClick={() => setBulkConfirm(true)} className="pill-item active"
+                style={{ color: 'var(--color-danger)', background: 'color-mix(in srgb, var(--color-danger) 14%, var(--color-bg-elevated))', boxShadow: 'var(--shadow-sm)' }}>
+                <span className="pill-label"><Trash2 size={12} />Delete</span>
+              </button>
             </div>
           ) : list.summary && (list.summary.income > 0 || list.summary.expense > 0) && (
             <span className="figure text-xs" style={{ color: 'var(--color-text-muted)' }}>
@@ -650,10 +651,10 @@ export default function Transactions() {
             })}
 
             {txns.length < list.total && (
-              <div style={{ padding: 16, display: 'flex', justifyContent: 'center', borderTop: '1px solid var(--color-border-subtle)' }}>
-                <Button variant="secondary" size="sm" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? 'Loading…' : `Show ${Math.min(PAGE, list.total - txns.length)} more`}
-                </Button>
+              <div style={{ padding: '0 16px 10px', borderTop: '1px solid var(--color-border-subtle)' }}>
+                <button type="button" onClick={loadMore} disabled={loadingMore} className="show-more text-xs">
+                  {loadingMore ? 'Loading…' : <>Show {Math.min(PAGE, list.total - txns.length)} more <ChevronDown size={13} /></>}
+                </button>
               </div>
             )}
           </div>
@@ -764,33 +765,17 @@ function Toolbar({
     <div style={{ padding: '18px 24px 16px', display: 'flex', flexDirection: 'column', gap: 14 }}>
       {/* What kind of row, and in what order. */}
       <div className="flex items-center justify-between" style={{ gap: 12, flexWrap: 'wrap' }}>
-        <div role="radiogroup" aria-label="Type" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {KINDS.map(k => {
-            const on = kind === k.key;
-            const n = countOf(k);
-            if (k.types && !n && !on) return null;
-            return (
-              <button key={k.key} type="button" role="radio" aria-checked={on} onClick={() => setKind(k.key)}
-                className="text-xs font-medium"
-                style={{
-                  display: 'inline-flex', alignItems: 'center', gap: 6,
-                  padding: '5px 11px', borderRadius: 7, cursor: 'pointer',
-                  border: '1px solid ' + (on ? 'var(--color-accent-dim)' : 'var(--color-border-subtle)'),
-                  background: on ? 'var(--color-accent-dim)' : 'transparent',
-                  color: on ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                }}>
-                {k.label}
-                <span className="figure" style={{ fontSize: 10, opacity: 0.7 }}>{formatCount(n)}</span>
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedControl ariaLabel="Type" value={kind} onChange={setKind}
+          options={KINDS
+            .filter(k => !k.types || countOf(k) || kind === k.key)
+            .map(k => ({ key: k.key, label: k.label, count: formatCount(countOf(k)) }))} />
         <div className="flex items-center" style={{ gap: 8 }}>
-          <SegmentedControl options={SORTS} value={sort} onChange={setSort} ariaLabel="Sort" />
-          {/* Sized like the sort chips beside it, not like a toolbar button. */}
-          <button type="button" onClick={onExport} title="Export CSV" aria-label="Export CSV" className="chip-button">
-            <Download size={13} />
-          </button>
+          {/* Export rides in the sort track as one more pill, so it is sized like its neighbours. */}
+          <SegmentedControl options={SORTS} value={sort} onChange={setSort} ariaLabel="Sort">
+            <button type="button" onClick={onExport} title="Export CSV" aria-label="Export CSV" className="pill-item">
+              <span className="pill-label"><Download size={13} /></span>
+            </button>
+          </SegmentedControl>
         </div>
       </div>
 

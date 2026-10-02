@@ -79,7 +79,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
     set({ amount: v === '' ? '' : String(Math.round((parseFloat(v) - baseCash) * 100) / 100) });
   };
   const switchAdjMode = mode => {
-    if (mode === 'target') setTarget(form.amount === '' ? '' : String(afterAdjustment));
+    if (mode === 'target') setTarget(form.amount === '' ? '' : String(Math.round(afterAdjustment * 100) / 100));
     setAdjMode(mode);
   };
 

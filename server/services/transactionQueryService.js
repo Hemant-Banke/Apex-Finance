@@ -110,7 +110,7 @@ async function getInsights(userId, q) {
     prevFilter.date = { $gte: new Date(start - span), $lt: new Date(start) };
   }
 
-  const [summary, allTypes, daily, categories, largest, prev] = await Promise.all([
+  const [summary, allTypes, daily, categories, largest, prev, earliest] = await Promise.all([
     flowsOf(filter),
     // Counts per type ignore the type filter, so every type chip can say what it holds.
     flowsOf(buildFilter(userId, { ...q, type: undefined })),
@@ -133,6 +133,8 @@ async function getInsights(userId, q) {
       .populate('account', 'name type')
       .sort({ amount: -1, date: -1 }).limit(5).lean(),
     prevFilter ? flowsOf(prevFilter) : null,
+    // The first matching income/expense ever, so the calendar starts no earlier than the record.
+    Transaction.findOne(cashOf(buildFilter(userId, q, { withDates: false }))).sort({ date: 1 }).select('date').lean(),
   ]);
 
   const cats = (type) => categories
@@ -144,6 +146,7 @@ async function getInsights(userId, q) {
     typeCounts: allTypes.byType,
     daily: daily.map(d => ({ date: d._id, in: d.in, out: d.out, count: d.count })),
     first: daily[0]?._id || null,
+    since: earliest ? toDateStr(earliest.date) : null,
     today: toDateStr(todayMs()),
     expenseCategories: cats('expense'),
     incomeCategories:  cats('income'),

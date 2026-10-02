@@ -37,6 +37,14 @@ const fetchNifty = (days, growth) => marketAPI.indexSeries('^NSEI', days).then(r
  *  self-priced asset (an FD, a flat) has none, so the search does not offer it. */
 const isViewable = (s) => viewPathFor(s) != null;
 
+// NSE's "01-Oct-2026 15:30" → "1 Oct, 3:30 pm".
+function nseTime(s) {
+  const m = /^(\d{2})-(\w{3})-\d{4} (\d{2}):(\d{2})/.exec(s || '');
+  if (!m) return s;
+  const h = +m[3];
+  return `${+m[1]} ${m[2]}, ${h % 12 || 12}:${m[4]} ${h < 12 ? 'am' : 'pm'}`;
+}
+
 export default function Markets() {
   const toast = useToast();
   const navigate = useNavigate();
@@ -83,29 +91,31 @@ export default function Markets() {
       <SectionHeader
         eyebrow="Markets"
         title="India"
-        sub={`Indices, asset classes, sectors and where the money is going${overview?.asof ? ` · NSE as of ${overview.asof} IST` : ''}`}
+        sub={`Indices, asset classes, sectors and where the money is going${overview?.asof ? ` · NSE as of ${nseTime(overview.asof)}` : ''}`}
         action={
-          <div className="flex items-center" style={{ gap: 8 }}>
+          <div className="flex items-center" style={{ gap: 10 }}>
             {/* Search is the page's call to action — a gold button with its word — and
                 opens the same Find-an-asset dialog the Add-asset flow uses, here offering
                 indices too. Refresh stays a quiet icon beside it. */}
-            <Button variant="gold" icon={Search} onClick={() => setSearchOpen(true)}
+            <div className="status-pill">
+              <span className="status-pill-text">
+                <span className="status-pill-dot" />
+                {refreshing ? 'Refreshing…' : updatedAt
+                  ? <>Updated <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>{updatedAt.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span></>
+                  : 'Live'}
+              </span>
+              <button type="button" onClick={refresh} disabled={refreshing} className="refresh-btn"
+                aria-label="Refresh" title="Refresh market data">
+                <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+              </button>
+            </div>
+            <Button variant="gold" icon={Search} onClick={() => setSearchOpen(true)} style={{ height: 38 }}
               title="Find a company, index, metal, coin or fund">
               Search
             </Button>
-            <button type="button" onClick={refresh} disabled={refreshing} className="refresh-btn"
-              aria-label="Refresh"
-              title={refreshing ? 'Refreshing…' : updatedAt ? `Refresh · last updated ${updatedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}` : 'Refresh'}>
-              <RefreshCw size={15} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-            </button>
           </div>
         }
       />
-      {updatedAt && (
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: -14, textAlign: 'right' }}>
-          Updated {updatedAt.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
-        </p>
-      )}
 
       {/* ── Masthead: the market's one number, and how broad the move under it is ──
           The Nifty says what the fifty largest did; breadth says whether the rest of the
@@ -129,7 +139,7 @@ export default function Markets() {
           }
           action={
             <div style={{ textAlign: 'right' }}>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 5 }}>Today</p>
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 5 }} title="The latest session's move">1D</p>
               <Delta value={nifty.chg1d} pct={nifty.chg1d} amount={false} size="md" />
             </div>
           }
@@ -184,7 +194,7 @@ export default function Markets() {
       <PriceGrapher title="Nifty 50" valueLabel="Nifty 50" formatValue={formatLevel}
         fetchData={fetchNifty} ranges={MARKET_RANGES} defaultRange="1Y" refreshKey={refreshKey}
         growthCapable defaultView="growth" viewLabels={{ complete: 'Level', growth: 'Growth', hint: 'Every line indexed to 100 at the start of the range' }}
-        benchmarks={NIFTY_BENCHMARKS} defaultCompare={['_METAL:gold', '^NSEMDCP50', '_METAL:silver']}
+        benchmarks={NIFTY_BENCHMARKS} defaultCompare={['_METAL:gold', '^NSEMDCP50', 'INR:^IXIC']}
         emptyText="Index history is unavailable right now" />
 
       <SectorMap refreshKey={refreshKey} />

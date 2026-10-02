@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom';
 import { dashboardAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import {
-  formatCurrency, compactIfLarge, formatDate, formatPct, pnlColor,
+  formatCurrency, compactIfLarge, formatDate, formatPct, formatSigned, pnlColor, monthLabel,
 } from '../lib/utils';
-import { Wallet } from 'lucide-react';
+import { getCategoryMap, describeCategory } from '../lib/categoryNames';
+import { Wallet, ArrowUpRight } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import CashflowChart from '../components/charts/CashflowChart';
@@ -18,6 +19,10 @@ import TransactionRow from '../components/transactions/TransactionRow';
 import AllocationBar from '../components/portfolio/AllocationBar';
 import AssetIcon from '../components/market/AssetIcon';
 import HoldingLink from '../components/portfolio/HoldingLink';
+import CategoryBreakdown from '../components/charts/CategoryBreakdown';
+import { portfolioStyle } from '../lib/portfolioStyle';
+import { planModel, loadPlanSettings } from '../lib/planModel';
+import IndependenceCard from '../components/plan/IndependenceCard';
 
 // The net-worth series runs to T-1 (asset prices are not final until the close), so these
 // measure settled day over settled day. Labelling the first one "today" would be a claim
@@ -80,7 +85,7 @@ function NetWorthMasthead({ summary, totals, hasPortfolio }) {
             return (
               <div key={key} style={{ textAlign: 'right' }}>
                 <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 4 }}>{label}</p>
-                <Delta value={c.abs} pct={c.pct} compact />
+                <Delta value={c.abs} pct={c.pct} compact stacked />
               </div>
             );
           })}
@@ -108,7 +113,7 @@ function NetWorthMasthead({ summary, totals, hasPortfolio }) {
           )}
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 20 }}>
-            <MastheadFigure
+            <MastheadFigure stackPct
               label="Portfolio"
               value={compactIfLarge(invested)}
               swatch="var(--color-accent)"
@@ -116,13 +121,13 @@ function NetWorthMasthead({ summary, totals, hasPortfolio }) {
               sub={hasPortfolio ? undefined
                 : <p className="text-xs" style={{ color: 'var(--color-text-muted)' }}>No holdings yet</p>}
             />
-            <MastheadFigure
+            <MastheadFigure stackPct
               label="Cash"
               value={compactIfLarge(cash)}
               swatch="var(--color-text-muted)"
               pct={shareOfAssets(cash)}
             />
-            <MastheadFigure
+            <MastheadFigure stackPct
               label="Liabilities"
               value={compactIfLarge(liabilities)}
               accent={liabilities > 0 ? 'var(--color-danger)' : undefined}
@@ -137,38 +142,88 @@ function NetWorthMasthead({ summary, totals, hasPortfolio }) {
   );
 }
 
-/**
- * The day's biggest movers — the only holdings worth interrupting someone about.
- * Unpriced holdings are excluded outright: a book-value stand-in has a day change of
- * exactly zero, and listing it among the movers would be noise dressed as signal.
- */
+/** The last session's best and worst holdings, side by side. Unpriced holdings never qualify. */
 function Movers({ holdings }) {
-  const moved = holdings
-    .filter(h => h.priced && h.dayChange !== 0)
-    .sort((a, b) => Math.abs(b.dayChange) - Math.abs(a.dayChange))
-    .slice(0, 5);
+  const moved = holdings.filter(h => h.priced && h.dayChange !== 0 && h.dayChangePct != null);
+  const gainers = moved.filter(h => h.dayChange > 0).sort((a, b) => b.dayChangePct - a.dayChangePct).slice(0, 4);
+  const losers  = moved.filter(h => h.dayChange < 0).sort((a, b) => a.dayChangePct - b.dayChangePct).slice(0, 4);
+  if (!gainers.length && !losers.length) return null;
 
-  if (!moved.length) return null;
+  const column = (title, rows, empty) => (
+    <div style={{ minWidth: 0 }}>
+      <p className="col-head" style={{ marginBottom: 6 }}>{title}</p>
+      {rows.length ? rows.map(h => (
+        <div key={h.symbol} className="flex items-center" style={{ gap: 9, padding: '7px 0', borderTop: '1px solid var(--color-border-subtle)' }}
+          title={`${formatSigned(Math.round(h.dayChange), compactIfLarge)} on your position`}>
+          <AssetIcon symbol={h.symbol} type={h.type} size={20} />
+          <p className="text-sm truncate" style={{ flex: 1, minWidth: 0, color: 'var(--color-text-secondary)' }}><HoldingLink h={h}>{h.name}</HoldingLink></p>
+          <Delta value={h.dayChange} pct={h.dayChangePct} amount={false} />
+        </div>
+      )) : <p className="text-xs" style={{ color: 'var(--color-text-muted)', padding: '8px 0', borderTop: '1px solid var(--color-border-subtle)' }}>{empty}</p>}
+    </div>
+  );
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 18 }}>
+      {column('Gainers · 1D', gainers, 'Nothing rose')}
+      {column('Losers · 1D', losers, 'Nothing fell')}
+    </div>
+  );
+}
+
+/**
+ * The whole picture in one strip: how the investments have done, what kind of book it is,
+ * how much is kept, how long the cash lasts, and this month so far. Each opens its page.
+ */
+function VitalSigns({ totals, profile, summary, incExp }) {
+  const style = portfolioStyle(profile);
+  const active = incExp.filter(m => m.income || m.expense);
+  const inc = active.reduce((s, m) => s + m.income, 0);
+  const exp = active.reduce((s, m) => s + m.expense, 0);
+  const rate = inc > 0 ? ((inc - exp) / inc) * 100 : null;
+  const avgExp = active.length ? exp / active.length : 0;
+  const avgKept = active.length ? (inc - exp) / active.length : 0;
+  const runway = avgExp > 0 && summary?.totalCash > 0 ? summary.totalCash / avgExp : null;
+
+  const tiles = [
+    totals?.holdingsCount > 0 && {
+      to: '/analytics', label: 'Investment gain',
+      value: formatSigned(Math.round(totals.totalGain || 0), compactIfLarge), tone: pnlColor(totals.totalGain),
+      sub: totals.xirr != null ? `${formatPct(totals.xirr, 1)} a year (XIRR)` : 'unrealised + realised',
+    },
+    style && {
+      to: '/analytics', label: 'Portfolio style', value: style.label, text: true,
+      sub: `${style.growth.toFixed(0)}% in growth assets`,
+    },
+    rate != null && {
+      to: '/analytics', label: 'Savings rate', value: `${rate.toFixed(0)}%`, tone: rate < 0 ? 'var(--color-danger)' : undefined,
+      sub: `${compactIfLarge(Math.round(avgKept))} kept a month`,
+    },
+    runway != null && {
+      to: '/plan', label: 'Cash runway', value: runway >= 24 ? '24+ mo' : `${runway.toFixed(1)} mo`,
+      sub: `at ${compactIfLarge(Math.round(avgExp))} a month`,
+    },
+    avgExp > 0 && {
+      to: '/transactions', label: 'Spent this month', value: compactIfLarge(Math.round(summary?.monthlyExpense || 0)),
+      sub: `typical month ${compactIfLarge(Math.round(avgExp))}`,
+    },
+  ].filter(Boolean);
+  if (!tiles.length) return null;
 
   return (
     <Card flush>
-      <div style={{ padding: '22px 24px 4px' }}>
-        <p className="eyebrow">Today's movers</p>
-      </div>
-      <div style={{ paddingTop: 12 }}>
-        {moved.map(h => (
-          <div key={h.symbol} className="data-row" style={{ padding: '12px 24px', cursor: 'default' }}>
-            <div className="flex items-center gap-3" style={{ minWidth: 0, flex: 1 }}>
-              <AssetIcon symbol={h.symbol} type={h.type} size={28} />
-              <div style={{ minWidth: 0 }}>
-                <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}><HoldingLink h={h}>{h.name}</HoldingLink></p>
-                <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                  {formatCurrency(h.price)}
-                </p>
-              </div>
-            </div>
-            <Delta value={h.dayChange} pct={h.dayChangePct} compact />
-          </div>
+      <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tiles.length}, minmax(0, 1fr))` }}>
+        {tiles.map((t, i) => (
+          <Link key={t.label} to={t.to} className="vital-tile" style={{ borderLeft: i ? '1px solid var(--color-border-subtle)' : 'none' }}>
+            <span className="flex items-center justify-between" style={{ gap: 8 }}>
+              <span className="col-head">{t.label}</span>
+              <ArrowUpRight size={12} className="vital-arrow" />
+            </span>
+            <span className={t.text ? undefined : 'figure'} style={{ display: 'block', fontSize: '1.2rem', fontWeight: 500, marginTop: 10, color: t.tone || 'var(--color-text-primary)', whiteSpace: 'nowrap' }}>
+              {t.value}
+            </span>
+            <span className="text-xs" style={{ display: 'block', color: 'var(--color-text-muted)', marginTop: 4 }}>{t.sub}</span>
+          </Link>
         ))}
       </div>
     </Card>
@@ -181,21 +236,32 @@ export default function Dashboard() {
   const [summary,   setSummary]   = useState(null);
   const [portfolio, setPortfolio] = useState(null);
   const [incExp,    setIncExp]    = useState([]);
+  const [spend,     setSpend]     = useState([]);
+  const [spending,  setSpending]  = useState(null);
   const [loading,   setLoading]   = useState(true);
 
   useEffect(() => { load(); }, []);
 
   const load = async () => {
     try {
-      const [s, p, ie] = await Promise.all([
+      const [s, p, ie, cats, catMap, sp] = await Promise.all([
         dashboardAPI.getSummary(),
         dashboardAPI.getPortfolio(),
         dashboardAPI.getIncomeExpense(6),
+        dashboardAPI.getCategoryTotals('expense', 3).catch(() => ({ data: [] })),
+        getCategoryMap().catch(() => null),
+        dashboardAPI.getSpendingProfile(12).catch(() => null),
       ]);
 
       setSummary(s.data);
       setPortfolio(p.data);
       setIncExp(ie.data);
+      setSpending(sp?.data || null);
+      setSpend(cats.data.map(c => ({
+        ...c,
+        name:  c._id ? describeCategory(c._id, catMap || undefined).label : 'Uncategorised',
+        emoji: c._id ? describeCategory(c._id, catMap || undefined).emoji : '',
+      })));
     } catch (e) { toast.error(e.response?.data?.message || 'Failed to load dashboard'); }
     finally { setLoading(false); }
   };
@@ -205,6 +271,22 @@ export default function Dashboard() {
   const totals   = portfolio?.totals   || {};
   const holdings = portfolio?.holdings || [];
   const hasPortfolio = holdings.length > 0;
+
+  // A typical month over the months with activity — the cashflow card's figures.
+  const flowMonths = incExp.filter(m => m.income || m.expense);
+  const flowIn = flowMonths.reduce((t, m) => t + m.income, 0);
+  const flowOut = flowMonths.reduce((t, m) => t + m.expense, 0);
+  const bestMonth = flowMonths.length > 1 ? [...flowMonths].sort((a, b) => (b.income - b.expense) - (a.income - a.expense))[0] : null;
+  const flow = {
+    totalIn: flowIn, totalOut: flowOut,
+    avgIn: flowMonths.length ? flowIn / flowMonths.length : 0,
+    avgOut: flowMonths.length ? flowOut / flowMonths.length : 0,
+    rate: flowIn > 0 ? ((flowIn - flowOut) / flowIn) * 100 : null,
+    best: bestMonth ? monthLabel(bestMonth.month) : null,
+  };
+
+  const planSettings = loadPlanSettings();
+  const plan = spending ? planModel({ summary, portfolio, spending }, planSettings) : null;
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -218,59 +300,59 @@ export default function Dashboard() {
       <NetWorthMasthead summary={summary} totals={totals} hasPortfolio={hasPortfolio} />
 
       {/* Net worth over time */}
-      <PriceGrapher height={260} growthCapable />
+      <PriceGrapher height={220} growthCapable />
 
-      {/* Allocation + movers */}
-      {hasPortfolio && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
-          <Card>
-            <SectionHeader
-              eyebrow="Portfolio"
-              size="sm"
-              style={{ marginBottom: 18 }}
-              action={
-                <Link to="/analytics" className="text-xs font-medium"
-                  style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
-                  Details →
-                </Link>
-              }
-            />
+      <VitalSigns totals={totals} profile={portfolio?.profile} summary={summary} incExp={incExp} />
 
-            {/* Performance lives HERE, not in the masthead band. Net worth is made of
-                portfolio + cash − debt; a gain is not a fourth ingredient of it, it is
-                how one of those three has done. Beside the mix that produced it, it
-                finally has something to be read against — and the day's move belongs
-                with the lifetime one, not stranded under a component of the total. */}
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-              <span className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: pnlColor(totals.unrealisedPnl) }}>
-                {compactIfLarge(totals.unrealisedPnl || 0)}
-              </span>
-              <span className="figure text-sm" style={{ color: pnlColor(totals.unrealisedPnl) }}>
-                {formatPct(totals.unrealisedPnlPct, 1)}
-              </span>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                unrealised on <span className="figure">{compactIfLarge(totals.invested || 0)}</span> invested
-              </span>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>Today</span>
-              <Delta value={totals.dayChange || 0} pct={totals.dayChangePct} compact />
-            </div>
-
-            <AllocationBar items={portfolio.allocation} />
-          </Card>
-          <Movers holdings={holdings} />
+      {/* What the money is in, and where it goes. */}
+      {(hasPortfolio || spend.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: hasPortfolio && spend.length ? 'repeat(2, minmax(0, 1fr))' : '1fr', gap: 16, alignItems: 'stretch' }}>
+          {hasPortfolio && (
+            <Card>
+              <SectionHeader
+                eyebrow="Portfolio"
+                size="sm"
+                style={{ marginBottom: 18 }}
+                action={
+                  <Link to="/analytics" className="text-xs font-medium"
+                    style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
+                    Details →
+                  </Link>
+                }
+              />
+              <div className="flex items-start justify-between" style={{ gap: 16, marginBottom: 18 }}>
+                <div>
+                  <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: pnlColor(totals.unrealisedPnl) }}>
+                    {formatSigned(Math.round(totals.unrealisedPnl || 0), compactIfLarge)}
+                  </p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
+                    <span className="figure" style={{ color: pnlColor(totals.unrealisedPnl) }}>{formatPct(totals.unrealisedPnlPct, 1)}</span>
+                    {' '}unrealised on <span className="figure">{compactIfLarge(totals.invested || 0)}</span>
+                  </p>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 4 }} title="The latest session's move">1D</p>
+                  <Delta value={Math.round(totals.dayChange || 0)} pct={totals.dayChangePct} compact stacked />
+                </div>
+              </div>
+              <AllocationBar items={portfolio.allocation} />
+              <div style={{ marginTop: 20 }}><Movers holdings={holdings} /></div>
+            </Card>
+          )}
+          {spend.length > 0 && (
+            <CategoryBreakdown title="Where it went" rows={spend} months={Math.min(3, incExp.length || 3)} invert trend={false}
+              emptyText="Nothing spent in this period" />
+          )}
         </div>
       )}
 
-      {/* Cashflow + recent activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: 16 }}>
+      {/* Cashflow, and where it is all heading. */}
+      <div style={{ display: 'grid', gridTemplateColumns: plan ? 'minmax(0, 1.5fr) minmax(0, 1fr)' : '1fr', gap: 16, alignItems: 'stretch' }}>
         <Card>
           <SectionHeader
-            eyebrow="Cashflow · 6 months"
+            eyebrow={`Cashflow · ${flowMonths.length || 6} months`}
             size="sm"
-            style={{ marginBottom: 20 }}
+            style={{ marginBottom: 18 }}
             action={
               <Link to="/analytics" className="text-xs font-medium"
                 style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
@@ -278,10 +360,21 @@ export default function Dashboard() {
               </Link>
             }
           />
-          {/* The same chart Analytics opens its cashflow card with; the month-by-month
-              ledger stays there. */}
-          {incExp.some(m => m.income || m.expense) ? (
-            <CashflowChart rows={incExp} height={240} />
+          {flowMonths.length ? (
+            <>
+              {/* A typical month, in four figures, before the shape of the months. */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 16, marginBottom: 18 }}>
+                <MastheadFigure tight label="Income / mo" value={compactIfLarge(Math.round(flow.avgIn))} accent="var(--color-success)"
+                  sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{compactIfLarge(Math.round(flow.totalIn))} total</span>} />
+                <MastheadFigure tight label="Spending / mo" value={compactIfLarge(Math.round(flow.avgOut))} accent="var(--color-danger)"
+                  sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{compactIfLarge(Math.round(flow.totalOut))} total</span>} />
+                <MastheadFigure tight label="Net / mo" value={formatSigned(Math.round(flow.avgIn - flow.avgOut), compactIfLarge)} accent={pnlColor(flow.avgIn - flow.avgOut)}
+                  sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>{flow.best ? `best ${flow.best}` : ''}</span>} />
+                <MastheadFigure tight label="Saved" value={flow.rate == null ? '—' : `${flow.rate.toFixed(0)}%`}
+                  sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>of income kept</span>} />
+              </div>
+              <CashflowChart rows={incExp} height={220} />
+            </>
           ) : (
             <div className="flex items-center justify-center" style={{ height: 240 }}>
               <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No income or expenses yet</p>
@@ -289,34 +382,36 @@ export default function Dashboard() {
           )}
         </Card>
 
-        <Card flush>
-          <div className="flex items-center justify-between" style={{ padding: '22px 24px 4px' }}>
-            <p className="eyebrow">Recent activity</p>
-            <Link to="/transactions" className="text-xs font-medium"
-              style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
-              View all →
-            </Link>
-          </div>
-          {summary?.recentTransactions?.length > 0 ? (
-            <div style={{ paddingTop: 12 }}>
-              {summary.recentTransactions.slice(0, 6).map(tx => (
-                <TransactionRow
-                  key={tx._id}
-                  tx={tx}
-                  subtitle={<>{tx.account?.name} · {formatDate(tx.date)}</>}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center" style={{ padding: '48px 24px' }}>
-              <div className="text-center">
-                <Wallet size={20} style={{ color: 'var(--color-text-muted)', opacity: 0.4, margin: '0 auto 8px' }} />
-                <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No transactions yet</p>
-              </div>
-            </div>
-          )}
-        </Card>
+        {plan && <IndependenceCard m={plan} s={planSettings} />}
       </div>
+
+      <Card flush>
+        <div className="flex items-center justify-between" style={{ padding: '22px 24px 4px' }}>
+          <p className="eyebrow">Recent activity</p>
+          <Link to="/transactions" className="text-xs font-medium"
+            style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
+            View all →
+          </Link>
+        </div>
+        {summary?.recentTransactions?.length > 0 ? (
+          <div style={{ paddingTop: 12 }}>
+            {summary.recentTransactions.slice(0, 5).map(tx => (
+              <TransactionRow
+                key={tx._id}
+                tx={tx}
+                subtitle={<>{tx.account?.name} · {formatDate(tx.date)}</>}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="flex items-center justify-center" style={{ padding: '48px 24px' }}>
+            <div className="text-center">
+              <Wallet size={20} style={{ color: 'var(--color-text-muted)', opacity: 0.4, margin: '0 auto 8px' }} />
+              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No transactions yet</p>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

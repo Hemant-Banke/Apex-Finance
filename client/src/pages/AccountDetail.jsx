@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { accountsAPI, transactionsAPI } from '../lib/api';
-import { formatCurrency, formatNativeCurrency, compactIfLarge, formatDate, formatSigned, pnlColor, CHART_COLORS } from '../lib/utils';
+import { accountsAPI, transactionsAPI, dashboardAPI } from '../lib/api';
+import { formatCurrency, compactIfLarge, formatDate, formatSigned, pnlColor } from '../lib/utils';
 import Modal from '../components/ui/Modal';
 import Spinner from '../components/ui/Spinner';
 import TransactionRow from '../components/transactions/TransactionRow';
@@ -9,19 +9,21 @@ import ConfirmModal from '../components/ui/ConfirmModal';
 import TransactionForm from '../components/forms/TransactionForm';
 import MarketSearch from '../components/market/MarketSearch';
 import AssetTransactionForm from '../components/market/AssetTransactionForm';
-import AllocationBar from '../components/portfolio/AllocationBar';
+import HoldingsBook from '../components/portfolio/HoldingsBook';
+import AllocationPanel from '../components/portfolio/AllocationPanel';
+import PerformancePanel from '../components/portfolio/PerformancePanel';
+import CashflowPanel from '../components/cashflow/CashflowPanel';
+import AccountEmpty from '../components/accounts/AccountEmpty';
 import SellHoldingModal from '../components/portfolio/SellHoldingModal';
-import SellButton from '../components/portfolio/SellButton';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import ImportModal from '../components/import/ImportModal';
 import Button from '../components/ui/Button';
 import AssetIcon from '../components/market/AssetIcon';
-import HoldingLink from '../components/portfolio/HoldingLink';
 import { assetTypeLabel } from '../lib/constants';
 import { toCreatePayload } from '../lib/undo';
 import Card from '../components/ui/Card';
-import ShowMore from '../components/ui/ShowMore';
 import SectionHeader from '../components/ui/SectionHeader';
+import SegmentedControl from '../components/ui/SegmentedControl';
 import BackLink from '../components/ui/BackLink';
 import {
   Plus, Pencil, TrendingUp, Shield, CreditCard,
@@ -122,6 +124,9 @@ export default function AccountDetail() {
   const [importOpen, setImportOpen]         = useState(false);
   // Sell-a-holding modal — the holding itself is the open flag.
   const [sellHolding, setSellHolding]       = useState(null);
+  const [book, setBook]                     = useState(null);
+  const [profile, setProfile]               = useState(null);
+  const [perf, setPerf]                     = useState(null);
   // Activity list: which kind of movement, and how many rows are on show.
   const [txFilter, setTxFilter]             = useState('all');
   const [txShown,  setTxShown]              = useState(TX_PAGE);
@@ -134,12 +139,17 @@ export default function AccountDetail() {
 
   const load = async () => {
     try {
-      const [a, t] = await Promise.all([
+      const [a, t, p] = await Promise.all([
         accountsAPI.getById(id),
-        transactionsAPI.getAll({ account: id, limit: 100 })
+        transactionsAPI.getAll({ account: id, limit: 100 }),
+        // This account's positions marked to market; without it the rows fall back to cost.
+        dashboardAPI.getPortfolio({ account: id }).catch(() => null),
       ]);
       setAccount(a.data);
       setTxns(t.data.transactions);
+      setBook(p?.data?.holdings || null);
+      setProfile(p?.data?.profile || null);
+      setPerf(p?.data?.totals || null);
     } catch (e) { toast.error(e.response?.data?.message || 'Failed to load account'); }
     finally { setLoading(false); }
   };
@@ -245,18 +255,12 @@ export default function AccountDetail() {
 
   const filteredTxns = txns.filter(TX_FILTERS.find(f => f.key === txFilter)?.match ?? (() => true));
 
-  // Holdings ordered by capital, each carrying its share of the account's book. One
-  // array feeds both the allocation bar and the list, so the colour a holding wears in
-  // the bar is the colour on its row — two arrays would drift the moment either sorted
-  // differently. Shorts keep their place with a negative weight rather than vanishing;
-  // `AllocationBar` filters them out of the bar itself.
-  const allocation = (account?.holdings || [])
-    .map(h => ({
-      ...h,
-      value:  h.totalInvested,
-      weight: totalInvested ? (h.totalInvested / totalInvested) * 100 : 0,
-    }))
-    .sort((a, b) => b.value - a.value);
+  // The marked-to-market book; if it could not be fetched, the stored positions at cost.
+  const holdingsBook = book || (account?.holdings || []).map(h => ({
+    ...h, invested: h.totalInvested, value: h.totalInvested, priced: false,
+    unrealisedPnl: 0, unrealisedPnlPct: 0, dayChange: 0, dayChangePct: 0,
+    weight: totalInvested ? (h.totalInvested / totalInvested) * 100 : 0,
+  }));
 
   if (loading) return <Spinner />;
   if (!account) return (
@@ -271,6 +275,10 @@ export default function AccountDetail() {
   const Icon = iconMap[account.type] || Briefcase;
   // Asset-holding accounts (brokerage/retirement) lead with the Add-asset CTA.
   const isAssetAccount = ['brokerage', 'retirement'].includes(account.type);
+  // A brand-new account: no history to chart and no activity to list, just a way in.
+  const noTxns = txns.length === 0;
+  const noHistory = noTxns && !totalValue && !account.balance;
+  const hasTrades = txns.some(t => t.type === 'buy' || t.type === 'sell');
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
@@ -359,9 +367,10 @@ export default function AccountDetail() {
                 sub={totalInvested > 0 && (
                   <>
                     <span className="figure">{compactIfLarge(totalInvested)}</span> invested
-                    <span className="figure" style={{ color: pnlColor(assetPnl), marginLeft: 8 }}>
-                      {formatSigned(assetPnl, compactIfLarge)}
-                    </span>
+                    {' · '}
+                    <span className="figure" style={{ color: pnlColor(assetPnl) }}>
+                      {formatSigned(Math.round(assetPnl), compactIfLarge)}
+                    </span> gain
                   </>
                 )}
               />
@@ -371,7 +380,7 @@ export default function AccountDetail() {
       </Card>
 
       {/* Account Balance History */}
-      <PriceGrapher
+      {!noHistory && <PriceGrapher
         fetchData={fetchDailyBalance}
         title="Account Balance"
         valueLabel="Balance"
@@ -390,7 +399,22 @@ export default function AccountDetail() {
         // account that can hold assets — every non-debt account, not just brokerage/
         // retirement (a bank or wallet account can hold assets too, e.g. NEXO Crypto).
         growthCapable={!account.isDebt}
-      />
+      />}
+
+      {/* Cash and debt accounts: what the money does here, as the allocation card does for a book. */}
+      {!isAssetAccount && (
+        <CashflowPanel accountId={id} balance={cashBalance} isDebt={account.isDebt} refreshKey={chartKey} />
+      )}
+
+      {/* This account's own mix, with its idle cash as a slice — how much is actually at work. */}
+      {!account.isDebt && holdingsBook.length > 0 && (
+        <AllocationPanel
+          holdings={holdingsBook}
+          cash={Math.max(0, cashBalance)}
+          profile={profile}
+          sub="This account's mix by market value, cash included · cost beneath shows the drift"
+        />
+      )}
 
       {/* ── Holdings ──────────────────────────────────────────────────────────
           This was THREE stacked cards saying overlapping things: a donut whose legend
@@ -400,94 +424,57 @@ export default function AccountDetail() {
           A bar rather than the donut, per the project's own rule — length beats angle
           for comparing to a whole, and the donut earns its place only where the split
           IS the subject. Here the holdings are the subject and the split is context. */}
-      {account.holdings?.length > 0 && (
-        <div>
-          <SectionHeader
-            eyebrow="Holdings"
-            size="sm"
-            style={{ marginBottom: 14 }}
-            action={
-              <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                {account.holdings.length} position{account.holdings.length === 1 ? '' : 's'}
+      {/* Lifetime gain, booked and on paper, and which holdings made it — any account that has traded. */}
+      {!account.isDebt && perf && (holdingsBook.length > 0 || hasTrades) && (
+        <PerformancePanel id="performance" totals={perf} account={id} />
+      )}
+
+      {/* An investment account with history but nothing open: say so, rather than leave a gap. */}
+      {isAssetAccount && !noTxns && holdingsBook.length === 0 && (
+        <Card>
+          <SectionHeader eyebrow="Holdings" size="sm" style={{ marginBottom: 18 }} />
+          <div className="flex items-center justify-between" style={{ gap: 20, flexWrap: 'wrap' }}>
+            <div className="flex items-center" style={{ gap: 14, minWidth: 0 }}>
+              <span style={{
+                width: 40, height: 40, borderRadius: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--color-bg-elevated)', boxShadow: 'var(--elev-ring)',
+              }}>
+                <BarChart2 size={18} strokeWidth={1.5} style={{ color: 'var(--color-text-muted)' }} />
               </span>
-            }
-          />
-          <Card flush>
-            {allocation.length > 1 && (
-              <div style={{ padding: '20px 20px 18px', borderBottom: '1px solid var(--color-border-subtle)' }}>
-                <AllocationBar items={allocation} />
+              <div style={{ minWidth: 0 }}>
+                <p className="text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>No open positions</p>
+                <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3, lineHeight: 1.5 }}>
+                  {hasTrades
+                    ? <>Everything bought here has been sold. What it made is in{' '}
+                        <button type="button" onClick={() => document.getElementById('performance')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: 'var(--color-accent)' }}>
+                          Performance ↑
+                        </button></>
+                    : `${cashBalance > 0 ? `${formatCurrency(cashBalance)} is sitting in cash. ` : ''}Add an asset to start tracking it here.`}
+                </p>
               </div>
-            )}
+            </div>
+            <Button variant="gold" icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>
+          </div>
+        </Card>
+      )}
 
-            {/* The largest six positions open; a long book keeps the rest behind the
-                toggle. The allocation bar above still draws all of them. */}
-            <ShowMore items={allocation} initial={6} noun="positions" toggleStyle={{ width: 'calc(100% - 48px)', margin: '10px 24px 16px' }} render={(h, i) => (
-              <div key={h.symbol} className="data-row group"
-                style={{ borderTop: i > 0 ? '1px solid var(--color-border-subtle)' : 'none', gap: 16 }}>
-                {/* Identity. The real instrument mark, not the one grey parcel icon
-                    every holding used to wear — the list read as a spreadsheet
-                    precisely because nothing in it was recognisable at a glance. */}
-                <div className="flex items-center gap-3" style={{ minWidth: 0, flex: 1 }}>
-                  {/* The rail ties a row to its slice of the bar above. Past the
-                      palette the bar folds everything into one "Other" segment, so
-                      those rows get a neutral rail rather than claiming a colour that
-                      is no longer theirs — `% CHART_COLORS.length` would have handed
-                      the 9th holding the 1st holding's hue. */}
-                  <span style={{
-                    width: 4, alignSelf: 'stretch', borderRadius: 99, flexShrink: 0, opacity: 0.9,
-                    background: i < CHART_COLORS.length - 1
-                      ? CHART_COLORS[i]
-                      : 'var(--color-border-hover)',
-                  }} />
-                  <AssetIcon symbol={h.symbol} name={h.name} type={h.type} size={30} />
-                  <div style={{ minWidth: 0 }}>
-                    <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
-                      <HoldingLink h={h}>{h.name}</HoldingLink>
-                    </p>
-                    <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                      <span className="figure">{h.symbol}</span> · {assetTypeLabel(h.type)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* The position: what you hold, and what it cost you a unit. */}
-                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 108 }}>
-                  <p className="figure text-sm" style={{ color: 'var(--color-text-secondary)' }}>
-                    {+h.qty.toFixed(4)}
-                  </p>
-                  <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {/* A foreign holding shows the average the exchange actually
-                        charged; the rupee cost is the column to its right. */}
-                    @ {h.currency
-                      ? formatNativeCurrency(h.avgCostPerUnitNative, h.currency)
-                      : formatCurrency(h.avgCostPerUnit)}
-                  </p>
-                </div>
-
-                {/* Capital, and its share of this account's book. */}
-                <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 104 }}>
-                  <p className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                    {formatCurrency(h.totalInvested)}
-                  </p>
-                  <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 2 }}>
-                    {h.weight.toFixed(1)}%
-                  </p>
-                </div>
-
-                {/* Selling used to mean opening Add asset and searching the market for
-                    something already on your own books. It belongs on the holding. */}
-                <SellButton onClick={() => setSellHolding(h)} title={`Sell ${h.name}`} />
-              </div>
-            )} />
-          </Card>
-          {/* Say which basis these are on. The header above prices the account at
-              market; these rows are what was paid, and the two figures sitting on one
-              page without a word between them is how someone reads a loss into a
-              holding that is fine. */}
-          <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 10 }}>
-            Positions are shown at cost. The account's market value and gain are above.
-          </p>
-        </div>
+      {holdingsBook.length > 0 && (
+        <Card flush>
+          <div style={{ padding: '22px 24px 16px' }}>
+            <SectionHeader
+              eyebrow="Holdings"
+              size="sm"
+              sub="Marked to market · click a holding for the full numbers"
+              action={
+                <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  {holdingsBook.length} position{holdingsBook.length === 1 ? '' : 's'}
+                </span>
+              }
+            />
+          </div>
+          <HoldingsBook holdings={holdingsBook} onSell={setSellHolding} initial={6} />
+        </Card>
       )}
 
       {/* ── Activity ──────────────────────────────────────────────────────────
@@ -495,91 +482,97 @@ export default function AccountDetail() {
           section, so the page had no end and the recent activity you actually came for
           was the first six of an endless scroll. Now: the recent few, a filter for the
           kind of movement you are looking for, and more on request. */}
-      <div>
-        <SectionHeader
-          eyebrow="Activity"
-          size="sm"
-          style={{ marginBottom: 14 }}
-          action={
-            <div className="flex items-center" style={{ gap: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <div className="pill-group">
-                {TX_FILTERS.map(f => (
-                  <button key={f.key} type="button"
-                    onClick={() => { setTxFilter(f.key); setTxShown(TX_PAGE); }}
-                    className={`pill-item ${txFilter === f.key ? 'active' : ''}`}>
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-              {/* Only the most recent hundred are loaded here. Anything older lives on
-                  the Transactions page, which already has date ranges, search and
-                  paging — so this hands off rather than rebuilding them. */}
-              <Link to={`/transactions?${new URLSearchParams({ account: id, period: 'all', ...(LEDGER_KIND[txFilter] && { type: LEDGER_KIND[txFilter] }) })}`}
-                className="text-xs font-medium"
-                style={{ color: 'var(--color-accent)', whiteSpace: 'nowrap' }}>
-                View all →
-              </Link>
-            </div>
-          }
+      {noTxns ? (
+        <AccountEmpty
+          isDebt={account.isDebt}
+          invest={isAssetAccount}
+          onAdd={openModal}
+          onAddAsset={!isAssetAccount ? undefined : () => { setSelectedSecurity(null); setAssetModal(true); }}
+          onImport={openImport}
         />
+      ) : (
+        <Card flush>
+          <div style={{ padding: '22px 24px 16px' }}>
+            <SectionHeader
+              eyebrow="Activity"
+              size="sm"
+              sub="The latest movements in and out of this account"
+              action={
+                <div className="flex items-center" style={{ gap: 12, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                  <SegmentedControl ariaLabel="Activity type" value={txFilter}
+                    onChange={k => { setTxFilter(k); setTxShown(TX_PAGE); }}
+                    options={TX_FILTERS.map(f => ({ key: f.key, label: f.label }))} />
+                  {/* Only the most recent hundred are loaded here. Anything older lives on
+                      the Transactions page, which already has date ranges, search and
+                      paging — so this hands off rather than rebuilding them. */}
+                  <Link to={`/transactions?${new URLSearchParams({ account: id, period: 'all', ...(LEDGER_KIND[txFilter] && { type: LEDGER_KIND[txFilter] }) })}`}
+                    className="text-xs font-medium"
+                    style={{ color: 'var(--color-accent)', whiteSpace: 'nowrap' }}>
+                    View all →
+                  </Link>
+                </div>
+              }
+            />
+          </div>
 
-        {filteredTxns.length > 0 ? (
-          <Card flush>
-            {filteredTxns.slice(0, txShown).map((tx, i) => {
-              // The statement carries transfers INTO this account as well as out of
-              // it, and the two read as opposites from here: one credits, one debits.
-              const incoming = tx.type === 'transfer'
-                ? (tx.toAccount?._id || tx.toAccount) === id
-                : undefined;
-              const counterparty = incoming ? tx.account : tx.toAccount;
-              return (
-                <TransactionRow
-                  key={tx._id}
-                  tx={tx}
-                  divided={i > 0}
-                  incoming={incoming}
-                  // Some rows here are read-only, so every row keeps the action gutter
-                  // — without it their amounts stopped at a different x.
-                  reserveActions
-                  subtitle={<>
-                    {tx.type} · {formatDate(tx.date)}
-                    {counterparty?.name && ` ${incoming ? '←' : '→'} ${counterparty.name}`}
-                  </>}
-                  // An incoming transfer is the OTHER account's transaction — the edit
-                  // form is built around `account`, which from here is the DESTINATION,
-                  // so it would rewrite the wrong side. This end stays read-only; the
-                  // row is editable from the source account (or the Transactions page).
-                  onEdit={incoming ? undefined : openEdit}
-                  onDelete={incoming ? undefined : handleDeleteClick}
-                />
-              );
-            })}
+          {filteredTxns.length > 0 ? (
+            <>
+              {filteredTxns.slice(0, txShown).map((tx) => {
+                // The statement carries transfers INTO this account as well as out of
+                // it, and the two read as opposites from here: one credits, one debits.
+                const incoming = tx.type === 'transfer'
+                  ? (tx.toAccount?._id || tx.toAccount) === id
+                  : undefined;
+                const counterparty = incoming ? tx.account : tx.toAccount;
+                return (
+                  <TransactionRow
+                    key={tx._id}
+                    tx={tx}
+                    divided
+                    incoming={incoming}
+                    // Some rows here are read-only, so every row keeps the action gutter
+                    // — without it their amounts stopped at a different x.
+                    reserveActions
+                    subtitle={<>
+                      {tx.type} · {formatDate(tx.date)}
+                      {counterparty?.name && ` ${incoming ? '←' : '→'} ${counterparty.name}`}
+                    </>}
+                    // An incoming transfer is the OTHER account's transaction — the edit
+                    // form is built around `account`, which from here is the DESTINATION,
+                    // so it would rewrite the wrong side. This end stays read-only; the
+                    // row is editable from the source account (or the Transactions page).
+                    onEdit={incoming ? undefined : openEdit}
+                    onDelete={incoming ? undefined : handleDeleteClick}
+                  />
+                );
+              })}
 
-            {filteredTxns.length > txShown && (
-              <button type="button"
-                onClick={() => setTxShown(n => n + TX_PAGE)}
-                style={{
-                  width: '100%', padding: '12px 24px', cursor: 'pointer', fontFamily: 'inherit',
-                  background: 'none', border: 'none', borderTop: '1px solid var(--color-border-subtle)',
-                  color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600,
-                }}>
-                Show {Math.min(TX_PAGE, filteredTxns.length - txShown)} more
-                <span style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>
-                  {' '}· {filteredTxns.length - txShown} older
-                </span>
-              </button>
-            )}
-          </Card>
-        ) : (
-          <Card className="flex items-center justify-center" style={{ padding: '40px 24px' }}>
-            <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              {txFilter === 'all'
-                ? 'No transactions in this account yet'
-                : `No ${TX_FILTERS.find(f => f.key === txFilter)?.label.toLowerCase()} here`}
-            </p>
-          </Card>
-        )}
-      </div>
+              {filteredTxns.length > txShown && (
+                <button type="button"
+                  onClick={() => setTxShown(n => n + TX_PAGE)}
+                  style={{
+                    width: '100%', padding: '12px 24px', cursor: 'pointer', fontFamily: 'inherit',
+                    background: 'none', border: 'none', borderTop: '1px solid var(--color-border-subtle)',
+                    color: 'var(--color-accent)', fontSize: '0.75rem', fontWeight: 600,
+                  }}>
+                  Show {Math.min(TX_PAGE, filteredTxns.length - txShown)} more
+                  <span style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>
+                    {' '}· {filteredTxns.length - txShown} older
+                  </span>
+                </button>
+              )}
+            </>
+          ) : (
+            <div className="flex items-center justify-center" style={{ padding: '36px 24px 40px', borderTop: '1px solid var(--color-border-subtle)' }}>
+              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
+                {txFilter === 'all'
+                  ? 'No transactions in this account yet'
+                  : `No ${TX_FILTERS.find(f => f.key === txFilter)?.label.toLowerCase()} here`}
+              </p>
+            </div>
+          )}
+        </Card>
+      )}
 
       {/* Add Transaction Modal */}
       <Modal open={modal} onClose={closeModal} eyebrow={account.name} title="New transaction" icon={Plus}>

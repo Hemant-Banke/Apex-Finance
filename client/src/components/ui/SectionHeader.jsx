@@ -13,7 +13,7 @@
 export default function SectionHeader({ eyebrow, title, sub, action, size = 'md', style }) {
   return (
     <div
-      className="flex items-end justify-between"
+      className="flex items-center justify-between"
       style={{ gap: 16, ...style }}
     >
       <div style={{ minWidth: 0 }}>

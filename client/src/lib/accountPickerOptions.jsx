@@ -1,14 +1,25 @@
 import { Landmark, TrendingUp, Shield, CreditCard, Wallet, Briefcase } from 'lucide-react';
 import { ACCOUNT_TYPES, accountTypeLabel } from './constants';
+import { CHART_COLORS } from './utils';
 
 // Account type → lucide icon component.
-const TYPE_ICON = {
+export const TYPE_ICON = {
   bank:       Landmark,
   brokerage:  TrendingUp,
   retirement: Shield,
   debt:       CreditCard,
   wallet:     Wallet,
   other:      Briefcase,
+};
+
+// Account type → identity colour and the group name a list of them goes under.
+export const ACCOUNT_TYPE_STYLE = {
+  bank:       { tone: CHART_COLORS[1], group: 'Bank accounts' },
+  brokerage:  { tone: CHART_COLORS[0], group: 'Brokerage' },
+  retirement: { tone: CHART_COLORS[2], group: 'Retirement' },
+  wallet:     { tone: CHART_COLORS[3], group: 'Wallets' },
+  other:      { tone: CHART_COLORS[6], group: 'Other' },
+  debt:       { tone: 'var(--color-danger)', group: 'Liabilities' },
 };
 
 /** Rendered lucide icon node for an account type (used by TypePicker options). */

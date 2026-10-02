@@ -55,6 +55,18 @@ export const rupeeLevel = (v) => formatLevel(v, 'INR');
 /** The company page for an NSE symbol. Under /markets so the sidebar keeps Markets lit. */
 export const stockPath = (symbol) => `/markets/stocks/${encodeURIComponent(symbol)}`;
 
+// Where an instrument page's back link returns: the page that linked to it (via router
+// state `from`), else Markets.
+const BACK_LABELS = [
+  [/^\/accounts\/[^/]+/, 'Account'], [/^\/accounts/, 'Accounts'], [/^\/analytics/, 'Analytics'],
+  [/^\/transactions/, 'Transactions'], [/^\/$/, 'Dashboard'],
+];
+export function backTarget(state) {
+  const from = state?.from;
+  const hit = from && BACK_LABELS.find(([re]) => re.test(from.split('?')[0]));
+  return hit ? { to: from, label: hit[1] } : { to: '/markets', label: 'Markets' };
+}
+
 /** The company page for a stock listed abroad, by its Yahoo symbol (AAPL, 7203.T). */
 export const globalStockPath = (symbol) => `/markets/world/${encodeURIComponent(symbol)}`;
 

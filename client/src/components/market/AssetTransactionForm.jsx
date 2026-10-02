@@ -4,6 +4,7 @@ import { formatCurrency, formatSigned, pnlColor, todayStr } from '../../lib/util
 import { ASSET_TYPES, PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
 import DatePicker from '../forms/DatePicker';
 import TypePicker from '../forms/TypePicker';
+import SegmentedControl from '../ui/SegmentedControl';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import RecurrenceFields, { RecurrenceToggle } from '../forms/RecurrenceFields';
 import { emptyRecurrence } from '../../lib/recurrence';
@@ -342,30 +343,12 @@ export default function AssetTransactionForm({
       {/* Buy / Sell — a segmented control with clear buy (gold) vs sell (green) states */}
       <div className="field">
         <label className="label">Transaction</label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {[
-            { t: 'buy',  label: 'Buy',  Icon: ArrowDownLeft, active: 'var(--color-success)', tint: 'var(--color-success-muted)' },
-            { t: 'sell', label: 'Sell', Icon: ArrowUpRight,  active: 'var(--color-danger)',  tint: 'var(--color-danger-muted)' },
-          ].map(({ t, label, Icon, active, tint }) => {
-            const on = txType === t;
-            return (
-              <button key={t} type="button"
-                onClick={() => { setTxType(t); if (!isEdit) setUsesCashBalance(t === 'sell'); }}
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                  padding: '11px 12px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                  fontFamily: 'inherit', fontSize: '0.875rem', fontWeight: 600,
-                  border: `1px solid ${on ? active : 'var(--color-border)'}`,
-                  background: on ? tint : 'var(--color-bg-elevated)',
-                  color: on ? active : 'var(--color-text-muted)',
-                  boxShadow: on ? `inset 0 0 0 1px ${active}` : 'var(--elev-ring)',
-                  transition: 'all 0.15s ease',
-                }}>
-                <Icon size={16} strokeWidth={2.4} /> {label}
-              </button>
-            );
-          })}
-        </div>
+        <SegmentedControl size="lg" block ariaLabel="Buy or sell" value={txType}
+          onChange={t => { setTxType(t); if (!isEdit) setUsesCashBalance(t === 'sell'); }}
+          options={[
+            { key: 'buy',  label: 'Buy',  icon: ArrowDownLeft, tone: 'var(--color-success)' },
+            { key: 'sell', label: 'Sell', icon: ArrowUpRight,  tone: 'var(--color-danger)' },
+          ]} />
       </div>
 
       {/* Account (create mode only; in edit mode account is fixed) */}

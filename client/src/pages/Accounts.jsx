@@ -2,170 +2,46 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { accountsAPI } from '../lib/api';
 import { formatCurrency, compactIfLarge } from '../lib/utils';
-import { ACCOUNT_TYPE_OPTIONS } from '../lib/accountPickerOptions';
-import { accountTypeLabel } from '../lib/constants';
+import { ACCOUNT_TYPE_OPTIONS, TYPE_ICON, ACCOUNT_TYPE_STYLE } from '../lib/accountPickerOptions';
+import AccountsEmpty from '../components/accounts/AccountsEmpty';
+import AccountCard from '../components/accounts/AccountCard';
+import AllocationBar from '../components/portfolio/AllocationBar';
 import Modal from '../components/ui/Modal';
 import TypePicker from '../components/forms/TypePicker';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Spinner from '../components/ui/Spinner';
-import Sparkline from '../components/ui/Sparkline';
 import SectionHeader from '../components/ui/SectionHeader';
 // The same component the dashboard's band uses. This page's composition strip and
 // that one are the same idea at two scales, and they were two hand-built copies of
 // one block of markup — the kind of pair that drifts the moment either is touched.
 import { MastheadFigure } from '../components/ui/Masthead';
 import ConfirmModal from '../components/ui/ConfirmModal';
-import {
-  Plus, Wallet, TrendingUp, Shield, CreditCard,
-  Landmark, Briefcase, Pencil,
-} from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
-const iconMap = { bank: Landmark, brokerage: TrendingUp, retirement: Shield, debt: CreditCard, wallet: Wallet, other: Briefcase };
 
 const EMPTY_FORM = { name: '', type: 'bank', description: '', initialBalance: '0' };
 
-/**
- * One account, in the list.
- *
- * The list is read the way a statement is read: down the figures. So the row is built
- * as a ledger line — identity on the left, the number on the right — and everything
- * that is not one of those two things has to earn its place.
- *
- * THE SIGNATURE is the share line beneath each balance: a bar whose LENGTH is that
- * account's share and whose SEGMENTS are cash versus invested, then the percentage it
- * draws. Bar first, then its value — the order the eye reads them in. The number is the
- * precise answer and the bar is the comparable one; a percentage alone makes you compare
- * by reading, and a bar alone makes you guess. Together they replace the three devices
- * this used to take: a "38% of assets" caption, a split micro-bar, and a "₹3.2L cash ·
- * ₹9.3L in assets" line repeating the bar in words.
- *
- * The bar's ZERO is at its right, against the percentage, growing leftward — one shared
- * baseline, which is the only way lengths compare, and the bar always touches the figure
- * it produces. Rows are sorted biggest-first, so the bars reach further left down the
- * column and the list reads as a chart without trying.
- *
- * All rules end flush right on a common baseline and grow leftward, because lengths are
- * only comparable from a shared edge.
- *
- * What was removed matters as much. The coloured left rail was a stock device saying
- * what the section header above it already said. The icon's 38px bordered tile put a
- * heavy box on every line of something that wants to read as a ruled page; the glyph
- * alone does the recognition. Balances print exactly as stored — a debt holds a
- * negative balance of its own, so nothing is negated for display.
- */
-const RULE_TRACK = 104;   // px the longest share bar can occupy
-const PCT_COL    = 32;    // fixed box for the share percentage, so it stays a column
-const GAP        = 8;
-
-function AccountRow({ acc, first, share, shareLabel = 'of assets', onEdit }) {
-  const Icon = iconMap[acc.type] || Briefcase;
-  const negative = acc.balance < 0;
-
-  const cash   = acc.cashBalance  ?? 0;
-  const assets = acc.assetBalance ?? 0;
-  const gross     = Math.abs(cash) + Math.abs(assets);
-  // Only an account holding both has a split worth drawing; a debt has no asset side.
-  const showSplit = !acc.isDebt && gross > 0 && assets > 0;
-  const cashPct   = gross ? (Math.abs(cash) / gross) * 100 : 0;
-
-  const tone = acc.isDebt ? 'var(--color-danger)' : 'var(--color-accent)';
-  // A hair of width even at a fraction of a percent — a row that owns something should
-  // never draw as nothing.
-  const ruleWidth = share == null ? null : Math.max(3, (Math.abs(share) / 100) * RULE_TRACK);
-
-  const ruleTitle = [
-    share != null && `${Math.abs(share).toFixed(1)}% ${shareLabel}`,
-    showSplit && `${formatCurrency(cash)} cash`,
-    showSplit && `${formatCurrency(assets)} invested`,
-  ].filter(Boolean).join(' · ');
-
+/** One kind of account: a header in its colour, then its accounts as cards. */
+function AccountGroup({ type, count, total, share, children }) {
+  const { tone, group } = ACCOUNT_TYPE_STYLE[type] || ACCOUNT_TYPE_STYLE.other;
   return (
-    <Link to={`/accounts/${acc._id}`} className="data-row group"
-      style={{
-        textDecoration: 'none', alignItems: 'center', gap: 16,
-        borderTop: first ? 'none' : '1px solid var(--color-border-subtle)',
-      }}>
-      {/* The glyph alone, no tile. It brightens with the row rather than announcing
-          itself at rest. */}
-      <Icon size={17} strokeWidth={1.6} aria-hidden
-        className="group-hover:!opacity-100"
-        style={{ color: 'var(--color-text-secondary)', flexShrink: 0, opacity: 0.6, transition: 'opacity 0.15s ease' }} />
-
-      <div style={{ minWidth: 0, flex: 1 }}>
-        <p className="truncate" style={{
-          fontFamily: 'var(--font-display)', fontOpticalSizing: 'auto',
-          fontSize: '0.9375rem', fontWeight: 500, letterSpacing: '-0.01em',
-          color: 'var(--color-text-primary)',
-        }}>
-          {acc.name}
-        </p>
-        <p className="text-xs truncate" style={{ color: 'var(--color-text-muted)', marginTop: 3 }}>
-          {accountTypeLabel(acc.type)}
-          {acc.description && ` · ${acc.description}`}
-        </p>
-      </div>
-
-      {/* Where this account has been. First to go when the row runs out of room — the
-          figure beside it is what you came for. */}
-      {acc.spark?.length > 1 && (
-        <span className="hidden sm:block" style={{ flexShrink: 0 }}>
-          <Sparkline values={acc.spark} tone={tone} title={`${acc.name} — balance over the last 90 days`} />
+    <section>
+      <div className="flex items-center" style={{ gap: 10, marginBottom: 12, padding: '0 2px' }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, background: tone }} />
+        <span className="col-head" style={{ color: 'var(--color-text-secondary)', fontSize: '0.6875rem' }}>{group}</span>
+        <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>· {count}</span>
+        <span style={{ flex: 1, height: 1, background: 'var(--color-border-subtle)', margin: '0 6px' }} />
+        {share != null && <span className="figure text-xs" style={{ color: 'var(--color-text-muted)' }}>{share.toFixed(0)}%</span>}
+        <span className="figure text-sm" style={{ fontWeight: 500, color: type === 'debt' ? 'var(--color-danger)' : 'var(--color-text-primary)', marginLeft: 10 }}>
+          {formatCurrency(total)}
         </span>
-      )}
-
-      <div style={{ flexShrink: 0, minWidth: PCT_COL + GAP + RULE_TRACK }}>
-        <p className="figure" style={{
-          fontSize: '0.9375rem', fontWeight: 500, textAlign: 'right',
-          whiteSpace: 'nowrap',
-          color: negative ? 'var(--color-danger)' : 'var(--color-text-primary)',
-        }}>
-          {formatCurrency(acc.balance)}
-        </p>
-
-        {/* The share: the bar draws it, the number names it — bar first, then its
-            value, which is the order the eye reads them in.
-
-            ZERO IS AT THE RIGHT. The bar's origin is pinned against its own percentage
-            and it grows leftward, so every row measures from one baseline and the bar
-            always meets the number it produces — no gap opening up between a small
-            account's stub and its figure. Sorted biggest-first, the bars reach further
-            and further left down the column. The percentage keeps a fixed-width box so
-            it stays a column instead of drifting with the bar's length. */}
-        {share != null && (
-          <div title={ruleTitle}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: GAP, marginTop: 7 }}>
-            <span style={{ display: 'flex', justifyContent: 'flex-end', width: RULE_TRACK, flexShrink: 0 }}>
-              <span style={{ display: 'flex', gap: 1, width: ruleWidth, height: 3, borderRadius: 99, overflow: 'hidden' }}>
-                {showSplit ? (
-                  <>
-                    <span style={{ width: `${cashPct}%`, background: 'var(--color-text-muted)', opacity: 0.55 }} />
-                    <span style={{ width: `${100 - cashPct}%`, background: tone }} />
-                  </>
-                ) : (
-                  <span style={{ width: '100%', background: tone, opacity: acc.isDebt ? 0.8 : 0.55 }} />
-                )}
-              </span>
-            </span>
-            <span className="figure" style={{
-              width: PCT_COL, textAlign: 'right', flexShrink: 0,
-              fontSize: '0.6875rem', color: 'var(--color-text-muted)',
-            }}>
-              {Math.abs(share).toFixed(0)}%
-            </span>
-          </div>
-        )}
       </div>
-
-      {/* The pencil, as everywhere else a name is editable. */}
-      <button onClick={(e) => onEdit(acc, e)}
-        title={`Edit ${acc.name}`} aria-label={`Edit ${acc.name}`}
-        className="opacity-0 group-hover:!opacity-100 transition-opacity"
-        style={{ color: 'var(--color-text-muted)', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4, flexShrink: 0 }}>
-        <Pencil size={13} />
-      </button>
-    </Link>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14 }}>
+        {children}
+      </div>
+    </section>
   );
 }
 
@@ -190,7 +66,7 @@ export default function Accounts() {
     finally { setLoading(false); }
   };
 
-  const openNew = () => { setEditing(null); setForm(EMPTY_FORM); setError(''); setModal(true); };
+  const openNew = (type = 'bank') => { setEditing(null); setForm({ ...EMPTY_FORM, type: typeof type === 'string' ? type : 'bank' }); setError(''); setModal(true); };
   const openEdit = (acc, e) => {
     e.preventDefault();
     setEditing(acc);
@@ -243,10 +119,6 @@ export default function Accounts() {
   const cashSum   = assetAccounts.reduce((s, a) => s + (a.cashBalance ?? 0), 0);
   const investSum = assetAccounts.reduce((s, a) => s + (a.assetBalance ?? 0), 0);
 
-  // Share of the asset side that is sitting as cash. Magnitudes, so an overdrawn
-  // account cannot make the bar exceed its own width.
-  const grossAssets = Math.abs(cashSum) + Math.abs(investSum);
-  const cashPct     = grossAssets ? (Math.abs(cashSum) / grossAssets) * 100 : 0;
 
   /** A figure as a share of the asset side. Magnitudes, so a debt reads as a size. */
   const pctOfAssets = (v) => (assetsSum ? (Math.abs(v) / Math.abs(assetsSum)) * 100 : null);
@@ -255,8 +127,14 @@ export default function Accounts() {
   // signed up, not about where your money is — and it made the "% of total" column
   // read as noise instead of a ranking.
   const byBalance = (a, b) => Math.abs(b.balance) - Math.abs(a.balance);
-  const assetRows = [...assetAccounts].sort(byBalance);
   const debtRows  = [...debtAccounts].sort(byBalance);
+  // Asset accounts grouped by type, biggest group first, biggest account first within it.
+  const assetGroups = Object.values(assetAccounts.reduce((g, a) => {
+    const k = ACCOUNT_TYPE_STYLE[a.type] ? a.type : 'other';
+    (g[k] ??= { type: k, rows: [], total: 0 }).rows.push(a);
+    g[k].total += a.balance;
+    return g;
+  }, {})).map(g => ({ ...g, rows: g.rows.sort(byBalance) })).sort((a, b) => b.total - a.total);
 
   if (loading) return <Spinner />;
 
@@ -274,6 +152,7 @@ export default function Accounts() {
           four figures where one was the sum of two others, and the reader had to work
           out which. Assets is now the label ON the composition bar, where being a
           subtotal is the whole point. */}
+      {accounts.length === 0 ? <AccountsEmpty onCreate={openNew} /> : (
       <Card gilt flush>
         {/* `center`, not `flex-start`: the button was pinned to the top of a three-line
             block and floated level with the eyebrow, which is the smallest thing there.
@@ -297,7 +176,7 @@ export default function Accounts() {
               </p>
             )}
           </div>
-          <Button variant="gold" icon={Plus} onClick={openNew}>New account</Button>
+          <Button variant="gold" icon={Plus} onClick={() => openNew()}>New account</Button>
         </div>
 
         {accounts.length > 0 && (
@@ -306,22 +185,19 @@ export default function Accounts() {
             borderTop: '1px solid var(--color-border-subtle)',
             background: 'var(--color-bg-secondary)',
           }}>
-            {/* How much is liquid versus at work — the one thing a sum of balances
-                cannot tell you, and the same split the per-account bar shows below. */}
+            {/* Where the money sits, by kind of account — the same colours as the cards below. */}
             {assetsSum > 0 && (
-              <div style={{ marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                  <p className="heading-sm" style={{ letterSpacing: '0.12em' }}>Assets</p>
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
+                  <p className="heading-sm" style={{ letterSpacing: '0.12em' }}>Assets by account type</p>
                   <p className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
                     {formatCurrency(assetsSum)}
                   </p>
                 </div>
-                <div style={{ display: 'flex', gap: 2, height: 6, borderRadius: 99, overflow: 'hidden' }}>
-                  <div title={`Cash · ${formatCurrency(cashSum)}`}
-                    style={{ width: `${cashPct}%`, background: 'var(--color-text-muted)', opacity: 0.55 }} />
-                  <div title={`Investments · ${formatCurrency(investSum)}`}
-                    style={{ width: `${100 - cashPct}%`, background: 'var(--color-accent)' }} />
-                </div>
+                <AllocationBar height={8} items={assetGroups.filter(g => g.total > 0).map(g => ({
+                  key: g.type, name: ACCOUNT_TYPE_STYLE[g.type].group, color: ACCOUNT_TYPE_STYLE[g.type].tone,
+                  value: g.total, weight: (g.total / assetsSum) * 100,
+                }))} />
               </div>
             )}
 
@@ -344,6 +220,7 @@ export default function Accounts() {
           </div>
         )}
       </Card>
+      )}
 
       {accounts.length > 0 ? (
         <>
@@ -351,70 +228,36 @@ export default function Accounts() {
               before, which made the asset list look like the page's default state and
               the debts like a footnote appended to it. They are two halves of the net
               position above and should announce themselves the same way. */}
-          {assetRows.length > 0 && (
-            <div>
-              <SectionHeader
-                eyebrow="Accounts"
-                size="sm"
-                style={{ marginBottom: 12 }}
-                action={
-                  <span className="figure text-sm" style={{ fontWeight: 500, color: 'var(--color-text-primary)' }}>
-                    {formatCurrency(assetsSum)}
-                  </span>
-                }
-              />
-              <Card flush>
-                {assetRows.map((acc, i) => (
-                  <AccountRow
-                    key={acc._id}
-                    acc={acc}
-                    first={i === 0}
-                    share={assetsSum > 0 ? (acc.balance / assetsSum) * 100 : null}
-                    onEdit={openEdit}
-                  />
-                ))}
-              </Card>
-            </div>
-          )}
+          {assetGroups.map(g => (
+            <AccountGroup key={g.type} type={g.type} count={g.rows.length} total={g.total}
+              share={assetsSum > 0 ? (g.total / assetsSum) * 100 : null}>
+              {g.rows.map(acc => (
+                <AccountCard
+                  key={acc._id}
+                  acc={acc}
+                  share={assetsSum > 0 ? (acc.balance / assetsSum) * 100 : null}
+                  onEdit={openEdit}
+                />
+              ))}
+            </AccountGroup>
+          ))}
 
           {debtRows.length > 0 && (
-            <div>
-              <SectionHeader
-                eyebrow="Liabilities"
-                size="sm"
-                style={{ marginBottom: 12 }}
-                action={
-                  <span className="figure text-sm" style={{ fontWeight: 500, color: 'var(--color-danger)' }}>
-                    {formatCurrency(debtTotal)}
-                  </span>
-                }
-              />
-              <Card flush>
-                {debtRows.map((acc, i) => (
-                  <AccountRow
-                    key={acc._id}
-                    acc={acc}
-                    first={i === 0}
-                    // Symmetric with the accounts above: how much of what you owe is
-                    // this one. A debt with no context is just a number to dread.
-                    share={debtTotal !== 0 ? (acc.balance / debtTotal) * 100 : null}
-                    shareLabel="of liabilities"
-                    onEdit={openEdit}
-                  />
-                ))}
-              </Card>
-            </div>
+            <AccountGroup type="debt" count={debtRows.length} total={debtTotal}>
+              {debtRows.map(acc => (
+                <AccountCard
+                  key={acc._id}
+                  acc={acc}
+                  share={debtTotal !== 0 ? (acc.balance / debtTotal) * 100 : null}
+                  shareLabel="of liabilities"
+                  onEdit={openEdit}
+                />
+              ))}
+            </AccountGroup>
           )}
         </>
       ) : (
-        <Card className="flex flex-col items-center justify-center" style={{ padding: '64px 24px' }}>
-          <Wallet size={28} style={{ color: 'var(--color-text-muted)', opacity: 0.3, marginBottom: 12 }} />
-          <p className="text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>No accounts yet</p>
-          <p className="text-sm" style={{ color: 'var(--color-text-muted)', margin: '6px 0 18px', maxWidth: 320, textAlign: 'center' }}>
-            An account holds cash and assets — a bank, a broker, a wallet, or something you owe.
-          </p>
-          <Button variant="gold" icon={Plus} onClick={openNew}>Create your first account</Button>
-        </Card>
+        null
       )}
 
       {/* Deleting an account is the one destructive action here that cannot be undone,

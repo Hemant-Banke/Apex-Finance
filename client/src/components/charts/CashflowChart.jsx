@@ -46,7 +46,7 @@ function MonthBand({ points, top, height, left, width, count }) {
  * cashflow at all, not a cashflow of zero: as 0, the month you are a day into dragged
  * the net line down to the axis as if it had broken even; as null the line stops.
  */
-export default function CashflowChart({ rows, height = 260 }) {
+export default function CashflowChart({ rows, height = 260, incomeLabel = 'Income', expenseLabel = 'Expense' }) {
   const chartRows = rows.map(m => (m.income || m.expense ? m : { ...m, net: null }));
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -63,8 +63,8 @@ export default function CashflowChart({ rows, height = 260 }) {
         <ReferenceLine y={0} stroke="var(--color-border-hover)" />
         {/* Income and expense are the same measure on one scale, so they share an
             axis honestly. Green/red here are STATUS, not category identity. */}
-        <Bar dataKey="income"  name="Income"  fill="var(--color-success)" radius={[4,4,0,0]} maxBarSize={22} />
-        <Bar dataKey="expense" name="Expense" fill="var(--color-danger)"  radius={[4,4,0,0]} maxBarSize={22} />
+        <Bar dataKey="income"  name={incomeLabel}  fill="var(--color-success)" radius={[4,4,0,0]} maxBarSize={22} />
+        <Bar dataKey="expense" name={expenseLabel} fill="var(--color-danger)"  radius={[4,4,0,0]} maxBarSize={22} />
         {/* Net cashflow is the SAME unit (rupees a month) as the bars, so — unlike the
             savings-rate line this card once carried on a second axis — it rides the
             one axis already there. Neutral ink, so it reads as the difference OF the

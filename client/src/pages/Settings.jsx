@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import SegmentedControl from '../components/ui/SegmentedControl';
 import { subscriptionsAPI, categoriesAPI, accountsAPI } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/utils';
 import Spinner from '../components/ui/Spinner';
@@ -37,23 +38,9 @@ export default function Settings() {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid var(--color-border-subtle)' }}>
-        {TABS.map(({ key, label, Icon }) => {
-          const on = tab === key;
-          return (
-            <button key={key} type="button" onClick={() => setTab(key)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '10px 14px', background: 'none', cursor: 'pointer',
-                border: 'none', borderBottom: `2px solid ${on ? 'var(--color-accent)' : 'transparent'}`,
-                color: on ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                fontSize: '0.8125rem', fontWeight: on ? 600 : 500, fontFamily: 'inherit',
-                marginBottom: -1, transition: 'color 0.15s, border-color 0.15s',
-              }}>
-              <Icon size={15} strokeWidth={1.8} /> {label}
-            </button>
-          );
-        })}
+      <div>
+        <SegmentedControl ariaLabel="Settings section" value={tab} onChange={setTab}
+          options={TABS.map(({ key, label, Icon }) => ({ key, label, icon: Icon }))} />
       </div>
 
       {tab === 'subscriptions' ? <SubscriptionsManager /> : <CategoriesManager />}
@@ -367,27 +354,12 @@ function CategoriesManager() {
           {!editing && (
             <div className="field">
               <label className="label">Kind</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {[
-                  { k: 'secondary', label: 'Category', hint: 'inside a group' },
-                  { k: 'primary',   label: 'Group',    hint: 'a new top-level group' },
-                ].map(({ k, label, hint }) => {
-                  const on = form.level === k;
-                  return (
-                    <button key={k} type="button" onClick={() => setForm({ ...form, level: k })}
-                      style={{
-                        display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start',
-                        padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                        fontFamily: 'inherit', textAlign: 'left',
-                        border: `1px solid ${on ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                        background: on ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
-                      }}>
-                      <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: on ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>{label}</span>
-                      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>{hint}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <SegmentedControl size="lg" block ariaLabel="Kind" value={form.level}
+                onChange={k => setForm({ ...form, level: k })}
+                options={[
+                  { key: 'secondary', label: 'Category', hint: 'inside a group' },
+                  { key: 'primary',   label: 'Group',    hint: 'a new top-level group' },
+                ]} />
             </div>
           )}
 

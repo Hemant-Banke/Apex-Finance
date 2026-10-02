@@ -62,7 +62,7 @@ export default function Masthead({ lead, action, band, to, title }) {
  * better; the figures just name their percentage.
  */
 // `tight` sets the figure and its caption as one unit: tight line boxes and a 3px gap.
-export function MastheadFigure({ label, value, pct, sub, accent, swatch, tight = false }) {
+export function MastheadFigure({ label, value, pct, sub, accent, swatch, tight = false, stackPct = false }) {
   return (
     <div style={{ minWidth: 0 }}>
       <p className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -73,12 +73,15 @@ export function MastheadFigure({ label, value, pct, sub, accent, swatch, tight =
         <span className="figure" style={{ fontSize: '1.0625rem', fontWeight: 500, color: accent || 'var(--color-text-primary)' }}>
           {value}
         </span>
-        {pct != null && (
+        {pct != null && !stackPct && (
           <span className="figure text-xs" style={{ color: 'var(--color-text-muted)' }}>
             {pct.toFixed(0)}%
           </span>
         )}
       </p>
+      {pct != null && stackPct && (
+        <p className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3 }}>{pct.toFixed(0)}% of assets</p>
+      )}
 
       {sub && <div style={tight ? { marginTop: 3, display: 'flex', lineHeight: 1.3 } : { marginTop: 7 }}>{sub}</div>}
     </div>

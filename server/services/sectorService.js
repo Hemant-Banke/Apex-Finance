@@ -455,4 +455,22 @@ async function searchUniverse(q, limit = 8) {
     .map(u => ({ symbol: `${u.symbol}.NS`, name: u.name, type: 'stock', exchange: 'NSE', currency: 'INR', sector: u.label }));
 }
 
-module.exports = { getSectors, getPeers, getComposition, searchUniverse, _csv, _weighted };
+let _warming = 0;
+
+/**
+ * Sector and cap rank per NSE symbol, from the CACHES only — never a network call, so a
+ * portfolio read cannot stall on NSE/Yahoo. A cold cache warms in the background.
+ */
+function peekClassification() {
+  const universe = _universe?.stocks;
+  if ((!universe || !_caps) && Date.now() - _warming > 10 * 60 * 1000) {
+    _warming = Date.now();
+    getSectors().catch(() => {});
+  }
+  const bySymbol = new Map((universe || []).map(u => [u.symbol, u]));
+  const rank = new Map(Object.entries(_caps?.bySymbol || {})
+    .sort((a, b) => b[1] - a[1]).map(([sym], i) => [sym, i + 1]));
+  return { ready: !!universe, bySymbol, rank };
+}
+
+module.exports = { getSectors, getPeers, getComposition, searchUniverse, peekClassification, _csv, _weighted };

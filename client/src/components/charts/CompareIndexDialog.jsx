@@ -4,9 +4,8 @@ import Button from '../ui/Button';
 import { BENCHMARKS } from '../../lib/constants';
 
 /**
- * One benchmark row — a colour swatch (the line it will render as, once picked)
- * plus its name. The swatch is drawn even when unselected, dimmed, so picking a
- * few rows previews the palette they'll take on the chart.
+ * One benchmark row — a colour swatch (the line it renders as) plus its name. An
+ * unpicked row has no colour yet and shows a neutral swatch.
  */
 function Row({ label, color, checked, onToggle }) {
   return (
@@ -22,9 +21,9 @@ function Row({ label, color, checked, onToggle }) {
     >
       <span style={{
         width: 10, height: 10, borderRadius: 3, flexShrink: 0,
-        background: color, opacity: checked ? 1 : 0.35,
+        background: color || 'var(--color-text-muted)', opacity: checked ? 1 : 0.3,
       }} />
-      <span className="text-sm" style={{ flex: 1, color: checked ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
+      <span className="text-sm truncate" style={{ flex: 1, minWidth: 0, color: checked ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
         {label}
       </span>
       <span style={{
@@ -46,7 +45,7 @@ function Row({ label, color, checked, onToggle }) {
  *   open, onClose
  *   selected     — array of selected symbols (controlled)
  *   onChange     — (nextSymbols[]) => void
- *   colorOf(sym) — maps a symbol to the swatch/line colour it will render as
+ *   colorOf(sym) — the line colour of a picked symbol; null when not picked
  *   options      — the catalogue to pick from (default: BENCHMARKS)
  */
 export default function CompareIndexDialog({ open, onClose, selected, onChange, colorOf, options = BENCHMARKS }) {
@@ -77,7 +76,7 @@ export default function CompareIndexDialog({ open, onClose, selected, onChange, 
           in view; each group's heading sticks while its rows pass beneath it. */}
       <div style={{
         display: 'flex', flexDirection: 'column', gap: 2,
-        maxHeight: 'min(46vh, 340px)', overflowY: 'auto', overscrollBehavior: 'contain',
+        maxHeight: 'min(46vh, 340px)', overflowY: 'auto', overflowX: 'hidden', overscrollBehavior: 'contain',
         margin: '0 -6px 16px', padding: '0 6px',
       }}>
         {groups.map(([group, rows], gi) => (

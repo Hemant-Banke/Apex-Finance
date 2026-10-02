@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { viewPathFor } from '../../lib/markets';
 import { isSelfPricedHolding } from '../../lib/constants';
 
@@ -7,6 +7,8 @@ import { isSelfPricedHolding } from '../../lib/constants';
  * price. A self-priced holding (an FD, a flat) has no market, so its name stays plain text.
  */
 export default function HoldingLink({ h, children }) {
+  const { pathname, search } = useLocation();
   const to = viewPathFor({ ...h, isManual: isSelfPricedHolding(h) });
-  return to ? <Link to={to} className="stock-link" style={{ color: 'inherit' }}>{children}</Link> : children;
+  // Carry the origin so the instrument page's back link returns here, not to Markets.
+  return to ? <Link to={to} state={{ from: pathname + search }} className="stock-link" style={{ color: 'inherit' }}>{children}</Link> : children;
 }

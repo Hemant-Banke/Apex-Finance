@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, Link, useLocation } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 import { marketsAPI, marketAPI, dashboardAPI } from '../lib/api';
 import { formatPct, pnlColor, dayLabel, fiscalQuarter, fiscalYear, formatCount } from '../lib/utils';
-import { stockPath, globalStockPath, companyMoney, axisFormatFor, MARKET_RANGES, toChartSeries } from '../lib/markets';
+import { stockPath, globalStockPath, companyMoney, backTarget, axisFormatFor, MARKET_RANGES, toChartSeries } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
@@ -317,6 +317,7 @@ function About({ profile }) {
 
 export default function Stock({ global = false }) {
   const { symbol } = useParams();
+  const back = backTarget(useLocation().state);
   const [data, setData]           = useState(null);
   const [error, setError]         = useState(null);
   const [positions, setPositions] = useState([]);
@@ -346,7 +347,7 @@ export default function Stock({ global = false }) {
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <BackLink to="/markets">Markets</BackLink>
+        <BackLink to={back.to}>{back.label}</BackLink>
         <Card><p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
           {error === 'notfound' ? `No ${global ? '' : 'NSE-listed '}company found for “${symbol}”.` : 'This company could not be loaded right now. Try again shortly.'}
         </p></Card>
@@ -362,7 +363,7 @@ export default function Stock({ global = false }) {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <BackLink to="/markets">Markets</BackLink>
+      <BackLink to={back.to}>{back.label}</BackLink>
 
       <SectionHeader
         eyebrow={[profile.sector, profile.industry].filter(Boolean).join(' · ') || 'Company'}

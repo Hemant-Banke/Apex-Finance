@@ -4,11 +4,12 @@ import { formatCurrency, compactIfLarge, axisCompact, MONTHS_SHORT } from '../..
 const DAY = 86_400_000;
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const WEEKDAY_NAMES = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-const MAX_WEEKS = 53;
 const LABEL_COL = 28;
 const RHYTHM = 150;
 const SIDE_GAP = 18;
 const MIN_CELL = 9;
+// Below this a long calendar scrolls sideways rather than shrinking further.
+const SCROLL_CELL = 11;
 // Diverging scale around a typical day: three steps each side of a grey midpoint.
 const INTENSITY = [30, 55, 82];
 const LEGEND_RATIOS = [1 / 8, 1 / 3, 0.6, 1, 1.7, 3, 8];
@@ -61,13 +62,17 @@ export default function SpendCalendar({ daily = [], from, to, activeDay, onSelec
     return () => ro.disconnect();
   }, []);
 
+  const scrollRef = useRef(null);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollLeft = el.scrollWidth;
+  }, [from, to, width]);
+
   const model = useMemo(() => {
     if (!to) return null;
     const end = parse(to);
-    let start = from ? parse(from) : end - 89 * DAY;
+    const start = from ? parse(from) : end - 89 * DAY;
     const gridStart = (ms) => ms - weekdayOf(ms) * DAY;
-    let clipped = false;
-    if ((end - gridStart(start)) / DAY / 7 > MAX_WEEKS) { start = end - (MAX_WEEKS * 7 - 1) * DAY; clipped = true; }
     const first = gridStart(start);
     const weeks = Math.floor((end - first) / DAY / 7) + 1;
 
@@ -93,28 +98,34 @@ export default function SpendCalendar({ daily = [], from, to, activeDay, onSelec
       const d = new Date(c.ms);
       if (c.inside && d.getUTCDate() === 1) months.push({ col: c.col, label: MONTHS_SHORT[d.getUTCMonth()] });
     }
+    // A window opening mid-month still names that month, if there is room before the next.
+    const startCol = Math.floor((start - first) / DAY / 7);
+    if (!months.some(m => m.col <= startCol + 2)) months.unshift({ col: startCol, label: MONTHS_SHORT[new Date(start).getUTCMonth()] });
     const avg = wd.map(w => (w.days ? w.total / w.days : 0));
-    return { cells, weeks, months, avg, typical: median(actives), clipped };
+    return { cells, weeks, months, avg, typical: median(actives) };
   }, [daily, from, to, measure]);
 
   if (!model) return <div ref={boxRef} />;
-  const { cells, weeks, months, avg, typical, clipped } = model;
+  const { cells, weeks, months, avg, typical } = model;
   const avgMax = Math.max(...avg);
   const peak = avg.indexOf(avgMax);
   const gap = weeks > 30 ? 2 : 3;
 
   // Cells fill the width; when they would get too small beside the weekday column, it moves below.
   const besideFit = width ? Math.floor((width - LABEL_COL - SIDE_GAP - RHYTHM - gap * weeks) / weeks) : 14;
-  const stacked = width > 0 && besideFit < MIN_CELL;
-  const fit = stacked ? Math.floor((width - LABEL_COL - gap * weeks) / weeks) : besideFit;
-  const cell = Math.max(4, Math.min(22, fit));
+  const stackedFit = Math.floor((width - LABEL_COL - gap * weeks) / weeks);
+  const stacked = width > 0 && besideFit < MIN_CELL && stackedFit >= SCROLL_CELL;
+  const fit = stacked ? stackedFit : besideFit;
+  const scrolls = width > 0 && fit < SCROLL_CELL;
+  const cell = scrolls ? SCROLL_CELL : Math.min(22, fit);
   const verb = measure === 'in' ? 'in' : 'out';
   const typicalRatio = hover?.v && typical ? hover.v / typical : null;
 
   return (
     <div>
       <div ref={boxRef} style={{ display: 'flex', flexDirection: stacked ? 'column' : 'row', gap: SIDE_GAP, alignItems: stacked ? 'stretch' : 'flex-start', minWidth: 0 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px repeat(${weeks}, ${cell}px)`, gap, flexShrink: 0 }}>
+        <div ref={scrollRef} style={scrolls ? { flex: '1 1 auto', minWidth: 0, overflowX: 'auto', paddingBottom: 8 } : { flexShrink: 0 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: `${LABEL_COL}px repeat(${weeks}, ${cell}px)`, gap, width: 'max-content' }}>
           <span />
           {Array.from({ length: weeks }, (_, c) => {
             const m = months.find(x => x.col === c);
@@ -126,11 +137,12 @@ export default function SpendCalendar({ daily = [], from, to, activeDay, onSelec
               onHover={setHover} onSelectDay={onSelectDay} />
           ))}
         </div>
+        </div>
 
         {/* Weekday rhythm: beside the grid, one bar per row it summarises; below it when narrow. */}
         <div style={stacked
           ? { display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 10 }
-          : { display: 'grid', gridTemplateRows: `14px repeat(7, ${cell}px)`, gap, minWidth: RHYTHM, maxWidth: 280, flex: 1 }}>
+          : { display: 'grid', gridTemplateRows: `14px repeat(7, ${cell}px)`, gap, minWidth: RHYTHM, maxWidth: 280, flex: scrolls ? `0 0 ${RHYTHM}px` : 1 }}>
           {!stacked && <span className="col-head" style={{ fontSize: 9, lineHeight: '14px' }}>Avg / day</span>}
           {avg.map((a, r) => (
             <div key={r} style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}
@@ -167,7 +179,7 @@ export default function SpendCalendar({ daily = [], from, to, activeDay, onSelec
             : typical
               ? <>A typical day {measure === 'in' ? 'brings in' : 'costs'} <span className="figure">{compactIfLarge(Math.round(typical))}</span>;
                   {' '}{WEEKDAY_NAMES[peak]}s {measure === 'in' ? 'bring in' : 'cost'} the most.
-                  {clipped ? ' Showing the last 12 months.' : ' Click a day to list it.'}</>
+                  {onSelectDay ? ' Click a day to list it.' : ''}{scrolls ? ' Scroll for earlier weeks.' : ''}</>
               : 'Nothing in this window yet.'}
         </p>
       </div>

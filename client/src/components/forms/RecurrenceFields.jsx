@@ -2,6 +2,7 @@ import DatePicker from './DatePicker';
 import TypePicker from './TypePicker';
 import { Repeat, Check } from 'lucide-react';
 import { FREQUENCIES, emptyRecurrence } from '../../lib/recurrence';
+import SegmentedControl from '../ui/SegmentedControl';
 
 /**
  * RecurrenceFields — the "make this recurring" block, shared by the cash and asset
@@ -146,29 +147,12 @@ export default function RecurrenceFields({ value, onChange, isAsset = false, fro
           {isAsset && showInvariant && (
             <div className="field">
               <label className="label">Keep constant each time</label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                {[
-                  { k: 'amount', label: 'Amount', hint: 'units vary with price' },
-                  { k: 'units',  label: 'Units',  hint: 'cost varies with price' },
-                ].map(({ k, label, hint }) => {
-                  const on = v.invariant === k;
-                  return (
-                    <button key={k} type="button" onClick={() => set({ invariant: k })}
-                      style={{
-                        display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'flex-start',
-                        padding: '8px 10px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                        fontFamily: 'inherit', textAlign: 'left',
-                        border: `1px solid ${on ? 'var(--color-accent)' : 'var(--color-border)'}`,
-                        background: on ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
-                      }}>
-                      <span style={{ fontSize: '0.8125rem', fontWeight: 600, color: on ? 'var(--color-accent)' : 'var(--color-text-secondary)' }}>
-                        {label}
-                      </span>
-                      <span style={{ fontSize: '0.6875rem', color: 'var(--color-text-muted)' }}>{hint}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              <SegmentedControl size="lg" block ariaLabel="Keep constant each time" value={v.invariant}
+                onChange={k => set({ invariant: k })}
+                options={[
+                  { key: 'amount', label: 'Amount', hint: 'units vary with price' },
+                  { key: 'units',  label: 'Units',  hint: 'cost varies with price' },
+                ]} />
             </div>
           )}
         </>

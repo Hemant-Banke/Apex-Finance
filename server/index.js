@@ -63,6 +63,16 @@ mongoose.connection.once('open', async () => {
 
   refreshFlows();
   setInterval(refreshFlows, 60 * 60 * 1000).unref();
+
+  // Daily closes for every cached Yahoo symbol, topped up to the last settled day so
+  // valuation and charts read Mongo, not Yahoo. Every 3h: US closes land after midnight IST.
+  const { refreshPriceCache } = require('./services/marketDataService');
+  const refreshPrices = () => refreshPriceCache()
+    .then(({ symbols, refreshed }) => symbols && console.log(`Price cache topped up — ${refreshed}/${symbols} symbols`))
+    .catch(e => console.error('Price cache refresh failed:', e.message));
+
+  refreshPrices();
+  setInterval(refreshPrices, 3 * 60 * 60 * 1000).unref();
 });
 
 // Middleware

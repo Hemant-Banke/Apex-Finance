@@ -11,6 +11,7 @@ import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT a
 import { BENCHMARKS } from '../../lib/constants';
 import ChartTooltip, { TooltipPanel } from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
+import SegmentedControl from '../ui/SegmentedControl';
 
 // ── Default config ────────────────────────────────────────────────────────────
 
@@ -165,18 +166,25 @@ function nextDayStr(dateStr) {
 // ── Benchmark comparison (growth view) ──────────────────────────────────────
 
 /**
- * Colour and label lookups for the overlays. Colour is the benchmark's place in the
- * SELECTION, not in the catalogue: the catalogue (indices, global markets, metals,
- * bitcoin, the dollar) is longer than the eight-hue palette, and colouring by catalogue
- * position would wrap — Gold and Nifty 50 both drawn gold the moment both were picked.
- * By selection order, up to eight lines on one chart are always eight distinct hues.
- * A row not yet picked previews the hue it WOULD take: the next free slot.
+ * Colour and label lookups for the overlays. Each picked benchmark holds a palette SLOT
+ * from the moment it is picked until it is removed — the lowest free one — so adding or
+ * removing a line never recolours the others, and eight lines are always eight hues.
+ * An unpicked benchmark has no colour (`null`); the picker draws it neutral.
  */
-const benchmarkLookups = (list, selected) => ({
-  colorOf: (symbol) => {
-    const i = selected.indexOf(symbol);
-    return CHART_COLORS[(i >= 0 ? i : selected.length) % CHART_COLORS.length];
-  },
+function assignSlots(slots, selected) {
+  for (const sym of Object.keys(slots)) if (!selected.includes(sym)) delete slots[sym];
+  const used = new Set(Object.values(slots));
+  for (const sym of selected) {
+    if (sym in slots) continue;
+    let i = 0;
+    while (used.has(i)) i++;
+    slots[sym] = i; used.add(i);
+  }
+  return slots;
+}
+
+const benchmarkLookups = (list, slots) => ({
+  colorOf: (symbol) => (symbol in slots ? CHART_COLORS[slots[symbol] % CHART_COLORS.length] : null),
   labelOf: (symbol) => list.find(b => b.symbol === symbol)?.label ?? symbol,
 });
 
@@ -523,8 +531,10 @@ export default function PriceGrapher({
   const [compareOpen,    setCompareOpen]    = useState(false);
   const [compareSymbols, setCompareSymbols] = useState(defaultCompare); // selected symbols
   const [compareSeries,  setCompareSeries]  = useState({});       // symbol -> [{date,close}]
+  const slotsRef = useRef({});
   const { colorOf: benchmarkColor, labelOf: benchmarkLabel } = useMemo(
-    () => benchmarkLookups(benchmarks, compareSymbols), [benchmarks, compareSymbols]);
+    () => benchmarkLookups(benchmarks, { ...assignSlots(slotsRef.current, compareSymbols) }),
+    [benchmarks, compareSymbols]);
 
   const growth = growthCapable && view === 'growth';
 
@@ -853,23 +863,10 @@ export default function PriceGrapher({
               The "+" (growth only) opens the benchmark-comparison picker. */}
           {growthCapable && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div className="pill-group" style={{ display: 'flex' }}>
-                <button
-                  onClick={() => setView('complete')}
-                  className={`pill-item${view === 'complete' ? ' active' : ''}`}
-                  style={{ fontSize: 11, padding: '3px 9px' }}
-                >
-                  {viewLabels.complete}
-                </button>
-                <button
-                  onClick={() => setView('growth')}
-                  className={`pill-item${view === 'growth' ? ' active' : ''}`}
-                  style={{ fontSize: 11, padding: '3px 9px' }}
-                  title={viewLabels.hint || 'Growth of the money itself, with deposits and withdrawals removed'}
-                >
-                  {viewLabels.growth}
-                </button>
-              </div>
+              <SegmentedControl size="sm" ariaLabel="View" value={view} onChange={setView} options={[
+                { key: 'complete', label: viewLabels.complete },
+                { key: 'growth', label: viewLabels.growth, title: viewLabels.hint || 'Growth of the money itself, with deposits and withdrawals removed' },
+              ]} />
               {growth && (
                 <button
                   onClick={() => setCompareOpen(true)}
@@ -917,49 +914,18 @@ export default function PriceGrapher({
 
             {/* Chart type toggle (only when OHLC data source provided) */}
             {fetchOHLC && (
-              <div style={{ display: 'flex', gap: 2, background: 'var(--color-bg-elevated)', borderRadius: 8, padding: 2 }}>
-                <button
-                  onClick={() => { setChartMode('line'); clearSelection(); }}
-                  title="Line chart"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    width: 26, height: 22, borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: chartMode === 'line' ? 'var(--color-bg-card)' : 'transparent',
-                    color: chartMode === 'line' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <Activity size={12} />
-                </button>
-                <button
-                  onClick={() => { setChartMode('candle'); clearSelection(); }}
-                  title="Candlestick chart"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    width: 26, height: 22, borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: chartMode === 'candle' ? 'var(--color-bg-card)' : 'transparent',
-                    color: chartMode === 'candle' ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <CandlestickChart size={12} />
-                </button>
-              </div>
+              <SegmentedControl size="sm" ariaLabel="Chart type" value={chartMode}
+                onChange={m => { setChartMode(m); clearSelection(); }}
+                options={[
+                  { key: 'line',   icon: Activity,         title: 'Line chart' },
+                  { key: 'candle', icon: CandlestickChart, title: 'Candlestick chart' },
+                ]} />
             )}
 
             {/* Range selector */}
-            <div className="pill-group" style={{ display: 'flex' }}>
-              {ranges.map(r => (
-                <button
-                  key={r.label}
-                  onClick={() => { setRange(r); clearSelection(); }}
-                  className={`pill-item${range.label === r.label ? ' active' : ''}`}
-                  style={{ fontSize: 11, padding: '3px 9px' }}
-                >
-                  {r.label}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl size="sm" ariaLabel="Range" value={range.label}
+              onChange={l => { setRange(ranges.find(r => r.label === l)); clearSelection(); }}
+              options={ranges.map(r => ({ key: r.label, label: r.label }))} />
           </div>
         </div>
       </div>

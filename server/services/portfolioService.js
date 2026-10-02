@@ -19,11 +19,12 @@
 const Transaction     = require('../models/Transaction');
 const AccountHoldings = require('../models/AccountHoldings');
 
-const { fetchLatestPrices, fetchHistoricPrices, lastOnOrBefore } = require('./marketDataService');
+const { fetchLatestPrices, fetchHistoricPrices, lastOnOrBefore, latestPreviousCloses } = require('./marketDataService');
 const { resolveUnitPrice }        = require('../utils/assetPricing');
 const { directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { midnight, todayMs, t1Ms, todayStr, t1Str, toDateStr } = require('../utils/helpers');
 const { DAY_MS }                  = require('../utils/constants');
+const { xirr }                    = require('../utils/series');
 const mfService                   = require('./mfService');
 
 /** How far back to look for a T-1 close: enough to clear a weekend plus a holiday run. */
@@ -42,8 +43,8 @@ const PREV_CLOSE_LOOKBACK_DAYS = 10;
  * the account it draws from, and "you hold 30" is a lie if 12 of them sit in a different
  * broker. So the sell UI gets the breakdown while everything else keeps the total.
  */
-async function loadBook(userId) {
-  const docs = await AccountHoldings.find({ user: userId }).select('account holdings').lean();
+async function loadBook(userId, account) {
+  const docs = await AccountHoldings.find({ user: userId, ...(account && { account }) }).select('account holdings').lean();
 
   const book = {};
   for (const doc of docs) {
@@ -102,14 +103,16 @@ async function loadBook(userId) {
  * Sells are matched per ACCOUNT (a sale draws from the account it happened in), then
  * totalled per symbol for the merged view.
  */
-async function computeRealised(userId) {
+async function computeRealised(userId, account) {
   const txns = await Transaction
-    .find({ user: userId, type: { $in: ['buy', 'sell'] } })
+    .find({ user: userId, type: { $in: ['buy', 'sell'] }, ...(account && { account }) })
     .select('account type assetSymbol units amount date')
     .sort({ date: 1 })
-    .lean();
+    .lean()
+    .then(chronological);
 
   const bySymbol = {};     // symbol → realised INR
+  const flows    = [];     // [dayMs, ±INR] — money into (−) and out of (+) the book
   const running  = {};     // `${account}|${symbol}` → { units, invested }
   let total = 0;
 
@@ -118,6 +121,7 @@ async function computeRealised(userId) {
     if (!sym || !tx.units) continue;
 
     const key = `${tx.account}|${sym}`;
+    flows.push([midnight(tx.date), directionalAssetImpact(tx.type) > 0 ? -(tx.amount || 0) : (tx.amount || 0)]);
     const pos = (running[key] ??= { units: 0, invested: 0 });
     const dir = directionalAssetImpact(tx.type);
 
@@ -139,8 +143,13 @@ async function computeRealised(userId) {
     pos.invested  = pos.units > 0 ? avg * pos.units : 0;   // drain the pool at the average
   }
 
-  return { total, bySymbol };
+  return { total, bySymbol, flows };
 }
+
+// Same-day trades carry no time, so buys go first: an intraday round trip is a buy then a
+// sell, and replaying the sell first books a phantom short with its whole proceeds as profit.
+const chronological = (txns) => txns.sort((a, b) =>
+  midnight(a.date) - midnight(b.date) || directionalAssetImpact(b.type) - directionalAssetImpact(a.type));
 
 /**
  * Live price + previous close for every position, both in INR.
@@ -165,13 +174,16 @@ async function priceBook(book) {
   const live = {};
   const prev = {};
   const dayBase = {};   // what today's move is measured FROM — `prev`, except for a fund
+  // The live feed's own previous-session close: the day's move then compares like with
+  // like, and on a weekend or holiday it is the last session's move rather than zero.
+  const sessionPrev = latestPreviousCloses(book.map(p => p.assetSymbol));
 
   for (const pos of book) {
     const sym     = pos.assetSymbol;
     const basisMs = midnight(pos.lastTransactionDate || pos.firstPurchaseDate || todayMs());
 
     const prevQuote = lastOnOrBefore(history[sym] || {}, t1)?.value ?? null;
-    let dayBaseQuote = prevQuote;
+    let dayBaseQuote = latest[sym] != null && sessionPrev[sym] != null ? sessionPrev[sym] : prevQuote;
 
     // A fund reprices once a day, and its NAV for today is published only at night. All
     // day, then, its "latest" NAV IS yesterday's, and comparing it with yesterday's close
@@ -234,8 +246,9 @@ async function priceBook(book) {
  *
  * @returns {Promise<{ holdings: Object[], totals: Object }>}
  */
-async function getPortfolio(userId, { live: wantLive = true } = {}) {
-  const [book, realised] = await Promise.all([loadBook(userId), computeRealised(userId)]);
+// `account` scopes the whole book (holdings, weights, realised) to one account.
+async function getPortfolio(userId, { live: wantLive = true, account = null } = {}) {
+  const [book, realised] = await Promise.all([loadBook(userId, account), computeRealised(userId, account)]);
 
   if (!book.length) {
     return {
@@ -244,6 +257,8 @@ async function getPortfolio(userId, { live: wantLive = true } = {}) {
         invested: 0, value: 0,
         unrealisedPnl: 0, unrealisedPnlPct: 0,
         realisedPnl: realised.total,
+        totalGain: realised.total,
+        ...bookXirr(realised.flows, 0, wantLive ? todayMs() : t1Ms()),
         dayChange: 0, dayChangePct: 0,
         holdingsCount: 0, priced: true,
         asof: wantLive ? todayStr() : t1Str(),
@@ -347,6 +362,8 @@ async function getPortfolio(userId, { live: wantLive = true } = {}) {
       unrealisedPnl,
       unrealisedPnlPct: invested ? (unrealisedPnl / Math.abs(invested)) * 100 : 0,
       realisedPnl:      realised.total,
+      totalGain:        unrealisedPnl + realised.total,
+      ...bookXirr(realised.flows, value, wantLive ? todayMs() : t1Ms()),
       dayChange,
       // Measured against only what was comparable, so an unpriceable holding neither
       // dilutes the move nor fabricates one.
@@ -359,6 +376,18 @@ async function getPortfolio(userId, { live: wantLive = true } = {}) {
       asof:             wantLive ? todayStr() : t1Str(),
     },
   };
+}
+
+/**
+ * Annualised money-weighted return of the book: every buy and sell as a dated flow, the
+ * current value as the closing one. Withheld under 90 days, where annualising is noise.
+ */
+function bookXirr(flows, value, endMs) {
+  if (!flows.length) return { xirr: null, since: null };
+  const since = flows[0][0];
+  if (endMs - since < 90 * DAY_MS) return { xirr: null, since: toDateStr(since) };
+  const r = xirr([...flows, [endMs, value]]);
+  return { xirr: r == null || !Number.isFinite(r) ? null : r, since: toDateStr(since) };
 }
 
 /**
@@ -410,14 +439,15 @@ async function getPortfolio(userId, { live: wantLive = true } = {}) {
  * @param {number} opts.fromMs  window start (UTC midnight); null = since the first trade
  * @param {number} opts.toMs    window end (UTC midnight), default T-1
  */
-async function getContribution(userId, { fromMs = null, toMs = null } = {}) {
+async function getContribution(userId, { fromMs = null, toMs = null, account = null } = {}) {
   const end = toMs ?? t1Ms();
 
   const txns = await Transaction
-    .find({ user: userId, type: { $in: ['buy', 'sell'] } })
+    .find({ user: userId, type: { $in: ['buy', 'sell'] }, ...(account && { account }) })
     .select('type assetSymbol assetName assetType units amount date purity rate currency')
     .sort({ date: 1 })
-    .lean();
+    .lean()
+    .then(chronological);
 
   if (!txns.length) return { rows: [], totals: emptyContributionTotals(fromMs, end) };
 

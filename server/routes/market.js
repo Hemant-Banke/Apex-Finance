@@ -8,7 +8,7 @@ const { isPurityAsset } = require('../utils/assetPricing');
 const { fxSymbol, normalizeCurrency } = require('../utils/currency');
 const {
   fetchChart, closesByDay, lastOnOrBefore, fetchMetalPricePerGram, fetchFxRate, searchYahoo,
-  fetchHistoricPrices,
+  fetchHistoricPrices, fetchDailyCloses, quoteCurrency,
 } = require('../services/marketDataService');
 const mfService = require('../services/mfService');
 const sectorService = require('../services/sectorService');
@@ -216,22 +216,19 @@ router.get('/index-series', asyncHandler(async (req, res) => {
     closes = (await fetchHistoricPrices([{ assetSymbol: symbol, assetType: metal }], from, now))[symbol] || {};
     if (!Object.keys(closes).length) throw new HttpError(502, 'Metal prices unavailable');
   } else {
-    const result = await fetchChart(symbol, {
-      period1: Math.floor((now - daysNum * DAY_MS) / 1000),
-      period2: Math.floor(now / 1000),
-      interval: '1d',
-    }, 10000);
-    if (!result) throw new HttpError(502, 'Index data unavailable');
-    closes = closesByDay(result);
+    // Settled closes from the local price cache, today's point from the live memo.
+    const from = midnight(now - daysNum * DAY_MS);
+    closes = await fetchDailyCloses(symbol, from, todayMs());
+    if (!Object.keys(closes).length) throw new HttpError(502, 'Index data unavailable');
 
-    const currency = inr ? normalizeCurrency(result.meta?.currency) : undefined;
+    let currency;
+    if (inr) {
+      const quoted = await quoteCurrency(symbol);
+      if (!quoted) throw new HttpError(502, 'Quote currency unavailable');
+      currency = normalizeCurrency(quoted);
+    }
     if (currency) {
-      const fx = await fetchChart(fxSymbol(currency), {
-        period1: Math.floor((now - (daysNum + 10) * DAY_MS) / 1000),
-        period2: Math.floor(now / 1000),
-        interval: '1d',
-      }, 10000);
-      const rates = fx ? closesByDay(fx) : {};
+      const rates = await fetchDailyCloses(fxSymbol(currency), from - 10 * DAY_MS, todayMs());
       // A missing rate is never treated as 1 (see utils/currency): a day with no rate
       // on or before it is dropped rather than charted as dollars read as rupees.
       // One forward pass over both sorted series (the rate carried forward across days
@@ -253,10 +250,13 @@ router.get('/index-series', asyncHandler(async (req, res) => {
   const startMs = midnight(Math.min(...seen));
   const endMs   = midnight(todayMs());
 
+  // One pass over the sorted closes, carrying the last one across closed days.
+  const sorted = seen.sort((a, b) => a - b);
   const out = [];
+  let i = -1;
   for (let t = startMs; t <= endMs; t += DAY_MS) {
-    const last = lastOnOrBefore(closes, t);
-    out.push({ date: toDateStr(t), close: last ? last.value : null });
+    while (i + 1 < sorted.length && sorted[i + 1] <= t) i++;
+    out.push({ date: toDateStr(t), close: i >= 0 ? closes[sorted[i]] : null });
   }
   res.json(out);
 }));

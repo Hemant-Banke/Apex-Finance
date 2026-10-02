@@ -34,6 +34,10 @@
   --color-danger: #ef4444;
   --color-danger-muted: rgba(239, 68, 68, 0.1);
   --color-chart-warm: #f0a04b;
+  /* The money garden's own greens — growth, not gain/loss status. */
+  --color-garden-deep: #2f5d3e;
+  --color-garden: #5c9a64;
+  --color-garden-light: #9ad8ae;
   --color-chart-coral: #e78a5c;
 
   /* Borders — cool hairlines */
@@ -353,9 +357,13 @@ body {
 /* Circular — for close / back affordances. */
 .btn-icon-circle { border-radius: 50%; }
 
-/* Pill toggle group */
+/* Pill toggle group — rendered by SegmentedControl, the one selector. */
 .pill-group {
   display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  align-self: center;
+  vertical-align: middle;
   padding: 3px;
   gap: 2px;
   border-radius: var(--radius-pill);
@@ -363,10 +371,16 @@ body {
   border: 1px solid var(--color-border);
 }
 .pill-item {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   padding: 5px 12px;
   border-radius: var(--radius-pill);
   font-size: 0.6875rem;
   font-weight: 500;
+  line-height: 1.25;
+  white-space: nowrap;
   cursor: pointer;
   border: none;
   background: transparent;
@@ -380,6 +394,22 @@ body {
   color: var(--color-text-primary);
   box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--color-border);
 }
+.pill-item:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
+.pill-label { display: inline-flex; align-items: baseline; gap: 6px; }
+.pill-label > svg { align-self: center; }
+.pill-count { font-size: 10px; opacity: 0.65; }
+.pill-hint { font-size: 0.6875rem; font-weight: 400; color: var(--color-text-muted); margin-top: 1px; }
+
+.pill-sm .pill-item { font-size: 11px; padding: 3px 9px; }
+.pill-sm .pill-label { gap: 4px; }
+
+/* Form fields: a recessed track the height of an input, the choice raised out of it. */
+.pill-lg { border-radius: 12px; background: var(--color-bg-input); padding: 4px; gap: 4px; }
+.pill-lg .pill-item { font-size: 0.8125rem; font-weight: 600; padding: 8px 14px; border-radius: 9px; }
+.pill-lg .pill-label { gap: 7px; }
+.pill-lg .pill-item.has-hint { padding: 7px 12px; }
+
+.pill-block { align-self: stretch; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); width: 100%; }
 
 /* ═══ INPUTS ═══ */
 .input-field {
@@ -530,6 +560,8 @@ select.input-field {
   max-width: 440px;
   max-height: calc(100vh - 7vh - 40px);
   overflow-y: auto;
+  /* overflow-y alone makes x auto too; floating panels portal out, so nothing needs it. */
+  overflow-x: hidden;
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border-hover);
   border-radius: var(--radius-lg);
@@ -948,10 +980,21 @@ select.input-field {
 
 /* Markets header icons (search, refresh) — quiet square outline buttons; the refresh
    icon turns while a refresh runs. */
+/* "Updated hh:mm" and its refresh as ONE control, so the time sits on the button it describes. */
+.status-pill {
+  display: inline-flex; align-items: center; height: 38px; box-sizing: border-box;
+  border: 1px solid var(--color-border-hover); border-radius: var(--radius-sm);
+  background: var(--color-bg-card); overflow: hidden;
+}
+.status-pill-text {
+  display: inline-flex; align-items: center; gap: 8px; padding: 0 12px 0 13px;
+  font-size: 0.75rem; color: var(--color-text-muted); white-space: nowrap;
+}
+.status-pill-dot { width: 6px; height: 6px; border-radius: 99px; background: var(--color-success); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-success) 18%, transparent); }
 .refresh-btn {
-  display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; padding: 0; border-radius: 9px;
-  background: transparent; border: 1px solid var(--color-border-hover); cursor: pointer;
-  color: var(--color-text-secondary); font-weight: 500; transition: all 0.15s ease;
+  display: inline-flex; align-items: center; justify-content: center; width: 38px; height: 100%; padding: 0;
+  background: transparent; border: none; border-left: 1px solid var(--color-border-subtle); cursor: pointer;
+  color: var(--color-text-secondary); transition: all 0.15s ease;
 }
 .refresh-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-card-hover); }
 .refresh-btn:disabled { cursor: default; opacity: 0.7; }
@@ -980,11 +1023,140 @@ select.input-field {
 }
 .category-option { transition: background 0.12s ease; }
 .category-option:hover { background: var(--color-bg-card-hover); }
-/* An icon-only control sized to sit in a row of SegmentedControl chips. */
-.chip-button {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 0 8px; align-self: stretch; border-radius: 7px; cursor: pointer;
-  border: 1px solid var(--color-border-subtle); background: transparent;
+
+/* Accounts empty state: a ghost account card that becomes a real one on click. */
+.starter-card {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 14px;
+  min-height: 168px; padding: 18px; border-radius: 14px; cursor: pointer; font-family: inherit;
+  background: var(--color-bg-secondary); border: 1px dashed var(--color-border-hover);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+.starter-card:hover { border-style: solid; border-color: color-mix(in srgb, var(--tone) 55%, transparent); background: var(--color-bg-card-hover); transform: translateY(-2px); }
+.starter-add {
+  position: absolute; top: 16px; right: 16px; width: 26px; height: 26px; border-radius: 99px;
+  display: flex; align-items: center; justify-content: center; color: var(--color-text-muted);
+  border: 1px solid var(--color-border-hover); transition: all 0.18s ease;
+}
+.starter-card:hover .starter-add { color: #1A1408; background: var(--color-accent); border-color: var(--color-accent); }
+
+/* Dashboard vital signs: each figure is a door to its page. */
+.vital-tile { display: block; padding: 18px 20px 18px; text-decoration: none; transition: background 0.15s ease; min-width: 0; }
+.vital-tile:hover { background: var(--color-bg-card-hover); }
+.vital-arrow { color: var(--color-text-muted); opacity: 0; transition: opacity 0.15s ease; }
+.vital-tile:hover .vital-arrow { opacity: 1; }
+
+/* An account as a metal card: brushed steel with the faintest tint of its type, hairline
+   edges, a specular highlight, and a quiet sheen on hover. No coloured glow. */
+.account-card {
+  position: relative; isolation: isolate; display: flex; flex-direction: column;
+  aspect-ratio: 1.62; min-height: 196px; min-width: 0; overflow: hidden;
+  padding: 20px 20px 18px; border-radius: 16px; text-decoration: none;
+  background:
+    linear-gradient(160deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0) 38%),
+    linear-gradient(145deg,
+      color-mix(in srgb, var(--tone) 10%, #1B1E23) 0%,
+      color-mix(in srgb, var(--tone) 5%, #111317) 52%,
+      color-mix(in srgb, var(--tone) 8%, #17191D) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.015),
+    0 14px 28px -16px rgba(0, 0, 0, 0.85),
+    0 2px 4px -2px rgba(0, 0, 0, 0.5);
+  transition: transform 0.4s cubic-bezier(.2,.7,.2,1), border-color 0.4s ease, box-shadow 0.4s ease;
+}
+/* Brushed grain: fine diagonal lines, felt more than seen. */
+.account-card::after {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: repeating-linear-gradient(115deg, rgba(255, 255, 255, 0.022) 0 1px, transparent 1px 3px);
+}
+/* The sheen: a narrow band of light across the face on hover. */
+.account-card::before {
+  content: ''; position: absolute; top: -50%; bottom: -50%; left: -60%; width: 30%; z-index: 1; pointer-events: none;
+  background: linear-gradient(105deg, transparent 0%, rgba(255, 255, 255, 0.06) 42%, rgba(255, 255, 255, 0.11) 50%, rgba(255, 255, 255, 0.06) 58%, transparent 100%);
+  transform: translateX(0) rotate(10deg); transition: transform 1.1s cubic-bezier(.2,.7,.2,1);
+}
+.account-card:hover::before { transform: translateX(560%) rotate(10deg); }
+.account-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.13);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.02),
+    0 22px 40px -18px rgba(0, 0, 0, 0.9),
+    0 2px 4px -2px rgba(0, 0, 0, 0.5);
+}
+/* The chip: polished silver with a whisper of the type's colour. */
+.account-card-chip {
+  width: 36px; height: 27px; border-radius: 6px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: color-mix(in srgb, var(--tone) 55%, #1A1C20);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--tone) 12%, #E9EAEC) 0%,
+    color-mix(in srgb, var(--tone) 18%, #A9ADB3) 50%,
+    color-mix(in srgb, var(--tone) 10%, #D6D8DB) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), inset 0 -1px 0 rgba(0, 0, 0, 0.25), 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+/* The type's emblem, embossed faintly into the steel. */
+.account-card-mark {
+  position: absolute; right: -22px; bottom: -26px; z-index: -1; pointer-events: none;
+  color: #ffffff; opacity: 0.035;
+}
+.account-card-balance {
+  font-size: 1.45rem; font-weight: 500; letter-spacing: -0.01em; white-space: nowrap;
+  color: var(--color-text-primary);
+}
+.account-card-network {
+  font-size: 0.6rem; font-weight: 600; letter-spacing: 0.26em; text-transform: uppercase;
+  color: color-mix(in srgb, var(--tone) 35%, var(--color-text-muted));
+}
+.account-card-spark { position: absolute; left: 0; right: 0; bottom: 0; height: 58px; opacity: 0.22; pointer-events: none; z-index: -1; }
+
+/* Plan page: a quiet status chip under the hero headline. */
+.freedom-chip {
+  display: inline-flex; align-items: center; gap: 9px; margin-top: 18px; padding: 7px 13px; border-radius: 99px;
+  font-size: 0.75rem; color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-bg-card) 80%, transparent); border: 1px solid var(--color-border-hover);
+}
+.freedom-chip-dot { width: 6px; height: 6px; border-radius: 99px; }
+
+/* Plan sliders: a thin track filled in gold up to the value, a light thumb ringed in gold. */
+.plan-range {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: 99px; outline: none; cursor: pointer;
+  background: linear-gradient(90deg, var(--color-accent) var(--pct), var(--color-bg-elevated) var(--pct));
+}
+.plan-range::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--color-text-primary); border: 3px solid var(--color-accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+  transition: transform 0.15s ease;
+}
+.plan-range::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.plan-range::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--color-text-primary); border: 3px solid var(--color-accent); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}
+.plan-range:focus-visible { box-shadow: 0 0 0 3px var(--color-accent-muted); }
+.plan-panel {
+  padding: 18px 18px 20px; border-radius: 14px; background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border-subtle); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
+}
+.plan-toggle {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 10px; cursor: pointer;
+  font-family: inherit; text-align: left; background: transparent; border: 1px solid var(--color-border-subtle);
   color: var(--color-text-muted); transition: all 0.15s ease;
 }
-.chip-button:hover { color: var(--color-text-primary); border-color: var(--color-border-hover); }
+.plan-toggle[aria-pressed='true'] { color: var(--color-text-primary); border-color: var(--color-border-hover); background: var(--color-bg-card); }
+.plan-toggle:hover { border-color: var(--color-border-hover); }
+
+/* Plan number fields: one recessed box, the unit sitting inside it. */
+.plan-field {
+  display: flex; align-items: center; height: 36px; padding: 0 10px; gap: 6px; border-radius: 9px;
+  background: var(--color-bg-input); border: 1px solid var(--color-border-subtle); transition: border-color 0.15s ease;
+}
+.plan-field:focus-within { border-color: var(--color-accent); }
+.plan-field input {
+  flex: 1; min-width: 0; height: 100%; background: transparent; border: none; outline: none;
+  color: var(--color-text-primary); font-size: 0.95rem; font-weight: 500; -moz-appearance: textfield;
+}
+.plan-field input::-webkit-outer-spin-button, .plan-field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.plan-field-unit { font-size: 0.75rem; color: var(--color-text-muted); }
