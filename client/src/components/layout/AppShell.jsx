@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw
 } from 'lucide-react';
 import ApexLogo from '../ui/ApexLogo';
-import CubeGrid, { GRID_PERIOD } from '../ui/CubeGrid';
+import DitherField from '../ui/DitherField';
 import { networthAPI } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
 
@@ -47,7 +47,7 @@ export default function AppShell({ children }) {
       position: 'relative',
     }}>
       {/* ── Ambient background — persists across all pages (AppShell never unmounts) ── */}
-      <CubeGrid period={GRID_PERIOD} style={{ opacity: 0.5 }} />
+      <DitherField />
       <div className="landing-orb" style={{ width: 680, height: 680, background: 'radial-gradient(circle, rgba(201,169,106,0.07), transparent 65%)', top: '-18%', right: '-2%', animation: 'orbFloat1 28s ease-in-out infinite' }} />
       <div className="landing-orb" style={{ width: 480, height: 480, background: 'radial-gradient(circle, rgba(91,110,142,0.07), transparent 65%)', bottom: '-12%', right: '22%', animation: 'orbFloat3 24s ease-in-out infinite' }} />
 

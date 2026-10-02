@@ -737,6 +737,29 @@ select.input-field {
   animation: heroFadeIn 0.8s ease-out 0.4s both;
 }
 
+/* Sign-in garden: petals fall and drift in whole 3px steps (DitherField), so the dots never resample. */
+@keyframes garden-fall {
+  from { transform: translate3d(0, calc(-1 * var(--fall)), 0); }
+  to { transform: translate3d(0, 0, 0); }
+}
+@keyframes garden-sway {
+  from { transform: translate3d(-9px, 0, 0); }
+  to { transform: translate3d(9px, 0, 0); }
+}
+.garden-sway { animation: garden-sway 7s steps(6) infinite alternate; }
+@media (prefers-reduced-motion: reduce) { .garden-sway { animation: none; } }
+
+/* Sign-in hero: a soft ink halo so the garden behind never crowds the type. */
+.hero-scrim::before {
+  content: '';
+  position: absolute;
+  inset: -150px -220px -150px -180px;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse at 38% 50%, rgba(11, 13, 16, 0.92) 0%, rgba(11, 13, 16, 0.75) 50%, transparent 78%);
+}
+.hero-scrim { text-shadow: 0 0 18px rgba(11, 13, 16, 0.95), 0 1px 3px rgba(11, 13, 16, 0.9); }
+
 .landing-orb {
   position: absolute;
   border-radius: 50%;

@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import ApexLogo from '../components/ui/ApexLogo';
-import CubeGrid, { GRID_PERIOD } from '../components/ui/CubeGrid';
+import DitherField from '../components/ui/DitherField';
 import OAuthButtons from '../components/auth/OAuthButtons';
 
 const WORDS = ['Tracks', 'Invests', 'Grows', 'Protects', 'Compounds'];
@@ -56,8 +56,8 @@ export default function Login() {
         background: '#0B0D10',
       }}>
 
-        {/* Cube grid with sweeping sheen */}
-        <CubeGrid period={GRID_PERIOD} />
+        {/* Money garden, fully shown */}
+        <DitherField full growth={0.6} />
 
         {/* Orbs */}
         <div className="landing-orb" style={{ width: 520, height: 520, background: 'radial-gradient(circle, rgba(45,212,191,0.22), transparent 65%)', top: '-8%', left: '-5%', animation: 'orbFloat1 20s ease-in-out infinite' }} />
@@ -87,7 +87,7 @@ export default function Login() {
         </div>
 
         {/* Hero text */}
-        <div style={{ position: 'relative', zIndex: 1, animation: 'heroFadeIn 0.9s ease-out 0.15s both' }}>
+        <div className="hero-scrim" style={{ position: 'relative', zIndex: 1, animation: 'heroFadeIn 0.9s ease-out 0.15s both' }}>
           <h1 className="hero-heading">
             <span style={{ display: 'block', marginBottom: 6 }}>Apex</span>
             <span style={{ position: 'relative', display: 'block', height: 'clamp(3.2rem, 6.4vw, 4.8rem)' }}>

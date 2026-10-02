@@ -3,7 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Eye, EyeOff, ArrowRight } from 'lucide-react';
 import ApexLogo from '../components/ui/ApexLogo';
-import CubeGrid, { GRID_PERIOD } from '../components/ui/CubeGrid';
+import DitherField from '../components/ui/DitherField';
 
 const PHRASES = ['Your wealth', 'Your growth', 'Your future', 'Your legacy'];
 
@@ -52,8 +52,8 @@ export default function Register() {
         background: '#0B0D10',
       }}>
 
-        {/* Cube grid with sweeping sheen */}
-        <CubeGrid period={GRID_PERIOD} />
+        {/* Money garden, fully shown */}
+        <DitherField full growth={0.6} />
 
         {/* Orbs — different palette from Login to distinguish the pages */}
         <div className="landing-orb" style={{ width: 480, height: 480, background: 'radial-gradient(circle, rgba(99,102,241,0.2), transparent 65%)', top: '-5%', right: '-2%', animation: 'orbFloat2 22s ease-in-out infinite' }} />
@@ -83,7 +83,7 @@ export default function Register() {
         </div>
 
         {/* Hero text */}
-        <div style={{ position: 'relative', zIndex: 1, animation: 'heroFadeIn 0.9s ease-out 0.15s both' }}>
+        <div className="hero-scrim" style={{ position: 'relative', zIndex: 1, animation: 'heroFadeIn 0.9s ease-out 0.15s both' }}>
           <h1 className="hero-heading">
             <span style={{ display: 'block', marginBottom: 6 }}>Begins with</span>
             <span style={{ position: 'relative', display: 'block', height: 'clamp(3.2rem, 6.4vw, 4.8rem)' }}>

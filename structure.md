@@ -73,7 +73,7 @@
 - `ui/Spinner.jsx` — Centred loading spinner.
 - `ui/TopProgressBar.jsx` — Top-of-page bar driven by in-flight API requests.
 - `ui/AppLoader.jsx` — Branded full-screen boot loader.
-- `ui/CubeGrid.jsx` — Animated canvas grid background.
+- `ui/DitherField.jsx` — Static dithered "money garden" (flowers, ₹ coin-blooms, banknote leaves), drawn once; a cursor lens reveals it in colour, or `full` shows it outright with CSS-stepped falling petals (sign-in pages).
 - `ui/ApexLogo.jsx` — SVG logo mark.
 - `ui/Divider.jsx` — Horizontal rule (neutral or gilt).
 
