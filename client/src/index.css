@@ -962,3 +962,29 @@ select.input-field {
   font-size: 0.625rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase;
   color: var(--color-text-muted);
 }
+
+/* ═══ TRANSACTIONS LEDGER ═══ */
+.calendar-cell { transition: transform 0.12s ease, box-shadow 0.12s ease; }
+.calendar-cell:hover { transform: scale(1.18); box-shadow: 0 0 0 1px var(--color-border-hover); }
+.category-row { cursor: pointer; border-radius: 8px; margin: -6px -8px; padding: 6px 8px; transition: background 0.15s ease; }
+.category-row:hover { background: var(--color-bg-card-hover); }
+.category-row[data-active='true'] { background: var(--color-accent-dim); }
+/* The row checkbox shows on hover, and stays once anything is selected. */
+.ledger-check { opacity: 0; transition: opacity 0.15s ease; }
+.group:hover .ledger-check, .ledger-selecting .ledger-check, .ledger-check:focus-within { opacity: 1; }
+.ledger-day {
+  position: sticky; top: var(--ledger-sticky, 0px); z-index: 1;
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  padding: 9px 24px; background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border-subtle); border-bottom: 1px solid var(--color-border-subtle);
+}
+.category-option { transition: background 0.12s ease; }
+.category-option:hover { background: var(--color-bg-card-hover); }
+/* An icon-only control sized to sit in a row of SegmentedControl chips. */
+.chip-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 8px; align-self: stretch; border-radius: 7px; cursor: pointer;
+  border: 1px solid var(--color-border-subtle); background: transparent;
+  color: var(--color-text-muted); transition: all 0.15s ease;
+}
+.chip-button:hover { color: var(--color-text-primary); border-color: var(--color-border-hover); }

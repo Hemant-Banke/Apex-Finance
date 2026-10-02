@@ -43,7 +43,9 @@ export default function AppShell({ children }) {
       display: 'flex',
       height: '100vh',
       background: 'var(--color-bg-primary)',
-      overflow: 'hidden',
+      // `clip`, not `hidden`: the drifting orbs overhang this box, and a hidden box can still be
+      // scrolled by focus, which slid the whole app sideways when a date popover opened.
+      overflow: 'clip',
       position: 'relative',
     }}>
       {/* ── Ambient background — persists across all pages (AppShell never unmounts) ── */}

@@ -52,6 +52,9 @@ const TX_FILTERS = [
   { key: 'trades',   label: 'Trades',    match: t => t.type === 'buy' || t.type === 'sell' },
 ];
 
+// The activity chip a "View all" carries over, as the ledger's own type filter.
+const LEDGER_KIND = { in: 'income', out: 'expense', transfer: 'transfer', trades: 'trades' };
+
 // Small pill showing an asset's type in a modal header.
 function AssetTypePill({ type }) {
   if (!type) return null;
@@ -511,7 +514,7 @@ export default function AccountDetail() {
               {/* Only the most recent hundred are loaded here. Anything older lives on
                   the Transactions page, which already has date ranges, search and
                   paging — so this hands off rather than rebuilding them. */}
-              <Link to={`/transactions?account=${id}`}
+              <Link to={`/transactions?${new URLSearchParams({ account: id, period: 'all', ...(LEDGER_KIND[txFilter] && { type: LEDGER_KIND[txFilter] }) })}`}
                 className="text-xs font-medium"
                 style={{ color: 'var(--color-accent)', whiteSpace: 'nowrap' }}>
                 View all →

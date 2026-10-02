@@ -1,5 +1,4 @@
 const express = require('express');
-const mongoose = require('mongoose');
 const Transaction = require('../models/Transaction');
 const Account = require('../models/Account');
 
@@ -12,6 +11,7 @@ const { normalizeCategory }     = require('../lib/categoryRules');
 const { getAccountCashBalance } = require('../services/accountBalance');
 const txService                 = require('../services/transactionService');
 const categoryProfile           = require('../services/categoryProfileService');
+const txQuery                   = require('../services/transactionQueryService');
 
 /**
  * Record saved (user-confirmed) transactions into the user's category profile.
@@ -31,14 +31,6 @@ function learnCategories(userId, rows) {
 
 const router = express.Router();
 router.use(protect);
-
-/**
- * Cast an id for the query. `find` would cast a string itself, but the summary
- * `aggregate` runs the SAME filter and Mongoose does not cast pipeline stages —
- * a string id there matches nothing, so the totals silently came back empty.
- * An unparseable id is left as-is and simply matches nothing, as before.
- */
-const oid = (id) => mongoose.Types.ObjectId.isValid(id) ? new mongoose.Types.ObjectId(id) : id;
 
 /** Validate one row and return the document to insert. Throws a human-readable message. */
 async function prepareTransaction(userId, body) {
@@ -98,76 +90,14 @@ async function createTransactions(userId, rows) {
 }
 
 
-// GET /api/transactions
-//
-// `summary` totals the WHOLE filtered set, not the page being returned — "₹40,000 in,
-// ₹32,000 out" has to describe the filter the user built, or it is a lie about page 1.
+// GET /api/transactions — a page of the filtered list; `summary` totals the WHOLE filter.
 router.get('/', asyncHandler(async (req, res) => {
-  const { account, type, category, search, startDate, endDate, limit = 50, page = 1 } = req.query;
+  res.json(await txQuery.listTransactions(req.user._id, req.query));
+}));
 
-  const filter = { user: req.user._id };
-  if (type)      filter.type     = type;
-  if (category)  filter.category = category;
-  if (startDate || endDate) {
-    filter.date = {};
-    if (startDate) filter.date.$gte = new Date(startDate);
-    if (endDate)   filter.date.$lte = new Date(endDate);
-  }
-
-  // Two independent `$or`s can live in one filter only under `$and` — the second
-  // assignment would otherwise silently overwrite the first.
-  const clauses = [];
-
-  // An account's statement is every transaction that MOVED ITS MONEY, and a transfer
-  // moves the destination's just as much as the source's. The cash store has always
-  // credited both sides (see buildAccountTxnsMap); the list was the one place that
-  // showed only the source, so an incoming transfer appeared as a balance rise with
-  // no transaction to explain it.
-  if (account) clauses.push({ $or: [{ account: oid(account) }, { toAccount: oid(account) }] });
-
-  // Free text matches whatever the user would recognise the row by: its note, or the
-  // asset it traded. Escaped — a stray "(" in the box must not throw a regex error.
-  if (search?.trim()) {
-    const rx = new RegExp(search.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-    clauses.push({ $or: [{ notes: rx }, { assetName: rx }, { assetSymbol: rx }] });
-  }
-  if (clauses.length) filter.$and = clauses;
-
-  const [total, transactions, flows] = await Promise.all([
-    Transaction.countDocuments(filter),
-    Transaction.find(filter)
-      .populate('account',   'name type')
-      .populate('toAccount', 'name type')
-      .sort({ date: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .lean(),
-    Transaction.aggregate([
-      { $match: filter },
-      { $group: { _id: '$type', total: { $sum: '$amount' }, count: { $sum: 1 } } },
-    ]),
-  ]);
-
-  const of = (t) => flows.find(f => f._id === t)?.total || 0;
-  const income  = of('income');
-  const expense = of('expense');
-
-  res.json({
-    transactions,
-    total,
-    page:  parseInt(page),
-    pages: Math.ceil(total / parseInt(limit)),
-    summary: {
-      income,
-      expense,
-      net:     income - expense,
-      // Trades are reported separately: a buy is not an expense, and rolling it into
-      // "out" would make an investment look like money burnt.
-      invested: of('buy'),
-      divested: of('sell'),
-      count:    total,
-    },
-  });
+// GET /api/transactions/insights — daily flows, categories, largest and the prior window, same filter.
+router.get('/insights', asyncHandler(async (req, res) => {
+  res.json(await txQuery.getInsights(req.user._id, req.query));
 }));
 
 // POST /api/transactions

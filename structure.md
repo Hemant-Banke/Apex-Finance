@@ -10,11 +10,13 @@
 - `charts/ChartTooltip.jsx` — Shared solid chart tooltip (+ `TooltipPanel`), with % change from window start.
 - `charts/CompareIndexDialog.jsx` — Picker for benchmark overlays on a chart.
 - `charts/CashflowChart.jsx` — Monthly income/expense bars + net cashflow line; used on Analytics and the Dashboard.
+- `charts/CategoryBreakdown.jsx` — Ranked category totals with bars and prior-window change; `onSelect`/`active` make rows filters (Analytics, Transactions).
 
 ### forms
 - `forms/TransactionForm.jsx` — Add/edit cash transactions (income, expense, transfer, adjustment).
 - `forms/TypePicker.jsx` — Generic dropdown-select (searchable, clearable); replaces native `<select>`.
 - `forms/CategoryPicker.jsx` — Hierarchical category picker wired to the categories API.
+- `forms/CategoryMultiPicker.jsx` — Multi-select category filter: tick whole groups or single categories (tri-state groups, search); used by the Transactions ledger.
 - `forms/DatePicker.jsx` — Date picker + `DateRangePicker`.
 - `forms/EmojiPicker.jsx` — Searchable emoji grid for category icons.
 - `forms/RecurrenceFields.jsx` — "Repeat" toggle + schedule fields for subscriptions.
@@ -59,12 +61,14 @@
 - `stock/Ownership.jsx` — Shareholding pattern over 12 quarters; abroad, insiders/institutions + largest holders.
 
 ### transactions
-- `transactions/TransactionRow.jsx` — The one transaction row used in every list.
+- `transactions/TransactionRow.jsx` — The one transaction row used in every list (`leading` slot, `selected` tint).
+- `transactions/SpendCalendar.jsx` — Daily in/out calendar heatmap (weeks × weekdays), green/red against the median day, with per-weekday averages; click a day to pick it.
 
 ### ui
 - `ui/Button.jsx` — Button primitive (variants, sizes, icon).
 - `ui/Card.jsx` — Surface primitive (gilt / compact / flush).
 - `ui/Badge.jsx` — Small status chip.
+- `ui/Checkbox.jsx` — Square checkbox (`accent` master / `plain` row); is a `<button role=checkbox>`.
 - `ui/Modal.jsx` — Portaled titled dialog; nests.
 - `ui/ConfirmModal.jsx` — Confirmation dialog (replaces `confirm()`).
 - `ui/Popover.jsx` — Portaled floating panel used by all pickers.
@@ -88,7 +92,7 @@
 - `Dashboard.jsx` — Net worth masthead, portfolio card, recent activity.
 - `Accounts.jsx` — Accounts list with liabilities, shares and sparklines.
 - `AccountDetail.jsx` — One account: masthead, history chart, holdings, activity.
-- `Transactions.jsx` — Full transaction list with filters and paging.
+- `Transactions.jsx` — The ledger: period masthead vs the prior window, spending calendar, largest outflows, clickable category breakdown, type chips with counts, search/account/amount/sort filters, day-grouped list, bulk select-delete with undo, CSV export, add/import.
 - `Analytics.jsx` — Cashflow, categories, holdings, contribution, allocation.
 - `Markets.jsx` — Indian market overview, growth chart, sectors, flows.
 - `Stock.jsx` — One company in full; `/markets/stocks/:nse` and `/markets/world/:yahoo` (`global` prop).
@@ -116,6 +120,7 @@
 - `categoryNames.js` — Cached category taxonomy; `useCategoryNames`, `describeCategory`.
 - `confidence.js` — Import confidence bands/labels (mirrors server).
 - `recurrence.js` — `FREQUENCIES`, `emptyRecurrence`.
+- `categorySelection.js` — Multi-category selection rules (`groupState`, `toggleGroup`, `toggleCode`, `isSelected`); a group never coexists with its own children.
 - `undo.js` — `toCreatePayload` to re-create a deleted transaction.
 - `accountPickerOptions.jsx` — Account-type icons and TypePicker option builders.
 
@@ -179,7 +184,7 @@
 #### Routes (`server/routes/`)
 - `auth.js` — Register, login, OAuth, me.
 - `accounts.js` — Account CRUD, balance, holdings, daily series.
-- `transactions.js` — Transaction CRUD, bulk, filters.
+- `transactions.js` — Transaction CRUD, bulk; list + `/insights` via transactionQueryService.
 - `subscriptions.js` — Subscription list/create/pause/delete.
 - `dashboard.js` — Summary, portfolio, holdings, contribution, income-expense, categories.
 - `networth.js` — Net worth series, ensure, rebuild.
@@ -190,6 +195,7 @@
 
 #### Services (`server/services/`)
 - `transactionService.js` — Transaction lifecycle; asset pricing on save.
+- `transactionQueryService.js` — The shared transaction filter (`buildFilter`), paged list + totals, and insights (daily flows, categories, largest, type counts, prior window).
 - `dailyValueService.js` — Store orchestration: rebuild, extend, delta merge, NW.
 - `tsService.js` — Pure cash/asset/net-worth series builders.
 - `holdingsService.js` — AVCO holdings maintenance.

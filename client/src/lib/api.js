@@ -84,6 +84,8 @@ export const accountsAPI = {
 // Transactions
 export const transactionsAPI = {
   getAll: (params) => api.get('/transactions', { params }),
+  // Same filter as getAll: daily in/out, categories, largest outflows, the prior window.
+  getInsights: (params) => api.get('/transactions/insights', { params }),
   create: (data) => api.post('/transactions', data),
   // Import path. One request, and one store pass server-side — sending rows singly
   // re-prices and re-aggregates every store per row.

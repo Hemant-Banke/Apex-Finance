@@ -61,14 +61,15 @@ export default function Masthead({ lead, action, band, to, title }) {
  * them comparable with the others. One bar above the row says it once, and says it
  * better; the figures just name their percentage.
  */
-export function MastheadFigure({ label, value, pct, sub, accent, swatch }) {
+// `tight` sets the figure and its caption as one unit: tight line boxes and a 3px gap.
+export function MastheadFigure({ label, value, pct, sub, accent, swatch, tight = false }) {
   return (
     <div style={{ minWidth: 0 }}>
       <p className="text-xs" style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
         {swatch && <span style={{ width: 7, height: 7, borderRadius: 2, background: swatch, flexShrink: 0 }} />}
         {label}
       </p>
-      <p style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 5 }}>
+      <p style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginTop: 5, ...(tight && { lineHeight: 1.2 }) }}>
         <span className="figure" style={{ fontSize: '1.0625rem', fontWeight: 500, color: accent || 'var(--color-text-primary)' }}>
           {value}
         </span>
@@ -79,7 +80,7 @@ export function MastheadFigure({ label, value, pct, sub, accent, swatch }) {
         )}
       </p>
 
-      {sub && <div style={{ marginTop: 7 }}>{sub}</div>}
+      {sub && <div style={tight ? { marginTop: 3, display: 'flex', lineHeight: 1.3 } : { marginTop: 7 }}>{sub}</div>}
     </div>
   );
 }

@@ -25,7 +25,8 @@ import { useCategoryNames } from '../../lib/categoryNames';
  * deliberately read-only. Set it on any list where some rows are actionable and some
  * are not; a wholly read-only feed leaves it off and gives up no space.
  */
-export default function TransactionRow({ tx, subtitle, incoming, onEdit, onDelete, reserveActions = false, divided = false }) {
+// `leading` is an optional node before the name (the ledger's select checkbox); `selected` tints the row.
+export default function TransactionRow({ tx, subtitle, incoming, onEdit, onDelete, reserveActions = false, divided = false, leading, selected = false }) {
   const { label } = useCategoryNames();
 
   // One action button's footprint (13px icon + 4px padding each side), so an empty
@@ -46,8 +47,10 @@ export default function TransactionRow({ tx, subtitle, incoming, onEdit, onDelet
       style={{
         padding: '12px 24px',
         borderTop: divided ? '1px solid var(--color-border-subtle)' : 'none',
+        background: selected ? 'var(--color-accent-dim)' : undefined,
       }}
     >
+      {leading && <div style={{ marginRight: 14, flexShrink: 0, display: 'flex' }}>{leading}</div>}
       <div style={{ minWidth: 0, flex: 1 }}>
         <p className="text-sm truncate" style={{ color: 'var(--color-text-primary)' }}>
           {getTransactionName(tx, label, incoming)}
