@@ -1,5 +1,5 @@
 import { Home, GraduationCap, Car, Heart, Plane, ShieldCheck, Briefcase, Sunset, Target } from 'lucide-react';
-import { todayStr } from './utils';
+import { todayStr, CHART_COLORS } from './utils';
 
 /**
  * Goal maths — pure, client-side, like `fire.js`. Goals are DATED, so everything here is in
@@ -32,6 +32,8 @@ export const ASSETS = {
   gold:   { label: 'Gold',   ret: 0.09, vol: 0.14 },
 };
 export const ASSET_KEYS = ['equity', 'debt', 'gold'];
+// Gold takes the gold slot; equity and debt the next two hues, fixed so every goal agrees.
+export const ASSET_COLORS = { gold: CHART_COLORS[0], equity: CHART_COLORS[1], debt: CHART_COLORS[2] };
 
 export const STRATEGIES = {
   auto:         { label: 'Auto',         hint: 'Glides with the horizon' },
@@ -163,40 +165,46 @@ export function goalStatus(prob) {
   return { key: 'off', label: 'Off track', tone: 'var(--color-danger)' };
 }
 
-/** Everything the overview needs about one goal. */
-export function goalModel(goal) {
-  const months = monthsUntil(goal.targetDate);
-  const draws = withdrawals(goal, months);
-  const required = requiredCorpus(goal, months);
-  const expected = expectedValue(goal, months, goal.saved || 0, goal.monthly || 0, goal.stepUp || 0);
-  const savedGrown = expectedValue(goal, months, goal.saved || 0, 0, 0);
-  const { finals, bands } = simulate(goal, months);
-  const prob = months ? successRate(finals, required) : ((goal.saved || 0) >= required ? 100 : 0);
+// Until the optimiser lands, Apex suggests the monthly amount that meets the goal 8 times in 10.
+export const PLAN_CONFIDENCE = 80;
+
+/** The monthly contribution that reaches `confidence`% of paths — bisection on the seeded simulation. */
+function confidenceMonthly(goal, months, required, confidence) {
+  if (!months) return null;
+  const odds = (monthly) => successRate(simulate(goal, months, { monthly, sims: 300 }).finals, required);
+  if (odds(0) >= confidence) return 0;
   const need = requiredMonthly(goal, months, required);
+  let lo = 0, hi = Math.max(1000, need * 3);
+  while (odds(hi) < confidence && hi < 1e9) hi *= 2;
+  for (let i = 0; i < 14; i++) {
+    const mid = (lo + hi) / 2;
+    if (odds(mid) >= confidence) hi = mid; else lo = mid;
+  }
+  return hi;
+}
+
+/** Everything the overview needs about one goal. The contribution plan is Apex's, not the user's. */
+export function goalModel(input) {
+  const months = monthsUntil(input.targetDate);
+  const base = { ...input, saved: 0, stepUp: 0, monthly: 0 };
+  const draws = withdrawals(base, months);
+  const required = requiredCorpus(base, months);
+  const need = requiredMonthly(base, months, required);
+  const monthly = confidenceMonthly(base, months, required, PLAN_CONFIDENCE) ?? 0;
+  const goal = { ...base, monthly };
+  const { finals, bands } = simulate(goal, months);
+  const prob = months ? successRate(finals, required) : 0;
   return {
-    goal, months, years: months / 12, draws, required, expected, bands, prob,
+    goal, months, years: months / 12, draws, required, bands, prob, need, monthly,
+    expected: expectedValue(goal, months, 0, monthly, 0),
     status: goalStatus(prob),
     futureCost: draws.reduce((s, w) => s + w, 0),
-    // Share of the goal today's savings already pay for, once grown to the date.
-    funded: required ? Math.min(100, (savedGrown / required) * 100) : 100,
-    need, gap: Number.isFinite(need) ? need - (goal.monthly || 0) : Infinity,
     mixNow: mixAt(goal.strategy, months / 12),
   };
 }
 
-/** The monthly contribution that reaches `confidence`% of paths — bisection on the seeded simulation. */
-export function monthlyForConfidence(gm, confidence = 80) {
-  const { goal, months, required } = gm;
-  if (!months) return null;
-  if (successRate(simulate(goal, months, { monthly: 0, sims: 300 }).finals, required) >= confidence) return 0;
-  let lo = 0, hi = Math.max(1000, gm.need * 3);
-  while (successRate(simulate(goal, months, { monthly: hi, sims: 300 }).finals, required) < confidence && hi < 1e9) hi *= 2;
-  for (let i = 0; i < 14; i++) {
-    const mid = (lo + hi) / 2;
-    if (successRate(simulate(goal, months, { monthly: mid, sims: 300 }).finals, required) >= confidence) hi = mid; else lo = mid;
-  }
-  return hi;
-}
+export const monthlyForConfidence = (gm, confidence = PLAN_CONFIDENCE) =>
+  confidenceMonthly(gm.goal, gm.months, gm.required, confidence);
 
 /** What each change does to the odds. */
 export function goalLevers(gm) {
@@ -211,7 +219,7 @@ export function goalLevers(gm) {
     { label: 'Push the date back a year', p: odds({}, requiredCorpus(later, months + 12), months + 12) },
     { label: 'Trim the goal by 10%', p: odds({}, required * 0.9) },
   ];
-  if (bolder) list.push({ label: `Take a ${STRATEGIES[bolder].label.toLowerCase()} mix`, p: odds({ strategy: bolder }) });
+  if (bolder) list.push({ label: `Switch to the ${STRATEGIES[bolder].label.toLowerCase()} mix`, p: odds({ strategy: bolder }) });
   return list.map(l => ({ ...l, delta: l.p - prob }));
 }
 
@@ -249,14 +257,14 @@ export function withdrawalPlan(gm) {
 
 /**
  * Priority first, then date: who the monthly surplus pays for, and where it runs out.
- * `need` is each goal's required first-year contribution on the expected path.
+ * `need` is each goal's suggested monthly contribution.
  */
 export function fundingWaterfall(models, surplus) {
   const order = [...models].sort((a, b) =>
     PRIORITIES[a.goal.priority].rank - PRIORITIES[b.goal.priority].rank || a.months - b.months);
   let left = Math.max(0, surplus);
   return order.map(gm => {
-    const need = Number.isFinite(gm.need) ? gm.need : 0;
+    const need = gm.monthly || 0;
     const covered = Math.min(need, left);
     left -= covered;
     return { gm, need, covered, short: need - covered, leftAfter: left };
@@ -265,11 +273,24 @@ export function fundingWaterfall(models, surplus) {
 
 export const GOAL_DEFAULTS = (type = 'other') => {
   const t = GOAL_TYPES[type];
-  const d = new Date(todayStr());
-  d.setUTCFullYear(d.getUTCFullYear() + 5);
   return {
-    name: '', type, priority: 'important', amount: null, targetDate: d.toISOString().slice(0, 10),
-    inflation: t.inflation, saved: 0, monthly: 0, stepUp: 0,
-    withdrawal: { mode: t.mode, years: t.years || 1 }, strategy: 'auto', notes: '',
+    name: '', type, priority: 'important', amount: null, targetDate: addMonths(todayStr(), 60),
+    inflation: t.inflation, withdrawal: { mode: t.mode, years: t.years || 1 }, strategy: 'auto', notes: '',
   };
 };
+
+/** `iso` moved forward by `n` calendar months, clamped to the month's last day. */
+export function addMonths(iso, n) {
+  const [y, m, d] = String(iso).slice(0, 10).split('-').map(Number);
+  const total = y * 12 + (m - 1) + n;
+  const ty = Math.floor(total / 12), tm = total % 12;
+  const last = new Date(Date.UTC(ty, tm + 1, 0)).getUTCDate();
+  return `${ty}-${String(tm + 1).padStart(2, '0')}-${String(Math.min(d, last)).padStart(2, '0')}`;
+}
+
+/** "8 mo", "3 yrs", "4 yrs 5 mo". */
+export function horizonLabel(months) {
+  const y = Math.floor(months / 12), m = months % 12;
+  if (!y) return `${m} mo`;
+  return `${y} yr${y === 1 ? '' : 's'}${m ? ` ${m} mo` : ''}`;
+}

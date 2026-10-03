@@ -2,6 +2,10 @@ import { Link } from 'react-router-dom';
 import { compactIfLarge, pnlColor } from '../../lib/utils';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
+import DitherField from '../ui/DitherField';
+
+// Petals drift down the right side, clear of the figures on the left.
+const PETAL_MASK = 'linear-gradient(90deg, transparent 35%, #000 90%)';
 
 const money = (v) => compactIfLarge(Math.round(v || 0));
 const span = (months) => (months < 24 ? `${months.toFixed(1)} mo` : `${(months / 12).toFixed(1)} yrs`);
@@ -25,7 +29,8 @@ export default function IndependenceCard({ m, s }) {
   const surplus = m.atRetire - m.needed;
   const all = m.sources.cash + m.sources.liquid + m.sources.illiquid - m.sources.debts;
   return (
-    <Card style={{ display: 'flex', flexDirection: 'column' }}>
+    <Card style={{ display: 'flex', flexDirection: 'column', position: 'relative', overflow: 'hidden', isolation: 'isolate' }}>
+      <DitherField petalsOnly vivid={0.4} style={{ zIndex: -1, maskImage: PETAL_MASK, WebkitMaskImage: PETAL_MASK }} />
       <SectionHeader eyebrow="Independence" size="sm" style={{ marginBottom: 18 }}
         action={<Link to="/plan" className="text-xs font-medium" style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>Plan →</Link>} />
 

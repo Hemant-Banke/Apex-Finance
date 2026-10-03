@@ -11,6 +11,7 @@ import { useToast } from '../context/ToastContext';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import CashflowChart from '../components/charts/CashflowChart';
 import Card from '../components/ui/Card';
+import GardenEmpty from '../components/ui/GardenEmpty';
 import Spinner from '../components/ui/Spinner';
 import Delta from '../components/ui/Delta';
 import SectionHeader from '../components/ui/SectionHeader';
@@ -376,9 +377,8 @@ export default function Dashboard() {
               <CashflowChart rows={incExp} height={220} />
             </>
           ) : (
-            <div className="flex items-center justify-center" style={{ height: 240 }}>
-              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No income or expenses yet</p>
-            </div>
+            <GardenEmpty card={false} compact title="No income or expenses yet"
+              text="Record a transaction or import a statement to see what comes in and goes out." style={{ minHeight: 240, borderRadius: 12 }} />
           )}
         </Card>
 
@@ -404,12 +404,8 @@ export default function Dashboard() {
             ))}
           </div>
         ) : (
-          <div className="flex items-center justify-center" style={{ padding: '48px 24px' }}>
-            <div className="text-center">
-              <Wallet size={20} style={{ color: 'var(--color-text-muted)', opacity: 0.4, margin: '0 auto 8px' }} />
-              <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No transactions yet</p>
-            </div>
-          </div>
+          <GardenEmpty card={false} compact icon={Wallet} title="No transactions yet"
+            text="Everything in Apex is a transaction — your latest five land here." />
         )}
       </Card>
     </div>

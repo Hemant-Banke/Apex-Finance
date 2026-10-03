@@ -5,6 +5,7 @@ import { TRANSACTION_TYPES } from '../../lib/constants';
 import { accountOptions } from '../../lib/accountPickerOptions';
 import CategoryPicker from './CategoryPicker';
 import TypePicker from './TypePicker';
+import { numericOnly } from '../../lib/numericInput';
 import DatePicker from './DatePicker';
 import SegmentedControl from '../ui/SegmentedControl';
 import RecurrenceFields from './RecurrenceFields';
@@ -180,7 +181,7 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
       <div className="txn-amount">
         <span className="txn-amount-mark">₹</span>
         <input
-          type="number" step="any" min={isAdjustment ? undefined : '0'}
+          type="number" step="any" min={isAdjustment ? undefined : '0'} {...numericOnly({ signed: isAdjustment })}
           value={byTarget ? target : form.amount}
           onChange={e => (byTarget ? setTargetBalance(e.target.value) : set({ amount: e.target.value }))}
           placeholder="0.00" required autoFocus

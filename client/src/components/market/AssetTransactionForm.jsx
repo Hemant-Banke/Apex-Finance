@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { numericOnly } from '../../lib/numericInput';
 import { marketAPI, transactionsAPI, subscriptionsAPI } from '../../lib/api';
 import { formatCurrency, formatSigned, pnlColor, todayStr } from '../../lib/utils';
 import { ASSET_TYPES, PURITY_OPTIONS, isPurityAsset, isRateAsset, rateLabel, isManualSymbol } from '../../lib/constants';
@@ -343,7 +344,7 @@ export default function AssetTransactionForm({
       {/* Buy / Sell — a segmented control with clear buy (gold) vs sell (green) states */}
       <div className="field">
         <label className="label">Transaction</label>
-        <SegmentedControl size="lg" block ariaLabel="Buy or sell" value={txType}
+        <SegmentedControl size="lg" block ringless solid ariaLabel="Buy or sell" value={txType}
           onChange={t => { setTxType(t); if (!isEdit) setUsesCashBalance(t === 'sell'); }}
           options={[
             { key: 'buy',  label: 'Buy',  icon: ArrowDownLeft, tone: 'var(--color-success)' },
@@ -392,7 +393,7 @@ export default function AssetTransactionForm({
       {showRate && (
         <div className="field">
           <label className="label">{rateLabel(effectiveType)}</label>
-          <input type="number" step="any" min="0" value={rate}
+          <input type="number" step="any" min="0" value={rate} {...numericOnly()}
             onChange={e => setRate(e.target.value)}
             className="input-field" placeholder="e.g. 7.1"
             style={{ fontFamily: 'var(--font-mono)' }} />
@@ -437,7 +438,7 @@ export default function AssetTransactionForm({
             </span>
           )}
         </div>
-        <input type="number" step="any" min="0.000001" value={units}
+        <input type="number" step="any" min="0.000001" value={units} {...numericOnly()}
           onChange={e => setUnits(e.target.value)}
           className="input-field" required style={{ fontFamily: 'var(--font-mono)' }}
           placeholder={enterAmount ? '5000' : '0.00'} />
@@ -499,7 +500,7 @@ export default function AssetTransactionForm({
           </div>
         ) : (
           <>
-            <input type="number" step="any" min="0" value={price}
+            <input type="number" step="any" min="0" value={price} {...numericOnly()}
               onChange={e => { setPrice(e.target.value); setPriceSource('manual'); }}
               className="input-field" placeholder="0.00" required
               style={{ fontFamily: 'var(--font-mono)', ...(priceSource === 'auto' ? { color: 'var(--color-accent)' } : null) }}

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
 } from 'recharts';
@@ -27,11 +28,13 @@ function NetDot({ cx, cy, payload }) {
  * width of the month's slot says "this month" without drawing over the data. `count` is
  * the number of slots, so the band's width follows the category spacing.
  */
+const Y_AXIS_W = 50;
+const bandWidth = (plotWidth, count) => Math.max(14, (plotWidth / count) * 0.78);
+
 function MonthBand({ points, top, height, left, width, count }) {
   const x = points?.[0]?.x;
   if (x == null || !count) return null;
-  const slot = width / count;
-  const w = Math.max(14, slot * 0.78);
+  const w = bandWidth(width, count);
   // Clamped into the plot so the first and last months' bands do not overhang it.
   const bx = Math.min(Math.max(x - w / 2, left), left + width - w);
   return <rect x={bx} y={top} width={w} height={height} rx={6}
@@ -48,31 +51,46 @@ function MonthBand({ points, top, height, left, width, count }) {
  */
 export default function CashflowChart({ rows, height = 260, incomeLabel = 'Income', expenseLabel = 'Expense' }) {
   const chartRows = rows.map(m => (m.income || m.expense ? m : { ...m, net: null }));
+  // The tooltip sits beside the hovered month's band, never over it.
+  const boxRef = useRef(null);
+  const [boxWidth, setBoxWidth] = useState(0);
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(([e]) => setBoxWidth(e.contentRect.width));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const tipOffset = chartRows.length && boxWidth
+    ? bandWidth(boxWidth - Y_AXIS_W - 4, chartRows.length) / 2 + 10
+    : 10;
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <ComposedChart data={chartRows} barGap={4} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
-        <XAxis dataKey="month" tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} dy={8}
-          tickFormatter={monthTick} interval="preserveStartEnd" />
-        <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false}
-          tickFormatter={v => axisCompact(v, '₹')} width={50} />
-        <Tooltip cursor={<MonthBand count={chartRows.length} />} content={<ChartTooltip />} isAnimationActive={false} />
-        <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
-        {/* A month that spent more than it earned has a NEGATIVE cashflow, so the
-            zero line is drawn — without it a dot below the bars' floor reads as
-            "small", not "in the red". */}
-        <ReferenceLine y={0} stroke="var(--color-border-hover)" />
-        {/* Income and expense are the same measure on one scale, so they share an
-            axis honestly. Green/red here are STATUS, not category identity. */}
-        <Bar dataKey="income"  name={incomeLabel}  fill="var(--color-success)" radius={[4,4,0,0]} maxBarSize={22} />
-        <Bar dataKey="expense" name={expenseLabel} fill="var(--color-danger)"  radius={[4,4,0,0]} maxBarSize={22} />
-        {/* Net cashflow is the SAME unit (rupees a month) as the bars, so — unlike the
-            savings-rate line this card once carried on a second axis — it rides the
-            one axis already there. Neutral ink, so it reads as the difference OF the
-            two bars rather than a third thing; each dot takes the sign's colour. */}
-        <Line dataKey="net" name="Net cashflow" type="monotone" stroke="var(--color-text-primary)"
-          strokeWidth={1.5} strokeOpacity={0.75} isAnimationActive={false}
-          dot={<NetDot />} activeDot={{ r: 4, fill: 'var(--color-text-primary)', strokeWidth: 0 }} />
-      </ComposedChart>
-    </ResponsiveContainer>
+    <div ref={boxRef} style={{ width: '100%' }}>
+      <ResponsiveContainer width="100%" height={height}>
+        <ComposedChart data={chartRows} barGap={4} margin={{ top: 8, right: 4, left: 0, bottom: 0 }}>
+          <XAxis dataKey="month" tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} dy={8}
+            tickFormatter={monthTick} interval="preserveStartEnd" />
+          <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false}
+            tickFormatter={v => axisCompact(v, '₹')} width={Y_AXIS_W} />
+          <Tooltip cursor={<MonthBand count={chartRows.length} />} content={<ChartTooltip />} offset={tipOffset} isAnimationActive={false} />
+          <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
+          {/* A month that spent more than it earned has a NEGATIVE cashflow, so the
+              zero line is drawn — without it a dot below the bars' floor reads as
+              "small", not "in the red". */}
+          <ReferenceLine y={0} stroke="var(--color-border-hover)" />
+          {/* Income and expense are the same measure on one scale, so they share an
+              axis honestly. Green/red here are STATUS, not category identity. */}
+          <Bar dataKey="income"  name={incomeLabel}  fill="var(--color-success)" radius={[4,4,0,0]} maxBarSize={22} />
+          <Bar dataKey="expense" name={expenseLabel} fill="var(--color-danger)"  radius={[4,4,0,0]} maxBarSize={22} />
+          {/* Net cashflow is the SAME unit (rupees a month) as the bars, so — unlike the
+              savings-rate line this card once carried on a second axis — it rides the
+              one axis already there. Neutral ink, so it reads as the difference OF the
+              two bars rather than a third thing; each dot takes the sign's colour. */}
+          <Line dataKey="net" name="Net cashflow" type="monotone" stroke="var(--color-text-primary)"
+            strokeWidth={1.5} strokeOpacity={0.75} isAnimationActive={false}
+            dot={<NetDot />} activeDot={{ r: 4, fill: 'var(--color-text-primary)', strokeWidth: 0 }} />
+        </ComposedChart>
+      </ResponsiveContainer>
+    </div>
   );
 }

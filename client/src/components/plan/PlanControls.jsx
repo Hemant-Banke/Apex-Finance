@@ -40,6 +40,69 @@ function Head({ children }) {
   return <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 8 }}>{children}</p>;
 }
 
+/** A section title with the figure it settles on, right-aligned. */
+function GroupHead({ title, figure, sub }) {
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div className="flex items-baseline justify-between" style={{ gap: 12 }}>
+        <span className="text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>{title}</span>
+        <span className="figure" style={{ fontSize: '0.95rem', fontWeight: 500, color: 'var(--color-accent)' }}>{figure}</span>
+      </div>
+      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3 }}>{sub}</p>
+    </div>
+  );
+}
+
+/** One option of a choice board: its name, then its figure, large enough to compare. */
+function Choice({ on, label, value, title, onClick, radio = false, check = false }) {
+  return (
+    <button type="button" className="plan-toggle" title={title} onClick={onClick}
+      {...(radio ? { role: 'radio', 'aria-checked': on } : {})} aria-pressed={on}
+      style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 4, padding: '10px 12px' }}>
+      <span className="text-xs flex items-center" style={{ gap: 6, fontWeight: 500 }}>
+        {check && <span style={{ width: 7, height: 7, borderRadius: 2, background: on ? 'var(--color-text-primary)' : 'var(--color-border-hover)' }} />}
+        {radio && <span className={`plan-radio${on ? ' is-on' : ''}`} />}
+        {label}
+      </span>
+      <span className="figure" style={{ fontSize: '0.95rem', fontWeight: 500, color: on ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>{value}</span>
+    </button>
+  );
+}
+
+const SPLIT = [
+  ['essential', 'Essential', 'var(--color-garden)', 'Rent, groceries, bills, EMIs'],
+  ['discretionary', 'Discretionary', 'var(--color-accent)', 'Eating out, shopping, travel'],
+  ['other', 'Unclassified', 'var(--color-text-muted)', 'Not yet sorted — counted as essential in Lean'],
+];
+
+/** Today's spending by class: one bar, each class named with its amount and share beneath. */
+function SpendSplit({ sp }) {
+  const total = sp.expense || 0;
+  return (
+    <div style={{ marginTop: 14 }}>
+      <div style={{ display: 'flex', gap: 2, height: 6, borderRadius: 99, overflow: 'hidden', background: 'var(--color-bg-elevated)' }}>
+        {SPLIT.map(([k, , c]) => (
+          <span key={k} style={{ width: `${total ? (sp[k] / total) * 100 : 0}%`, background: c, opacity: k === 'other' ? 0.5 : 0.85 }} />
+        ))}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 12, marginTop: 10 }}>
+        {SPLIT.map(([k, label, c, tip]) => (
+          <div key={k} title={tip} style={{ minWidth: 0 }}>
+            <p className="text-xs flex items-center" style={{ gap: 6, color: 'var(--color-text-muted)' }}>
+              <span style={{ width: 7, height: 7, borderRadius: 2, background: c, opacity: k === 'other' ? 0.5 : 0.85, flexShrink: 0 }} />
+              {label}
+            </p>
+            <p style={{ marginTop: 3 }}>
+              <span className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>{money(sp[k])}</span>
+              <span className="figure text-xs" style={{ color: 'var(--color-text-muted)', marginLeft: 6 }}>{total ? Math.round((sp[k] / total) * 100) : 0}%</span>
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** Every assumption the plan rests on, as one compact board. */
 export default function PlanControls({ s, set, reset, m }) {
   const working = Math.max(0, s.retireAge - s.age), retired = Math.max(0, s.endAge - s.retireAge);
@@ -92,52 +155,34 @@ export default function PlanControls({ s, set, reset, m }) {
           hint="Share of the corpus drawn each year · 3–3.5% is the cautious Indian range" />
 
         <div style={{ gridColumn: 'span 2', minWidth: 0 }}>
-          <Head>Spending in retirement, a month</Head>
+          <GroupHead title="Monthly spending in retirement" figure={money(m.spend)}
+            sub="The life your corpus has to pay for, in today's rupees" />
           <div role="radiogroup" aria-label="Spending basis" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
             {[['lean', 'Lean', 'Essentials only'], ['current', 'Current', 'What you spend today'], ['fat', 'Fat', '1.5× today'], ['custom', 'Custom', 'Your own figure']].map(([k, l, tip]) => (
-              <button key={k} type="button" role="radio" aria-checked={s.basis === k} aria-pressed={s.basis === k} title={tip}
-                className="plan-toggle" onClick={() => set({ basis: k })}
-                style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '7px 10px' }}>
-                <span className="text-xs">{l}</span>
-                <span className="figure text-xs" style={{ color: s.basis === k ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>
-                  {money(k === 'custom' ? s.customSpend : m.spendOptions[k])}
-                </span>
-              </button>
+              <Choice key={k} on={s.basis === k} radio label={l} title={tip}
+                value={money(k === 'custom' ? s.customSpend : m.spendOptions[k])} onClick={() => set({ basis: k })} />
             ))}
           </div>
           {s.basis === 'custom' ? (
             <div style={{ marginTop: 12 }}>
               <Field label="Custom, a month" prefix="₹" value={s.customSpend} min={0} onChange={v => set({ customSpend: v ?? 0 })} />
             </div>
-          ) : (
-            <div title={`Essential ${money(sp.essential)} · discretionary ${money(sp.discretionary)} · unclassified ${money(sp.other)}`}
-              style={{ display: 'flex', gap: 2, height: 3, borderRadius: 99, overflow: 'hidden', marginTop: 10 }}>
-              {[['essential', 'var(--color-garden)'], ['discretionary', 'var(--color-accent)'], ['other', 'var(--color-text-muted)']].map(([k, c]) => (
-                <span key={k} style={{ width: `${sp.expense ? (sp[k] / sp.expense) * 100 : 0}%`, background: c, opacity: k === 'other' ? 0.5 : 0.85 }} />
-              ))}
-            </div>
-          )}
+          ) : <SpendSplit sp={sp} />}
         </div>
 
         <div style={{ gridColumn: 'span 2', minWidth: 0 }}>
-          <Head>Counts as yours · <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>{money(m.corpus)}</span></Head>
+          <GroupHead title="What counts toward your corpus" figure={money(m.corpus)}
+            sub="Tick what you would actually live on" />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 6 }}>
             {[
               ['cash', 'Cash', m.sources.cash],
-              ['liquid', 'Liquid', m.sources.liquid],
+              ['liquid', 'Investments', m.sources.liquid],
               ['illiquid', 'Locked-in', m.sources.illiquid],
               ['debts', 'Less debt', -m.sources.debts],
             ].map(([k, label, v]) => (
-              <button key={k} type="button" className="plan-toggle" aria-pressed={!!s.include[k]}
+              <Choice key={k} on={!!s.include[k]} check label={label} value={money(v)}
                 title={{ cash: 'Cash in the bank', liquid: 'Investments sellable within days', illiquid: 'EPF, FDs, bonds, property', debts: 'Subtract what you owe' }[k]}
-                onClick={() => set({ include: { ...s.include, [k]: !s.include[k] } })}
-                style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2, padding: '7px 10px' }}>
-                <span className="text-xs flex items-center" style={{ gap: 6 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: 2, background: s.include[k] ? 'var(--color-accent)' : 'var(--color-border-hover)' }} />
-                  {label}
-                </span>
-                <span className="figure text-xs" style={{ color: s.include[k] ? 'var(--color-text-secondary)' : 'var(--color-text-muted)' }}>{money(v)}</span>
-              </button>
+                onClick={() => set({ include: { ...s.include, [k]: !s.include[k] } })} />
             ))}
           </div>
         </div>

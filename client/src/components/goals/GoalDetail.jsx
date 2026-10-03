@@ -4,9 +4,9 @@ import SectionHeader from '../ui/SectionHeader';
 import ShowMore from '../ui/ShowMore';
 import { compactIfLarge, formatCurrency, formatPoints, todayStr } from '../../lib/utils';
 import {
-  ASSETS, ASSET_KEYS, STRATEGIES, contributionPlan, withdrawalPlan, goalLevers, monthlyForConfidence, mixReturn,
+  ASSETS, ASSET_KEYS, STRATEGIES, contributionPlan, withdrawalPlan, goalLevers, mixReturn, ASSET_COLORS,
 } from '../../lib/goals';
-import { GoalFanChart, GlidePathChart, ASSET_COLORS } from './GoalCharts';
+import { GoalFanChart, GlidePathChart } from './GoalCharts';
 
 const money = (v) => compactIfLarge(Math.round(v || 0));
 
@@ -33,7 +33,6 @@ export default function GoalDetail({ gm }) {
   const contrib = useMemo(() => contributionPlan(gm), [gm]);
   const payout = useMemo(() => withdrawalPlan(gm), [gm]);
   const levers = useMemo(() => goalLevers(gm), [gm]);
-  const sure = useMemo(() => monthlyForConfidence(gm, 80), [gm]);
   const glide = contrib.map(r => ({ ...r.mix, tick: `${startYear + r.year}`, label: `${startYear + r.year} · ${Math.max(0, Math.ceil(gm.years - r.year))} yrs to go` }));
   const spread = goal.withdrawal?.mode === 'spread';
   const surplus = gm.expected - gm.required;
@@ -42,16 +41,17 @@ export default function GoalDetail({ gm }) {
   return (
     <Card gilt>
       <SectionHeader eyebrow={goal.name} size="sm" style={{ marginBottom: 20 }}
-        sub={`${money(goal.amount)} in today's rupees${spread ? `, drawn over ${goal.withdrawal.years} years` : ''} · needed ${goalYear} · costs rise ${goal.inflation}% a year`} />
+        sub={`${money(goal.amount)} in today's rupees${spread ? `, drawn over ${goal.withdrawal.years} years` : ''} · needed ${goalYear} · costs assumed to rise ${goal.inflation}% a year`} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 18, marginBottom: 24 }}>
         <Stat label="Costs by then" value={money(gm.futureCost)} sub={`${money(goal.amount)} today, inflated`} />
         <Stat label="Corpus needed" value={money(gm.required)} sub={spread ? 'on the date — the rest earns while drawn' : 'on the date'} />
+        <Stat label="Apex suggests" tone="var(--color-accent)" value={gm.months ? formatCurrency(Math.round(gm.monthly)) : '—'}
+          sub={gm.months ? 'a month, for 8 in 10 odds' : 'the date has arrived'} />
+        <Stat label="Middle path" value={Number.isFinite(gm.need) ? formatCurrency(Math.round(gm.need)) : '—'}
+          sub="a month — gets there half the time" />
         <Stat label="Expected" value={money(gm.expected)} tone={surplus >= 0 ? 'var(--color-success)' : 'var(--color-danger)'}
-          sub={`${surplus >= 0 ? 'surplus' : 'short'} ${money(Math.abs(surplus))} on the middle path`} />
-        <Stat label="Odds" value={`${gm.prob.toFixed(0)}%`} tone={gm.status.tone} sub={`${gm.status.label} · of 500 simulated markets`} />
-        <Stat label="For 80% odds" value={sure == null ? '—' : `${formatCurrency(Math.round(sure))}`}
-          sub={sure == null ? 'the date has arrived' : `a month${goal.stepUp ? `, rising ${goal.stepUp}% a year` : ''}`} />
+          sub={`${surplus >= 0 ? 'surplus' : 'short'} ${money(Math.abs(surplus))} at the suggested amount`} />
       </div>
 
       <p className="col-head" style={{ marginBottom: 6 }}>Range of outcomes</p>
@@ -62,7 +62,7 @@ export default function GoalDetail({ gm }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 28, marginTop: 28 }}>
         <div>
-          <p className="col-head" style={{ marginBottom: 12 }}>Contribution plan</p>
+          <p className="col-head" style={{ marginBottom: 12 }}>Suggested contributions</p>
           {contrib.length ? (
             <ShowMore items={contrib} initial={6} noun="years" wrap={body => (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -74,7 +74,7 @@ export default function GoalDetail({ gm }) {
                   <tr key={r.year}>
                     <TD>{startYear + r.year}</TD>
                     <TD right>{formatCurrency(Math.round(r.monthly))}</TD>
-                    <TD right>{money(r.paid + (goal.saved || 0))}</TD>
+                    <TD right>{money(r.paid)}</TD>
                     <TD right tone="var(--color-text-primary)">{money(r.value)}</TD>
                   </tr>
                 )} />
@@ -107,7 +107,7 @@ export default function GoalDetail({ gm }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 28, marginTop: 28 }}>
         <div>
           <div className="flex items-baseline justify-between" style={{ marginBottom: 10, gap: 12 }}>
-            <p className="col-head">Asset strategy · {STRATEGIES[goal.strategy]?.label}</p>
+            <p className="col-head">Asset mix · {goal.strategy === 'auto' ? 'Apex’s glide path' : `${STRATEGIES[goal.strategy]?.label}, your preference`}</p>
             <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>expected {(mixReturn(mixNow) * 100).toFixed(1)}% a year now</span>
           </div>
           <div className="flex" style={{ gap: 16, marginBottom: 8, flexWrap: 'wrap' }}>

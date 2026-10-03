@@ -12,6 +12,7 @@ import { BENCHMARKS } from '../../lib/constants';
 import ChartTooltip, { TooltipPanel } from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
 import SegmentedControl from '../ui/SegmentedControl';
+import Spinner from '../ui/Spinner';
 
 // ── Default config ────────────────────────────────────────────────────────────
 
@@ -932,9 +933,7 @@ export default function PriceGrapher({
 
       {/* ── Chart area ──────────────────────────────────────────────────── */}
       {loading ? (
-        <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <div className="spinner" style={{ width: 20, height: 20, borderWidth: 2 }} />
-        </div>
+        <Spinner height={height} />
       ) : activeEmpty ? (
         <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{emptyText}</p>

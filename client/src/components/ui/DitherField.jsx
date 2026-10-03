@@ -1,17 +1,9 @@
 import { useEffect, useRef } from 'react';
 
-const CELL = 3;            // dot lattice pitch (px); the lens snaps to it
-const DOT = 2;             // lit dot size inside a cell
+import { CELL, threshold, paintDots as paint } from '../../lib/dither';
+
 const LENS_R = 216;        // aperture radius, a multiple of CELL
 const LERP = 0.12;
-
-const BAYER = [
-  [0, 32, 8, 40, 2, 34, 10, 42], [48, 16, 56, 24, 50, 18, 58, 26],
-  [12, 44, 4, 36, 14, 46, 6, 38], [60, 28, 52, 20, 62, 30, 54, 22],
-  [3, 35, 11, 43, 1, 33, 9, 41], [51, 19, 59, 27, 49, 17, 57, 25],
-  [15, 47, 7, 39, 13, 45, 5, 37], [63, 31, 55, 23, 61, 29, 53, 21],
-];
-const threshold = (cx, cy) => (BAYER[cy & 7][cx & 7] + 0.5) / 64;
 
 const hash = (x, y) => {
   const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
@@ -145,29 +137,6 @@ function drawPetals(ctx, R, W, span, count, repeat, bold = false) {
   ctx.globalAlpha = 1;
 }
 
-// Dots straight onto a full-size canvas: solid cells lit, half-tone cells (back row, petals)
-// on a fixed half pattern, faint edges dark. `density` thins further on the same pattern.
-function paint(canvas, data, cols, rows, density) {
-  canvas.width = cols * CELL;
-  canvas.height = rows * CELL;
-  const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(canvas.width, canvas.height);
-  const px = img.data, stride = canvas.width * 4;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const j = (r * cols + c) * 4, a = data[j + 3] / 255, t = threshold(c, r);
-      if (!((a >= 0.7 || (a > 0.3 && t < 0.5)) && density > t)) continue;
-      for (let dy = 0; dy < DOT; dy++) {
-        let i = (r * CELL + dy) * stride + c * CELL * 4;
-        for (let dx = 0; dx < DOT; dx++, i += 4) {
-          px[i] = data[j]; px[i + 1] = data[j + 1]; px[i + 2] = data[j + 2]; px[i + 3] = 255;
-        }
-      }
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-}
-
 // The aperture: dense at the pointer, thinning to an fbm-ragged edge, punched on the same lattice.
 let lensMask = null;
 function getLensMask() {
@@ -192,7 +161,9 @@ function getLensMask() {
 // Rendered once per size, no animation loop. `full` shows the whole garden at `vivid` with
 // no lens (sign-in pages); otherwise it rests at `rest` and the cursor lens reveals it.
 // `fall` adds the CSS-driven petal fall — on by default with `full`, opt-in under a lens.
-export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fall: falling = full, growth = 1, style }) {
+// `petalsOnly` draws just the falling petals at `vivid` (no garden, no lens), for small surfaces.
+export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fall = full, growth = 1, petalsOnly = false, style }) {
+  const falling = fall || petalsOnly;
   const hostRef = useRef(null);
   const restRef = useRef(null);
   const vividRef = useRef(null);
@@ -210,10 +181,12 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fa
       src.width = cols; src.height = rows;
       const ctx = src.getContext('2d');
       ctx.scale(1 / CELL, 1 / CELL);
-      drawGarden(ctx, W, H, growth, !falling);
-      const data = ctx.getImageData(0, 0, cols, rows).data;
-      paint(restRef.current, data, cols, rows, full ? 1 : 0.5);
-      if (vividRef.current) paint(vividRef.current, data, cols, rows, 1);
+      if (!petalsOnly) {
+        drawGarden(ctx, W, H, growth, !falling);
+        const data = ctx.getImageData(0, 0, cols, rows).data;
+        paint(restRef.current, data, cols, rows, full ? 1 : 0.5);
+        if (vividRef.current) paint(vividRef.current, data, cols, rows, 1);
+      }
 
       // A separate petal layer, two identical bands tall, that CSS slides down
       // one whole cell per step — the dots never resample, so the fall cannot flicker.
@@ -223,23 +196,32 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fa
         fsrc.width = cols; fsrc.height = rows * 2;
         const fctx = fsrc.getContext('2d');
         fctx.scale(1 / CELL, 1 / CELL);
-        drawPetals(fctx, rng(11), W, rows * CELL, Math.round((W * H) / 16000), rows * CELL, true);
-        paint(fall, fctx.getImageData(0, 0, cols, rows * 2).data, cols, rows * 2, 1);
+        drawPetals(fctx, rng(11), W, rows * CELL, Math.max(petalsOnly ? 3 : 0, Math.round(((W * H) / 16000) * Math.max(1, growth))), rows * CELL, true);
+        const sheet = petalsOnly ? document.createElement('canvas') : fall;
+        paint(sheet, fctx.getImageData(0, 0, cols, rows * 2).data, cols, rows * 2, 1);
         fall.style.setProperty('--fall', `${rows * CELL}px`);
-        fall.style.animation = reduce ? 'none' : `garden-fall ${Math.round(rows / 8)}s steps(${rows}) infinite`;
+        const steps = `${Math.max(1, Math.round(rows / 8))}s steps(${rows}) infinite`;
+        // Petals-only slides a background, not a transform: a composited layer under text blurs the text.
+        if (petalsOnly) {
+          fall.style.backgroundImage = `url(${sheet.toDataURL()})`;
+          fall.style.backgroundSize = `${cols * CELL}px ${rows * CELL * 2}px`;
+          fall.style.animation = reduce ? 'none' : `petal-slide ${steps}`;
+        } else {
+          fall.style.animation = reduce ? 'none' : `garden-fall ${steps}`;
+        }
       }
     };
     draw();
     const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(draw, 200); });
     ro.observe(host);
     return () => { clearTimeout(timer); ro.disconnect(); };
-  }, [full, falling, growth]);
+  }, [full, falling, growth, petalsOnly]);
 
   useEffect(() => {
     const host = hostRef.current, lens = vividRef.current;
     const fine = window.matchMedia('(pointer: fine)').matches;
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (full || !lens || !fine || reduce) return;
+    if (full || petalsOnly || !lens || !fine || reduce) return;
 
     const mask = `url(${getLensMask()})`;
     lens.style.maskImage = lens.style.webkitMaskImage = mask;
@@ -273,19 +255,20 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fa
       window.removeEventListener('pointermove', onMove);
       document.documentElement.removeEventListener('pointerleave', onLeave);
     };
-  }, [vivid, full]);
+  }, [vivid, full, petalsOnly]);
 
   const layer = { position: 'absolute', top: 0, left: 0 };
   return (
     <div ref={hostRef} aria-hidden="true"
       style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', ...style }}>
-      <canvas ref={restRef} style={{ ...layer, opacity: full ? vivid : rest }} />
-      {falling && (
+      {!petalsOnly && <canvas ref={restRef} style={{ ...layer, opacity: full ? vivid : rest }} />}
+      {petalsOnly && <div ref={fallRef} style={{ position: 'absolute', inset: 0, opacity: vivid, imageRendering: 'pixelated' }} />}
+      {falling && !petalsOnly && (
         <div className="garden-sway" style={{ ...layer, opacity: full ? vivid : Math.min(1, rest * 2.4) }}>
           <canvas ref={fallRef} style={{ display: 'block', willChange: 'transform' }} />
         </div>
       )}
-      {!full && (
+      {!full && !petalsOnly && (
         <canvas ref={vividRef} style={{
           ...layer,
           opacity: 0,

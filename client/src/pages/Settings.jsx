@@ -5,6 +5,7 @@ import { formatCurrency, formatDate } from '../lib/utils';
 import Spinner from '../components/ui/Spinner';
 import { useToast } from '../context/ToastContext';
 import Card from '../components/ui/Card';
+import GardenEmpty from '../components/ui/GardenEmpty';
 import Button from '../components/ui/Button';
 import Badge from '../components/ui/Badge';
 import Modal from '../components/ui/Modal';
@@ -89,13 +90,8 @@ function SubscriptionsManager() {
   if (loading) return <Spinner height={200} />;
 
   if (!subs.length) return (
-    <Card className="flex flex-col items-center justify-center" style={{ padding: '56px 24px' }}>
-      <Repeat size={26} style={{ color: 'var(--color-text-muted)', opacity: 0.3, marginBottom: 12 }} />
-      <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No recurring transactions yet</p>
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 6, opacity: 0.75 }}>
-        Tick “Repeat this transaction” when adding one — a SIP, rent, a subscription.
-      </p>
-    </Card>
+    <GardenEmpty compact icon={Repeat} title="No recurring transactions yet"
+      text="Tick “Repeat this transaction” when adding one — a SIP, rent, a subscription." />
   );
 
   return (

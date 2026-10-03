@@ -22,6 +22,7 @@ import AssetIcon from '../components/market/AssetIcon';
 import { assetTypeLabel } from '../lib/constants';
 import { toCreatePayload } from '../lib/undo';
 import Card from '../components/ui/Card';
+import GardenEmpty from '../components/ui/GardenEmpty';
 import SectionHeader from '../components/ui/SectionHeader';
 import SegmentedControl from '../components/ui/SegmentedControl';
 import BackLink from '../components/ui/BackLink';
@@ -431,32 +432,16 @@ export default function AccountDetail() {
 
       {/* An investment account with history but nothing open: say so, rather than leave a gap. */}
       {isAssetAccount && !noTxns && holdingsBook.length === 0 && (
-        <Card>
-          <SectionHeader eyebrow="Holdings" size="sm" style={{ marginBottom: 18 }} />
-          <div className="flex items-center justify-between" style={{ gap: 20, flexWrap: 'wrap' }}>
-            <div className="flex items-center" style={{ gap: 14, minWidth: 0 }}>
-              <span style={{
-                width: 40, height: 40, borderRadius: 12, flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
-                background: 'var(--color-bg-elevated)', boxShadow: 'var(--elev-ring)',
-              }}>
-                <BarChart2 size={18} strokeWidth={1.5} style={{ color: 'var(--color-text-muted)' }} />
-              </span>
-              <div style={{ minWidth: 0 }}>
-                <p className="text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>No open positions</p>
-                <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 3, lineHeight: 1.5 }}>
-                  {hasTrades
-                    ? <>Everything bought here has been sold. What it made is in{' '}
-                        <button type="button" onClick={() => document.getElementById('performance')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: 'var(--color-accent)' }}>
-                          Performance ↑
-                        </button></>
-                    : `${cashBalance > 0 ? `${formatCurrency(cashBalance)} is sitting in cash. ` : ''}Add an asset to start tracking it here.`}
-                </p>
-              </div>
-            </div>
-            <Button variant="gold" icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>
-          </div>
-        </Card>
+        <GardenEmpty compact oneLine align="left" icon={BarChart2} eyebrow="Holdings" title="No open positions"
+          text={hasTrades
+            ? <>Everything bought here has been sold — what it made is in{' '}
+                <button type="button" onClick={() => document.getElementById('performance')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', font: 'inherit', color: 'var(--color-accent)' }}>
+                  Performance ↑
+                </button></>
+            : `${cashBalance > 0 ? `${formatCurrency(cashBalance)} is sitting in cash — add` : 'Add'} an asset to start tracking it here.`}>
+          <Button variant="gold" icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>
+        </GardenEmpty>
       )}
 
       {holdingsBook.length > 0 && (

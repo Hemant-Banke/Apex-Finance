@@ -3,13 +3,16 @@ import { Briefcase, Pencil } from 'lucide-react';
 import { formatCurrency, compactIfLarge, formatSigned } from '../../lib/utils';
 import { accountTypeLabel } from '../../lib/constants';
 import { TYPE_ICON, ACCOUNT_TYPE_STYLE } from '../../lib/accountPickerOptions';
-import Sparkline from '../ui/Sparkline';
+import CardDither from './CardDither';
 
 /**
- * One account as a card you would want in your wallet: a deep metallic face in its type's
- * colour, a chip, the balance, and the type set like a card network along the foot.
- * The sheen and the brushed texture live in index.css (`.account-card`).
+ * One account as a card you would want in your wallet: a dark face dithered in its type's
+ * colour (`CardDither`, the balance's 90 days as terrain), a chip, the balance, and the type
+ * set like a card network along the foot. The dotted sheen lives in index.css (`.account-card`).
  */
+// Ink halo so text stays legible over the dithered face.
+const SHADOW = '0 0 10px rgba(11, 13, 16, 0.9), 0 1px 2px rgba(11, 13, 16, 0.9)';
+
 export default function AccountCard({ acc, share, shareLabel = 'of assets', onEdit }) {
   const Icon = TYPE_ICON[acc.type] || Briefcase;
   const tone = (ACCOUNT_TYPE_STYLE[acc.type] || ACCOUNT_TYPE_STYLE.other).tone;
@@ -23,15 +26,16 @@ export default function AccountCard({ acc, share, shareLabel = 'of assets', onEd
 
   return (
     <Link to={`/accounts/${acc._id}`} className="account-card group" style={{ '--tone': tone }}>
+      <CardDither tone={tone} values={spark} />
       <Icon className="account-card-mark" size={132} strokeWidth={1} aria-hidden />
 
-      <div className="flex items-start justify-between" style={{ gap: 10, position: 'relative' }}>
+      <div className="flex items-start justify-between" style={{ gap: 10, position: 'relative', textShadow: SHADOW }}>
         <span className="flex items-center" style={{ gap: 12, minWidth: 0 }}>
           <span className="account-card-chip"><Icon size={15} strokeWidth={1.9} /></span>
           <span style={{ minWidth: 0 }}>
             <span className="truncate" style={{ display: 'block', fontSize: '0.92rem', fontWeight: 500, color: 'var(--color-text-primary)', letterSpacing: '-0.005em' }}>{acc.name}</span>
             {acc.description && (
-              <span className="truncate" style={{ display: 'block', fontSize: '0.7rem', color: 'var(--color-text-muted)', marginTop: 2 }}>{acc.description}</span>
+              <span className="truncate" style={{ display: 'block', fontSize: '0.7rem', color: 'var(--color-text-secondary)', marginTop: 2 }}>{acc.description}</span>
             )}
           </span>
         </span>
@@ -42,11 +46,11 @@ export default function AccountCard({ acc, share, shareLabel = 'of assets', onEd
         </button>
       </div>
 
-      <div style={{ marginTop: 'auto', position: 'relative' }}>
+      <div style={{ marginTop: 'auto', position: 'relative', textShadow: SHADOW }}>
         <p className="figure account-card-balance" style={{ color: acc.balance < 0 ? 'var(--color-danger)' : undefined }}>
           {formatCurrency(acc.balance)}
         </p>
-        <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 6 }}>
+        <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: 6 }}>
           {split ? (
             <>
               {Math.round(cash) !== 0 && <><span className="figure">{compactIfLarge(Math.round(cash))}</span> cash · </>}
@@ -59,21 +63,15 @@ export default function AccountCard({ acc, share, shareLabel = 'of assets', onEd
         </p>
       </div>
 
-      <div className="flex items-center justify-between" style={{ marginTop: 16, position: 'relative' }}>
+      <div className="flex items-center justify-between" style={{ marginTop: 16, position: 'relative', textShadow: SHADOW }}>
         <span className="account-card-network">{accountTypeLabel(acc.type)}</span>
         {share != null && (
           <span className="figure" title={`${Math.abs(share).toFixed(1)}% ${shareLabel}`}
-            style={{ fontSize: '0.7rem', color: 'var(--color-text-secondary)' }}>
+            style={{ fontSize: '0.7rem', color: 'var(--color-text-primary)' }}>
             {Math.abs(share).toFixed(0)}%
           </span>
         )}
       </div>
-
-      {spark.length > 1 && (
-        <div className="account-card-spark" aria-hidden>
-          <Sparkline values={spark} tone={tone} height={58} width={240} fluid />
-        </div>
-      )}
     </Link>
   );
 }

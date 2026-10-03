@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { numericOnly } from '../../lib/numericInput';
 import { Check, Sparkles, ArrowRight, Pencil, Plus, RotateCcw, AlertCircle } from 'lucide-react';
 import { transactionsAPI } from '../../lib/api';
 import { formatCurrency, formatDate, todayStr, toDateInput } from '../../lib/utils';
@@ -584,7 +585,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
               </div>
               <div className="field">
                 <label className="label">Amount</label>
-                <input type="number" step="any" min="0" value={row.amount ?? ''}
+                <input type="number" step="any" min="0" value={row.amount ?? ''} {...numericOnly()}
                   onChange={e => onChange({ amount: e.target.value })}
                   className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
               </div>
@@ -603,7 +604,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                 </div>
                 <div className="field">
                   <label className="label">Units</label>
-                  <input type="number" step="any" min="0" value={row.units ?? ''}
+                  <input type="number" step="any" min="0" value={row.units ?? ''} {...numericOnly()}
                     onChange={e => onChange({ units: e.target.value })}
                     className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0" />
                 </div>
@@ -614,7 +615,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                       {row.currency && row.currency !== 'INR' ? `(${row.currency})` : ''}
                     </span>
                   </label>
-                  <input type="number" step="any" min="0" value={row.pricePerUnit ?? ''}
+                  <input type="number" step="any" min="0" value={row.pricePerUnit ?? ''} {...numericOnly()}
                     onChange={e => onChange({ pricePerUnit: e.target.value })}
                     className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
                 </div>

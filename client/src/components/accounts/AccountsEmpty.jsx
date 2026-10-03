@@ -1,5 +1,5 @@
 import { Plus } from 'lucide-react';
-import Card from '../ui/Card';
+import GardenEmpty from '../ui/GardenEmpty';
 import Button from '../ui/Button';
 import { TYPE_ICON, ACCOUNT_TYPE_STYLE } from '../../lib/accountPickerOptions';
 
@@ -13,23 +13,15 @@ const STARTERS = [
 /** No accounts yet: the four kinds as ghost cards, each a one-click start. */
 export default function AccountsEmpty({ onCreate }) {
   return (
-    <Card gilt flush>
-      <div style={{ padding: '44px 32px 36px', textAlign: 'center' }}>
-        <p className="eyebrow" style={{ justifyContent: 'center', marginBottom: 14 }}>Accounts</p>
-        <h1 className="heading-xl" style={{ color: 'var(--color-text-primary)' }}>Start with where your money lives</h1>
-        <p className="text-sm" style={{ color: 'var(--color-text-muted)', margin: '10px auto 0', maxWidth: 460, lineHeight: 1.6 }}>
-          Every account holds cash, assets, or a debt. Add one and Apex builds your net worth,
-          portfolio and cashflow from what happens in it.
-        </p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, padding: '0 28px 30px' }}>
+    <GardenEmpty eyebrow="Accounts" title="Start with where your money lives"
+      text="Every account holds cash, assets, or a debt. Add one and Apex builds your net worth, portfolio and cashflow from what happens in it.">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 14, marginBottom: 22 }}>
         {STARTERS.map(({ type, name, what }) => {
           const Icon = TYPE_ICON[type];
           const tone = ACCOUNT_TYPE_STYLE[type].tone;
           return (
             <button key={type} type="button" onClick={() => onCreate(type)} className="starter-card"
-              style={{ '--tone': tone }}>
+              style={{ '--tone': tone, minHeight: 140 }}>
               <span style={{
                 width: 38, height: 38, borderRadius: 11, display: 'flex', alignItems: 'center', justifyContent: 'center',
                 background: `color-mix(in srgb, ${tone} 16%, transparent)`, color: tone,
@@ -51,9 +43,7 @@ export default function AccountsEmpty({ onCreate }) {
         })}
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '0 0 34px' }}>
-        <Button variant="gold" icon={Plus} onClick={() => onCreate('bank')}>New account</Button>
-      </div>
-    </Card>
+      <Button variant="gold" icon={Plus} onClick={() => onCreate('bank')}>New account</Button>
+    </GardenEmpty>
   );
 }

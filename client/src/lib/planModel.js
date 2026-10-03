@@ -65,10 +65,13 @@ export function planModel(data, s) {
     ageNow: s.age, retireAge: s.retireAge, endAge: s.endAge,
   });
 
+  // Tiers around the CHOSEN spend, so they move with it: lean trims to your essentials' share, fat is 1.5×.
+  const leanShare = spending.expense > 0 ? Math.min(1, spendOptions.lean / spending.expense) : 0.7;
+  const tierSpend = { lean: spend * leanShare, current: spend, fat: spend * 1.5 };
   const variants = ['lean', 'current', 'fat'].map(k => {
-    const t = fireNumber(spendOptions[k] * 12, s.swr);
+    const t = fireNumber(tierSpend[k] * 12, s.swr);
     const y = yearsToTarget(corpus, contribution, accReal, t);
-    return { k, label: { lean: 'Lean FIRE', current: 'FIRE', fat: 'Fat FIRE' }[k], target: t, years: y, pct: t ? (corpus / t) * 100 : 0 };
+    return { k, label: { lean: 'Lean FIRE', current: 'FIRE', fat: 'Fat FIRE' }[k], spend: tierSpend[k], target: t, years: y, pct: t ? (corpus / t) * 100 : 0 };
   });
 
   // Levers: what moves the date most.

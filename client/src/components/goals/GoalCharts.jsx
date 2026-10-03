@@ -1,13 +1,10 @@
 import { Area, Bar, BarChart, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { axisCompact, compactIfLarge, CHART_COLORS } from '../../lib/utils';
-import { ASSETS, ASSET_KEYS } from '../../lib/goals';
+import { axisCompact, compactIfLarge } from '../../lib/utils';
+import { ASSETS, ASSET_KEYS, ASSET_COLORS } from '../../lib/goals';
 import { TooltipPanel } from '../charts/ChartTooltip';
 
 const money = (v) => compactIfLarge(Math.round(v || 0));
 const AXIS = { fill: '#878D97', fontSize: 11 };
-
-// Gold takes the gold slot; equity and debt the next two hues, fixed so every goal agrees.
-export const ASSET_COLORS = { gold: CHART_COLORS[0], equity: CHART_COLORS[1], debt: CHART_COLORS[2] };
 
 function Head({ children }) {
   return (

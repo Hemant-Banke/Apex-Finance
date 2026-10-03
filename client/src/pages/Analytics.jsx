@@ -1,3 +1,4 @@
+import { LineChart } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { dashboardAPI, accountsAPI } from '../lib/api';
 import { getCategoryMap, describeCategory } from '../lib/categoryNames';
@@ -6,6 +7,7 @@ import {
 } from '../lib/utils';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
+import GardenEmpty from '../components/ui/GardenEmpty';
 import Divider from '../components/ui/Divider';
 import SegmentedControl from '../components/ui/SegmentedControl';
 import Delta from '../components/ui/Delta';
@@ -198,7 +200,7 @@ export default function Analytics() {
           </Card>
         </>
       ) : (
-        <Card><Empty text="No holdings yet — add an asset to see performance" /></Card>
+        <GardenEmpty compact icon={LineChart} title="No holdings yet" text="Add an asset to an account and its performance, allocation and contribution appear here." />
       )}
 
       {/* ── Cashflow ──────────────────────────────────────────────────────────

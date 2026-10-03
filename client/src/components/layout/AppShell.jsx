@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
-  LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw, Flame
+  LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw, Flame, Target
 } from 'lucide-react';
 import ApexLogo from '../ui/ApexLogo';
 import DitherField from '../ui/DitherField';
@@ -15,6 +15,7 @@ const nav = [
   { to: '/transactions', icon: ArrowLeftRight, label: 'Transactions' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/plan', icon: Flame, label: 'Freedom Plan' },
+  { to: '/goals', icon: Target, label: 'Goals' },
   { to: '/markets', icon: Landmark, label: 'Markets' },
   { to: '/settings', icon: SettingsIcon, label: 'Settings' },
 ];
@@ -121,7 +122,7 @@ export default function AppShell({ children }) {
             style={{
               display: 'flex', alignItems: 'center', gap: 8,
               width: '100%', padding: '8px 12px', borderRadius: 8,
-              background: 'none', border: '1px solid var(--color-border-subtle)',
+              background: 'none', border: 'none',
               color: 'var(--color-text-muted)', cursor: rebuilding ? 'default' : 'pointer',
               fontSize: 11, opacity: rebuilding ? 0.5 : 0.7,
             }}
