@@ -14,7 +14,7 @@ const nav = [
   { to: '/accounts', icon: Wallet, label: 'Accounts' },
   { to: '/transactions', icon: ArrowLeftRight, label: 'Transactions' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-  { to: '/plan', icon: Flame, label: 'Plan' },
+  { to: '/plan', icon: Flame, label: 'Freedom Plan' },
   { to: '/markets', icon: Landmark, label: 'Markets' },
   { to: '/settings', icon: SettingsIcon, label: 'Settings' },
 ];

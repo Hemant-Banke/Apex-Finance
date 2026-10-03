@@ -126,6 +126,14 @@ export const subscriptionsAPI = {
   delete: (id)          => api.delete(`/subscriptions/${id}`),
 };
 
+// Goals — plans, not money; all maths is client-side (lib/goals).
+export const goalsAPI = {
+  getAll: ()         => api.get('/goals'),
+  create: (data)     => api.post('/goals', data),
+  update: (id, data) => api.put(`/goals/${id}`, data),
+  delete: (id)       => api.delete(`/goals/${id}`),
+};
+
 // Market data (search + historical prices via Yahoo Finance proxy)
 export const marketAPI = {
   // `indices` — include market indices (Markets can show one; nothing can buy one).

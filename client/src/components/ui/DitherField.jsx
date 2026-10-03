@@ -190,9 +190,9 @@ function getLensMask() {
 }
 
 // Rendered once per size, no animation loop. `full` shows the whole garden at `vivid` with
-// no lens, plus a CSS-driven petal fall (sign-in pages); otherwise it rests at `rest` and the
-// cursor lens reveals it.
-export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, growth = 1, style }) {
+// no lens (sign-in pages); otherwise it rests at `rest` and the cursor lens reveals it.
+// `fall` adds the CSS-driven petal fall — on by default with `full`, opt-in under a lens.
+export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fall: falling = full, growth = 1, style }) {
   const hostRef = useRef(null);
   const restRef = useRef(null);
   const vividRef = useRef(null);
@@ -210,12 +210,12 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, gr
       src.width = cols; src.height = rows;
       const ctx = src.getContext('2d');
       ctx.scale(1 / CELL, 1 / CELL);
-      drawGarden(ctx, W, H, growth, !full);
+      drawGarden(ctx, W, H, growth, !falling);
       const data = ctx.getImageData(0, 0, cols, rows).data;
       paint(restRef.current, data, cols, rows, full ? 1 : 0.5);
       if (vividRef.current) paint(vividRef.current, data, cols, rows, 1);
 
-      // Sign-in pages: a separate petal layer, two identical bands tall, that CSS slides down
+      // A separate petal layer, two identical bands tall, that CSS slides down
       // one whole cell per step — the dots never resample, so the fall cannot flicker.
       const fall = fallRef.current;
       if (fall) {
@@ -233,7 +233,7 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, gr
     const ro = new ResizeObserver(() => { clearTimeout(timer); timer = setTimeout(draw, 200); });
     ro.observe(host);
     return () => { clearTimeout(timer); ro.disconnect(); };
-  }, [full, growth]);
+  }, [full, falling, growth]);
 
   useEffect(() => {
     const host = hostRef.current, lens = vividRef.current;
@@ -280,8 +280,8 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, gr
     <div ref={hostRef} aria-hidden="true"
       style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', ...style }}>
       <canvas ref={restRef} style={{ ...layer, opacity: full ? vivid : rest }} />
-      {full && (
-        <div className="garden-sway" style={{ ...layer, opacity: vivid }}>
+      {falling && (
+        <div className="garden-sway" style={{ ...layer, opacity: full ? vivid : Math.min(1, rest * 2.4) }}>
           <canvas ref={fallRef} style={{ display: 'block', willChange: 'transform' }} />
         </div>
       )}

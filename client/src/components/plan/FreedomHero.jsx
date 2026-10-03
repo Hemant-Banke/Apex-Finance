@@ -42,7 +42,7 @@ export default function FreedomHero({ m, s }) {
 
   return (
     <Card gilt flush style={{ position: 'relative' }}>
-      <DitherField growth={growth} rest={0.32} vivid={0.95}
+      <DitherField fall growth={growth} rest={0.32} vivid={0.95}
         style={{ maskImage: 'linear-gradient(90deg, transparent 20%, #000 75%)', WebkitMaskImage: 'linear-gradient(90deg, transparent 20%, #000 75%)' }} />
 
       <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 36, flexWrap: 'wrap', padding: '30px 30px 26px' }}>

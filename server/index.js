@@ -24,6 +24,7 @@ const marketsRoutes = require('./routes/markets');
 const categoryRoutes = require('./routes/categories');
 const importRoutes = require('./routes/import');
 const subscriptionRoutes = require('./routes/subscriptions');
+const goalRoutes = require('./routes/goals');
 
 const app = express();
 
@@ -85,6 +86,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountRoutes);
 app.use('/api/transactions', transactionRoutes);
 app.use('/api/subscriptions', subscriptionRoutes);
+app.use('/api/goals', goalRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/networth', networthRoutes);
 app.use('/api/market', marketRoutes);
