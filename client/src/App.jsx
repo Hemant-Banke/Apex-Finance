@@ -1,6 +1,7 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
+import { PricingProvider } from './context/PricingContext';
 import AppShell from './components/layout/AppShell';
 import DesktopOnly from './components/layout/DesktopOnly';
 import AppLoader from './components/ui/AppLoader';
@@ -39,6 +40,7 @@ function App() {
     <DesktopOnly>
     <AuthProvider>
       <ToastProvider>
+      <PricingProvider>
         <TopProgressBar />
         <Router>
         <Routes>
@@ -112,6 +114,7 @@ function App() {
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
         </Router>
+      </PricingProvider>
       </ToastProvider>
     </AuthProvider>
     </DesktopOnly>

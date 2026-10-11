@@ -22,17 +22,25 @@
 ### plan
 - `plan/FreedomHero.jsx` — Plan page hero: gilt card over the money-garden `DitherField` (with falling petals), which grows fuller with FIRE progress and floods the card at FIRE; lean/FIRE/fat tiers are built around the CHOSEN spend; "Free at N" headline, gold progress ring, Coast FIRE progress readout (gold rule), lean/regular/fat (chosen one in gold). House colours only — ink and gold.
 - `plan/Journey.jsx` — Milestone strip under the path chart (which hides its own x-axis), on the same age axis (`inset` = plot margins): each milestone's dashed line runs from the chart down to its dot; labels below in two staggered rows. Milestones from `planModel.journeyMarks`, rounded to whole ages so the lines meet the chart's yearly hover steps.
-- `plan/PlanControls.jsx` — Compact assumptions board (spending and corpus sections carry bold titles with their figure; spending split essential/discretionary/unclassified with amounts and shares): typed `.plan-field` inputs for exact values (ages, monthly investing, custom spend), gold `.plan-range` sliders only for the four rates (explanations in tooltips), spending choice (radio cards — the chosen one raised (lighter surface, no border) with a filled white radio mark) with its composition bar, what-counts toggles; consequences in the header line. Persisted on the device.
+- `plan/PlanControls.jsx` — Compact assumptions board (its `Dial`/`Field`/`GroupHead`/`Choice` live in `ui/AssumptionControls`) (spending and corpus sections carry bold titles with their figure; spending split essential/discretionary/unclassified with amounts and shares): typed `.plan-field` inputs for exact values (ages, monthly investing, custom spend), gold `.plan-range` sliders only for the four rates (explanations in tooltips), spending choice (radio cards — the chosen one raised (lighter surface, no border) with a filled white radio mark) with its composition bar, what-counts toggles; consequences in the header line. Persisted on the device.
 - `plan/RunwayTiers.jsx` — Months of spending covered by cash → + liquid → + locked-in → net of debts.
 - `plan/ProjectionChart.jsx` — Corpus by age in today's rupees with FIRE number, retirement, FI and depletion markers.
 - `plan/IndependenceCard.jsx` — The plan in brief for the Dashboard: progress to the FIRE number, FI age, Coast FIRE, retirement surplus, runway.
 - `plan/SensitivityGrid.jsx` — FI age across withdrawal rates × returns (CSS grid), deeper garden green = sooner, yours (or the nearest cell) as the one light chip.
 
 ### goals
-- `goals/GoalsView.jsx` — The body of the Goals page: masthead (cost when due; surplus split by what each goal takes), pinned timeline, goal cards (cost then, suggested monthly), `GoalDetail` for the selected goal, priority-first funding of the monthly surplus, payouts by year. Empty state: `GardenEmpty` with compact starter kinds.
+- `goals/GoalsCard.jsx` — Dashboard summary of the goal plan (same `useGoalPlan`, same saved assumptions, so it cannot disagree with the Goals page): goals on target, this month's goal money by goal against the cap, spare and set-aside, then the next four goals with cost then and odds.
+- `goals/GoalsView.jsx` — The Goals page body: masthead (cost when due, on-target count; band: set aside today, invested a month, cap, spare), `GoalTimeline`, `GoalCard` selector grid, `GoalDetail` of the selected goal, `PlanRoutes` beside `GoalAssumptions`, then `PlanLevers`. Solves via `useGoalPlan`.
 - `goals/GoalForm.jsx` — Add/edit a goal on one unscrolled screen. Left, four steps: What (type `TypePicker`, name, cost via `MoneyInput`, inflation prefilled per type), When (one field: Months/Years/Date tabs over the number or date, capped at 60 years / 720 months; priority as a `StepSlider`), Paid out (All at once / Spread out with a − N + years stepper, capped at 40, and a line saying what that means), Invested (the risk `StepSlider` with "Apex picks" as its detached first stop; the step header states the mix). Right, a deeply inset ticket: the corpus needed (one figure for a lump sum; a spread goal also shows the total paid out), today-vs-then bars (a spread goal's payouts anchored at the right end), a facts list, and the submit button. No contribution inputs.
-- `goals/GoalDetail.jsx` — One goal in full: costs by then, corpus needed, Apex's suggested monthly (80% odds), middle-path monthly, expected; outcome fan; contribution and withdrawal plans by year; asset mix and glide path; levers on the odds.
-- `goals/GoalCharts.jsx` — `GoalFanChart` (10th–90th percentile band, median, needed), `GlidePathChart` (equity/debt/gold by year), `NeedsChart` (payouts by year stacked by goal).
+- `goals/GoalDetail.jsx` — One goal inside the whole plan: odds vs its tier's target, corpus needed, set aside today (and how far that alone gets it), first monthly amount, middle outcome, average shortfall; the fan chart under the plan; Money in (earmark by account, monthly by phase routed to accounts) and Money out (payouts by account); glide path; its own levers (date +1y, trim 10%, from scratch, bolder mix) via `LeverEffects`.
+- `goals/GoalCard.jsx` — A goal as an account-style metal card (`CardDither` in the goal's colour, the plan's middle path as terrain): cost when due, the plan in one line (set aside · ₹/mo from when), priority, odds dot. Selection raises the card, never outlines it.
+- `goals/GoalTimeline.jsx` — Measured SVG timeline: each goal at its date as a ring filled to its odds (stems on collision-free levels; spread payouts along the axis), and below the axis the monthly plan hanging as stacked bands per goal against the dashed cap. Hover links ring, band and legend; click selects.
+- `goals/PlanRoutes.jsx` — "Where the money goes": Now (moves between accounts and classes, unused money), Each month (per phase: split by goal, then by account), Payouts (dated, by account).
+- `goals/PlanLevers.jsx` — Plan-wide sensitivity (each lever re-solves the plan). Exports `LeverEffects`: goals crossing their target, odds of goals below target, change in spare money (shown only above 1% of headroom).
+- `goals/GoalAssumptions.jsx` — The plan's assumptions as controls: monthly cap (default the surplus) and its yearly rise, class returns, inflation shift, emergency reserve, target odds per priority, and which accounts the plan may draw on. Per device.
+- `goals/PlanAccount.jsx` — An account tag in the plan (type icon + name); one the plan recommends opening is dashed with a "new" chip.
+- `goals/PlanMethod.jsx` — Modal ("How it works" in the Goals masthead) explaining the optimisation in 11 parts — inputs, corpus, markets, a pot's linearity, utility, constraints, the greedy solve and repricing, routing to accounts, levers, what it leaves out — with this plan's live numbers and `PLAN_METHOD` constants. Formulas are typeset with KaTeX (`F rows={[[tex, note]]}`).
+- `goals/GoalCharts.jsx` — `GoalFanChart` (10th–90th percentile band, median, needed), `GlidePathChart` (equity/debt/gold by year).
 
 ### cashflow
 - `cashflow/CashflowPanel.jsx` — A cash/debt account's counterpart to `AllocationPanel`: window control, profile, chart + ledger, category breakdowns, patterns (fetches `/accounts/:id/cashflow`).
@@ -57,6 +65,7 @@
 
 ### layout
 - `layout/AppShell.jsx` — App frame: sidebar navigation + page outlet.
+- `layout/PriceBasis.jsx` — Sidebar card: the Live prices switch and what every figure is really as of ("Assets at close of Mon 5 Oct · cash as of today", "Live · 18:02", or "Quotes unavailable · showing close of …" when a live fetch fell back), read from the last priced response's `asof`.
 - `layout/DesktopOnly.jsx` — Gates the app to wide, hover-capable screens.
 
 ### market
@@ -109,6 +118,8 @@
 - `ui/DivergingBar.jsx` — Signed bar from a shared zero.
 - `ui/SegmentedControl.jsx` — THE selector (pill track; pills fill the track edge to edge, no inner padding): every window/range/view/filter/tab and form choice. `size` sm/md/lg, `block`, `ringless` (no track border or tone ring), `solid` (active toned pill filled, light text — the Buy/Sell switch), options take `icon`/`hint`/`tone`/`count`, `children` for extra pills.
 - `ui/StepSlider.jsx` — Slider over a few ordered stops on a coloured gradient track (`stops: [{key,label,color,icon?,detached?}]`), lit up to the chosen stop; labels are clickable, keyboard/drag via a hidden range input. A leading `detached` stop (with an `icon`) sits off the scale, joined by a dotted line — an option that is not a point on it (the goal form's "Apex picks"). For SCALES (priority, risk) — unordered choices stay on `SegmentedControl`.
+- `ui/Switch.jsx` — On/off switch with label and optional sub-line, the whole row the control (white knob when on). Used by the sidebar's Live prices and the goal form's use-existing-money.
+- `ui/AssumptionControls.jsx` — The controls of an assumptions board, shared by the Freedom Plan and the goal plan: `Dial` (slider with its value), `Field` (typed number with unit), `GroupHead` (section title with its figure), `Choice` (radio/check card).
 - `ui/ShowMore.jsx` — Collapses long lists (head or both-ends mode).
 - `ui/Sparkline.jsx` — Tiny SVG trend line.
 - `ui/BackLink.jsx` — The one "back" control.
@@ -122,12 +133,12 @@
 
 ### Pages (`client/src/pages/`)
 - `Login.jsx` / `Register.jsx` — Auth entry (OAuth + email) / manual signup.
-- `Dashboard.jsx` — Net worth masthead, net-worth chart, vital signs strip (investment gain + XIRR, portfolio style, savings rate, cash runway, spent this month), portfolio (allocation, 1D, gainers/losers) beside where it went (equal height), cashflow (avg in/out/net/saved + chart) beside Independence, recent activity.
+- `Dashboard.jsx` — Net worth masthead, net-worth chart, vital signs strip (investment gain + XIRR, portfolio style, savings rate, cash runway, spent this month), portfolio (allocation, 1D, gainers/losers) beside where it went (equal height), cashflow (avg in/out/net/saved + chart) beside Independence, recent activity; recent activity beside `GoalsCard`.
 - `Accounts.jsx` — Net-position masthead with assets-by-type bar, accounts grouped by type as `AccountCard` grids (each type its own colour), liabilities; `AccountsEmpty` when there are none.
 - `AccountDetail.jsx` — One account: masthead, history chart, cashflow panel (bank/wallet/other/debt), allocation, performance (any account that has traded), holdings, activity; `AccountEmpty` instead of chart and activity when it has no transactions; a "No open positions" card on an investment account with history but nothing held.
 - `Transactions.jsx` — The ledger: period masthead vs the prior window, spending calendar, largest outflows, clickable category breakdown, type chips with counts, search/account/amount/sort filters, day-grouped list, bulk select-delete with undo, CSV export, add/import.
 - `Analytics.jsx` — Masthead, net-worth chart, allocation, performance (+ contribution), holdings, cashflow, categories.
-- `Goals.jsx` — Goals (`/goals`, own sidebar entry): loads the spending profile for the monthly surplus, renders `GoalsView`.
+- `Goals.jsx` — Goals (`/goals`, own sidebar entry): loads the spending profile, accounts and portfolio (the plan's inputs), renders `GoalsView`.
 - `Plan.jsx` — the Freedom Plan, FIRE & retirement (`/plan`): `FreedomHero`, assumptions, `Journey`, assumptions, the path, retirement check (surplus/shortfall, SIP to close, money lasts until), runway tiers, sensitivity, levers.
 - `Markets.jsx` — Indian market overview, growth chart, sectors, flows.
 - `Stock.jsx` — One company in full; `/markets/stocks/:nse` and `/markets/world/:yahoo` (`global` prop).
@@ -137,6 +148,7 @@
 ### Context (`client/src/context/`)
 - `AuthContext.jsx` — User/session state and auth actions.
 - `ToastContext.jsx` — Toasts with optional action (Undo).
+- `PricingContext.jsx` — The sidebar's Live prices switch (`usePricing()` → `{ live, setLive }`), persisted via `lib/pricing`.
 
 ---
 
@@ -144,7 +156,11 @@
 
 ### Client (`client/src/lib/`)
 - `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`.
-- `goals.js` — Pure goal maths in NOMINAL rupees: `GOAL_TYPES`, `PRIORITIES`, `STRATEGIES`/`mixAt` (glide path; fixed mixes de-risk in the last 3 years), `ASSETS`/`ASSET_COLORS`, `requiredCorpus`, `requiredMonthly`, seeded Monte Carlo `simulate`, `goalModel` (contribution plan = the 80%-odds monthly, `PLAN_CONFIDENCE`), `monthlyForConfidence`, `addMonths`, `horizonLabel`, `goalLevers`, `contributionPlan`, `withdrawalPlan`, `fundingWaterfall`, `GOAL_DEFAULTS`.
+- `goals.js` — Goals for the UI: `GOAL_TYPES` (icons, default inflation and payout), `ASSET_COLORS`, `monthsUntil`, `goalModel` (one goal's own cost, corpus, mix — no simulation), `oddsTone`, `goalColours`, `GOAL_DEFAULTS`; re-exports `goalMath`.
+- `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
+- `goalPlan.js` — The plan across all goals (pure): `fundingSources` (liquid money per account by class, less the reserve), `buildPlan` (seeded Monte Carlo + greedy marginal allocation, strict priority tiers to target odds, scarcity-priced pools, earmarks, monthly phases, routing to accounts, moves, payouts), `planLevers`, `goalLevers`, `PLAN_DEFAULTS`, `withDefaults`, `PLAN_METHOD` (the fixed constants — scenarios, λ, κ, step size, price cap, seed — so the method modal never states a number the code does not use).
+- `goalPlan.worker.js` — Runs `buildPlan` then the levers off the main thread.
+- `useGoalPlan.js` — `useGoalPlan(input, settings, focusId)` (worker, debounced, stale answers dropped), `goalPlanInput` (slims goals/accounts/portfolio/spending for the worker), `load`/`saveGoalPlanSettings` (localStorage `apex_goal_plan`).
 - `dither.js` — Shared ordered dithering on the 3px lattice: `CELL`, `DOT`, `threshold`, `paintDots` (the garden's rule), `paintTone` (alpha → dot density). Used by `DitherField` and `CardDither`.
 - `planModel.js` — `planModel(data, settings)`: the whole FIRE plan from summary + portfolio + spending profile; `loadPlanSettings`, `journeyMarks`, `PLAN_DEFAULTS`, `PLAN_STORE_KEY`. Shared by Plan and Dashboard.
 - `fire.js` — Pure FIRE maths in today's rupees: `realRate`, `fireNumber`, `yearsToTarget`, `coastNumber`, `requiredMonthly`, `corpusForYears`, `project`.
@@ -161,6 +177,7 @@
 - `categoryNames.js` — Cached category taxonomy; `useCategoryNames`, `describeCategory`.
 - `confidence.js` — Import confidence bands/labels (mirrors server).
 - `numericInput.js` — `numericOnly({signed})`: props for a number `<input>` that let through only digits, one `.` and (if signed) `−` — typed, pasted or dropped (Safari otherwise accepts any text) — and blur on wheel — every amount/units/price field in the transaction, asset and import forms; `wholeNumber(raw, max)`: digits only, capped, null when empty.
+- `pricing.js` — The app-wide price basis (`isLive`/`setLive`, localStorage `apex_live_prices`, default off) and `takesBasis(url)`, which the API interceptor uses to add `fetchLatestBal` to every endpoint that values assets.
 - `recurrence.js` — `FREQUENCIES`, `emptyRecurrence`.
 - `categorySelection.js` — Multi-category selection rules (`groupState`, `toggleGroup`, `toggleCode`, `isSelected`); a group never coexists with its own children.
 - `undo.js` — `toCreatePayload` to re-create a deleted transaction.
@@ -217,7 +234,7 @@
 - `Account.js` — Account container.
 - `Transaction.js` — Every financial movement.
 - `Subscription.js` — Recurring transaction templates.
-- `Goal.js` — A financial goal (a plan, not money): amount in today's rupees, date, priority, inflation, saved/monthly/step-up, withdrawal mode, strategy.
+- `Goal.js` — A financial goal (a plan, not money): amount in today's rupees, date, priority, inflation, withdrawal mode, strategy, `useExisting` (may the plan earmark money already held; default true). `saved`/`monthly`/`stepUp` are legacy and ignored.
 - `DailyAccountBalance.js` — Per-account cash/asset time series.
 - `DailyNetWorth.js` — Per-user net worth series.
 - `AccountHoldings.js` — Per-account AVCO holdings.
@@ -225,6 +242,7 @@
 - `UserCategoryProfile.js` — Learned merchant→category profile.
 - `MfScheme.js` / `MfNav.js` — AMFI fund index / NAV history caches.
 - `PriceHistory.js` — Daily closes per Yahoo symbol (native), with covered range and quote currency.
+- `CurrentPrice.js` — The latest live quote per Yahoo symbol (native price, previous session's close, IST day, fetchedAt). A shared cache; closes never go here.
 - `MarketFlow.js` — Daily FII/DII/MF flows + participant OI.
 
 #### Routes (`server/routes/`)
@@ -252,6 +270,7 @@
 - `portfolioProfileService.js` — `getProfile(holdings)`: the book as a whole (classes, caps, regions, sectors, liquidity, yield, in-profit, holding age); local reads only. Served as `profile` on `/dashboard/portfolio`.
 - `marketDataService.js` — All Yahoo fetching, FX, live/historic prices; historic closes via the price cache; `fetchDailyCloses`, `quoteCurrency`, `refreshPriceCache`.
 - `priceCacheService.js` — `getCloses` (cache-first daily closes, fetch only gaps, failures never advance coverage), `getCurrency`, `refreshAll` (3-hourly top-up).
+- `livePriceService.js` — `getQuotes(symbols)`: live native quotes cached in `currentprices` for 60s per symbol; one batched spark fetch for the rest, concurrent callers share it; a failed fetch serves today's last quote marked stale.
 - `mfService.js` — AMFI mutual-fund cache, search, NAVs.
 - `symbolResolver.js` — Statement instrument → priceable symbol.
 - `subscriptionService.js` — Materialise due recurring transactions.

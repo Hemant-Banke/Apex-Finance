@@ -11,6 +11,7 @@ const { badRequest } = require('../utils/httpError');
 const { holdingsToArray } = require('../services/holdingsService');
 const { getPortfolio, getContribution, allocationByType } = require('../services/portfolioService');
 const { getProfile } = require('../services/portfolioProfileService');
+const { getAllAccountsAssetBalance } = require('../services/accountBalance');
 const { t1Str, t1Ms } = require('../utils/helpers');
 const { DAY_MS } = require('../utils/constants');
 
@@ -26,12 +27,14 @@ router.use(protect);
  * says so — a two-week-old account has no one-year change, and inventing one by
  * comparing against zero would report a spectacular fake gain.
  */
-function netWorthChange(doc, daysAgo) {
+function netWorthChange(doc, daysAgo, live = null) {
   const ts = doc?.valuesTS || [];
   if (ts.length < 2) return null;
 
-  const current = ts[ts.length - 1];
-  const idx     = ts.length - 1 - daysAgo;
+  // Live basis: from today's live figure back to the same day N days ago. Settled: between
+  // closes, so 1D is the last settled session's move rather than a near-zero "today".
+  const current = live ?? ts[ts.length - 1];
+  const idx     = ts.length - (live != null ? 0 : 1) - daysAgo;
   const partial = idx < 0;
   const past    = ts[Math.max(0, idx)];
 
@@ -96,7 +99,14 @@ router.get('/summary', asyncHandler(async (req, res) => {
     }
   });
 
-  const asof = t1Str();
+  // Live basis: cash is already at T, so only the assets are re-priced.
+  let asof = t1Str();
+  if (req.query.fetchLatestBal === 'true') {
+    const settledAssets = totalAssets - totalCash;
+    const live = await getAllAccountsAssetBalance(req.user, true);
+    totalAssets += live.value - settledAssets;
+    asof = live.asof;
+  }
 
   const symbolsSeen = new Set();
   holdingsDocs.forEach(doc => (doc.holdings || []).forEach(h => {
@@ -149,12 +159,8 @@ router.get('/summary', asyncHandler(async (req, res) => {
     // settled T-1 series is exactly what is wanted.
     netWorth:         totalAssets - totalLiabilities,
     asof,
-    netWorthChange: {
-      day:   netWorthChange(nwDoc, 1),
-      week:  netWorthChange(nwDoc, 7),
-      month: netWorthChange(nwDoc, 30),
-      year:  netWorthChange(nwDoc, 365),
-    },
+    netWorthChange: Object.fromEntries([['day', 1], ['week', 7], ['month', 30], ['year', 365]].map(([k, n]) =>
+      [k, netWorthChange(nwDoc, n, req.query.fetchLatestBal === 'true' ? totalAssets - totalLiabilities : null)])),
     totalAssets,
     totalLiabilities,
     totalCash,
@@ -177,12 +183,13 @@ router.get('/summary', asyncHandler(async (req, res) => {
 // @route   GET /api/dashboard/portfolio
 // The book marked to market: per-holding value, unrealised & realised P&L, day change,
 // weight — plus the same rolled up, and allocation by asset type at MARKET VALUE.
-// Values are the last settled close (T-1), matching the stores.
-// `?account=<id>` scopes it to one account (the account page's holdings).
+// Values are the last settled close (T-1), matching the stores — or live prices with
+// `?fetchLatestBal=true`. `?account=<id>` scopes it to one account (the account page's holdings).
 router.get('/portfolio', asyncHandler(async (req, res) => {
   const { account } = req.query;
   if (account && !mongoose.Types.ObjectId.isValid(account)) throw badRequest('Invalid account id');
-  const { holdings, totals } = await getPortfolio(req.user._id, { live: false, account: account || null });
+  const live = req.query.fetchLatestBal === 'true';
+  const { holdings, totals } = await getPortfolio(req.user._id, { live, account: account || null });
   const profile = await getProfile(holdings).catch((e) => { console.error(e); return null; });
   res.json({ holdings, totals, allocation: allocationByType(holdings), profile });
 }));

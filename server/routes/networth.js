@@ -42,7 +42,9 @@ router.get('/daily', asyncHandler(async (req, res) => {
     result.push({ date: toDateStr(startMs + i * DAY_MS), value: doc.valuesTS[i] });
   }
 
-  const { value: assetValue } = await getAllAccountsAssetBalance(req.user, false);
+  // Live prices when asked: on the settled basis today's assets ARE yesterday's close, so
+  // today's point could never move and a 1D growth view read zero.
+  const { value: assetValue } = await getAllAccountsAssetBalance(req.user, req.query.fetchLatestBal === 'true');
   const todayValue = (doc.lastCashValue || 0) + assetValue;
   result.push({ date: todayStr(), value: todayValue });
 

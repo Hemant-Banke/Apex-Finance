@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { dashboardAPI } from '../lib/api';
+import { dashboardAPI, goalsAPI, accountsAPI } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import {
   formatCurrency, compactIfLarge, formatDate, formatPct, formatSigned, pnlColor, monthLabel,
@@ -24,6 +24,7 @@ import CategoryBreakdown from '../components/charts/CategoryBreakdown';
 import { portfolioStyle } from '../lib/portfolioStyle';
 import { planModel, loadPlanSettings } from '../lib/planModel';
 import IndependenceCard from '../components/plan/IndependenceCard';
+import GoalsCard from '../components/goals/GoalsCard';
 
 // The net-worth series runs to T-1 (asset prices are not final until the close), so these
 // measure settled day over settled day. Labelling the first one "today" would be a claim
@@ -239,25 +240,31 @@ export default function Dashboard() {
   const [incExp,    setIncExp]    = useState([]);
   const [spend,     setSpend]     = useState([]);
   const [spending,  setSpending]  = useState(null);
+  const [goals,     setGoals]     = useState([]);
+  const [accounts,  setAccounts]  = useState([]);
   const [loading,   setLoading]   = useState(true);
 
   useEffect(() => { load(); }, []);
 
   const load = async () => {
     try {
-      const [s, p, ie, cats, catMap, sp] = await Promise.all([
+      const [s, p, ie, cats, catMap, sp, gl, ac] = await Promise.all([
         dashboardAPI.getSummary(),
         dashboardAPI.getPortfolio(),
         dashboardAPI.getIncomeExpense(6),
         dashboardAPI.getCategoryTotals('expense', 3).catch(() => ({ data: [] })),
         getCategoryMap().catch(() => null),
         dashboardAPI.getSpendingProfile(12).catch(() => null),
+        goalsAPI.getAll().catch(() => ({ data: [] })),
+        accountsAPI.getAll().catch(() => ({ data: [] })),
       ]);
 
       setSummary(s.data);
       setPortfolio(p.data);
       setIncExp(ie.data);
       setSpending(sp?.data || null);
+      setGoals(gl.data || []);
+      setAccounts(ac.data || []);
       setSpend(cats.data.map(c => ({
         ...c,
         name:  c._id ? describeCategory(c._id, catMap || undefined).label : 'Uncategorised',
@@ -385,29 +392,33 @@ export default function Dashboard() {
         {plan && <IndependenceCard m={plan} s={planSettings} />}
       </div>
 
-      <Card flush>
-        <div className="flex items-center justify-between" style={{ padding: '22px 24px 4px' }}>
-          <p className="eyebrow">Recent activity</p>
-          <Link to="/transactions" className="text-xs font-medium"
-            style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
-            View all →
-          </Link>
-        </div>
-        {summary?.recentTransactions?.length > 0 ? (
-          <div style={{ paddingTop: 12 }}>
-            {summary.recentTransactions.slice(0, 5).map(tx => (
-              <TransactionRow
-                key={tx._id}
-                tx={tx}
-                subtitle={<>{tx.account?.name} · {formatDate(tx.date)}</>}
-              />
-            ))}
+      {/* What happened lately, beside what the money is for. */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.5fr) minmax(0, 1fr)', gap: 16, alignItems: 'stretch' }}>
+        <Card flush>
+          <div className="flex items-center justify-between" style={{ padding: '22px 24px 4px' }}>
+            <p className="eyebrow">Recent activity</p>
+            <Link to="/transactions" className="text-xs font-medium"
+              style={{ color: 'var(--color-text-muted)', textDecoration: 'none' }}>
+              View all →
+            </Link>
           </div>
-        ) : (
-          <GardenEmpty card={false} compact icon={Wallet} title="No transactions yet"
-            text="Everything in Apex is a transaction — your latest five land here." />
-        )}
-      </Card>
+          {summary?.recentTransactions?.length > 0 ? (
+            <div style={{ paddingTop: 12 }}>
+              {summary.recentTransactions.slice(0, 5).map(tx => (
+                <TransactionRow
+                  key={tx._id}
+                  tx={tx}
+                  subtitle={<>{tx.account?.name} · {formatDate(tx.date)}</>}
+                />
+              ))}
+            </div>
+          ) : (
+            <GardenEmpty card={false} compact icon={Wallet} title="No transactions yet"
+              text="Everything in Apex is a transaction — your latest five land here." />
+          )}
+        </Card>
+        <GoalsCard goals={goals} accounts={accounts} portfolio={portfolio} spending={spending} />
+      </div>
     </div>
   );
 }

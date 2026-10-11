@@ -97,8 +97,8 @@ router.get('/:id/cashflow', asyncHandler(async (req, res) => {
 // @route   GET /api/accounts/:id/daily?days=N&fetchLatestBal=true&growth=true
 // Returns [{ date, cashValue, assetValue, totalValue }] for the account's balance history.
 // cashTS (length N) runs startDate → T; assetTS (length N-1) runs startDate → T-1, so the
-// settled series stops a day short. Today is only appended when fetchLatestBal asks for
-// live prices — otherwise there is no asset value for it yet.
+// settled series stops a day short, so today is always appended: T cash + the T-1 close,
+// or live asset prices when fetchLatestBal asks for them.
 //
 // `growth=true` swaps `totalValue` for a growth-only index (base 100 at the account's own
 // first day) — the complete series with every later deposit/withdrawal/uncashed trade
@@ -131,11 +131,13 @@ router.get('/:id/daily', asyncHandler(async (req, res) => {
     });
   }
 
-  if (req.query.fetchLatestBal === 'true' && !account.isDebt) {
-    const { value: assetValue } = await getAccountAssetBalance(
-      account, req.user, true, doc, holdingsDoc?.holdings || [],
-    );
-    const cashValue = cashTS[cashTS.length - 1];
+  // Today always ends the series, on the basis asked for: T cash plus the T-1 close, or
+  // live asset prices with fetchLatestBal. A debt account has cash only.
+  {
+    const cashValue = cashTS[cashTS.length - 1] ?? 0;
+    const assetValue = account.isDebt ? 0 : (await getAccountAssetBalance(
+      account, req.user, req.query.fetchLatestBal === 'true', doc, holdingsDoc?.holdings || [],
+    )).value;
     result.push({ date: todayStr(), cashValue, assetValue, totalValue: cashValue + assetValue });
   }
 
@@ -147,6 +149,9 @@ router.get('/:id/daily', asyncHandler(async (req, res) => {
     for (let i = 0; i < cashTS.length - 1; i++) {
       fullValuesTS.push((cashTS[i] ?? 0) + (assetTS[i] ?? 0));
     }
+    // A live today point joins the index too, or it fell past its end and came back null.
+    const today = result[result.length - 1];
+    if (today?.date === todayStr()) fullValuesTS.push(today.totalValue);
     const endMs    = docStartMs + (fullValuesTS.length - 1) * DAY_MS;
     const growthTS = await dvService.computeGrowthIndex(
       req.user._id, docStartMs, endMs, fullValuesTS, account._id,

@@ -24,6 +24,7 @@ const goalSchema = new mongoose.Schema({
     years: { type: Number, min: 1, max: 40, default: 1 },  // spread: drawn evenly over this many years
   },
   strategy: { type: String, enum: GOAL_STRATEGIES, default: 'auto' },
+  useExisting: { type: Boolean, default: true },          // may the plan earmark money already held
   notes: { type: String, trim: true, maxlength: 200 },
 }, { timestamps: true });
 

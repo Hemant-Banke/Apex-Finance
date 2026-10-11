@@ -18,6 +18,10 @@ const OVERLAP_MS = 3 * DAY_MS;
 // A symbol's first fetch takes this much history, so later windows are cache hits.
 const FIRST_FETCH_MS = 5 * 365 * DAY_MS;
 const REFRESH_CONCURRENCY = 5;
+// A recent day with no close may simply not be published yet (Yahoo posts NSE closes hours
+// late). Coverage over such days is re-checked, at most this often, until the close lands.
+const RECENT_MS  = 5 * DAY_MS;
+const RECHECK_MS = 30 * 60 * 1000;
 
 // One fetch per symbol at a time: a second caller waits and then finds the cache warm.
 const locks = new Map();
@@ -29,13 +33,27 @@ function withLock(symbol, fn) {
   return next;
 }
 
+/**
+ * How far coverage can be trusted. Recent days past the last close are not trusted once the
+ * last check is RECHECK_MS old: a fetch at 4am IST once marked Monday covered with no Monday
+ * close in it, and Monday was valued at last week's prices for good.
+ */
+function trustedTo(doc, today) {
+  if (doc.to == null || doc.to < today - RECENT_MS) return doc.to;
+  let last = -Infinity;
+  for (const k of Object.keys(doc.closes || {})) last = Math.max(last, Number(k));
+  const checkedAt = doc.fetchedAt ? new Date(doc.fetchedAt).getTime() : 0;
+  return last < doc.to && Date.now() - checkedAt > RECHECK_MS ? Math.max(last, doc.from) : doc.to;
+}
+
 /** The day ranges a request needs that the cache does not yet cover. */
 function gapsFor(doc, startMs, endMs, today) {
   if (endMs < startMs) return [];
   if (doc?.from == null || doc?.to == null) return [[Math.min(startMs, today - FIRST_FETCH_MS), endMs]];
+  const to = trustedTo(doc, today);
   const gaps = [];
   if (startMs < doc.from) gaps.push([startMs, doc.from - DAY_MS]);
-  if (endMs > doc.to) gaps.push([Math.max(doc.from, doc.to - OVERLAP_MS), endMs]);
+  if (endMs > to) gaps.push([Math.max(doc.from, to - OVERLAP_MS), endMs]);
   return gaps;
 }
 
@@ -85,7 +103,8 @@ async function getCloses(symbol, assetType, startMs, endMs, fetchRange) {
 /** Tops up every cached symbol to the last settled day; run on a timer, off the request path. */
 async function refreshAll(fetchRange) {
   const lastSettled = todayMs() - DAY_MS;
-  const docs = await PriceHistory.find({ $or: [{ to: { $lt: lastSettled } }, { to: null }] })
+  const recent = todayMs() - RECENT_MS;
+  const docs = await PriceHistory.find({ $or: [{ to: { $lt: lastSettled } }, { to: null }, { to: { $gte: recent } }] })
     .select('symbol assetType').lean();
 
   let i = 0, refreshed = 0;

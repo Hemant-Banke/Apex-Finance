@@ -60,6 +60,8 @@ async function loadAccountsById(userId) {
  * Ten days clears a weekend plus a run of market holidays (Diwali, etc).
  */
 const PRICE_LOOKBACK_DAYS = 10;
+// Settled days re-valued on each daily extend, to pick up closes that were published late.
+const REVISE_DAYS = 3;
 
 /** Fetch all symbol price series in one batched call. */
 function fetchPrices(assets, assetStartMs) {
@@ -232,6 +234,24 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
 
   const accountsById = await loadAccountsById(userId);
 
+  // The last REVISE_DAYS settled days are re-valued, not just appended to, so a close that
+  // arrived late corrects the store instead of freezing the day at the previous close.
+  // Only where the account made no trade in that window: the holdings snapshot that
+  // calibrates the extend is then exactly what it held on those days.
+  const earliest = Math.min(...acctDocs.map(d => midnight(d.startDate) + Math.max(0, (d.assetTS?.length || 0) - REVISE_DAYS) * DAY_MS));
+  const traded = new Set((await Transaction.find({
+    user: userId, type: { $in: ['buy', 'sell'] }, date: { $gte: new Date(earliest) },
+  }).select('account date').lean()).map(t => `${t.account}:${midnight(t.date)}`));
+  const reviseFrom = (d) => {
+    const len = d.assetTS?.length || 0;
+    const back = Math.min(REVISE_DAYS, len);
+    const start = midnight(d.startDate) + (len - back) * DAY_MS;
+    for (let day = start; day < start + back * DAY_MS; day += DAY_MS) {
+      if (traded.has(`${d.account}:${day}`)) return len;
+    }
+    return len - back;
+  };
+
   // Load holdings once per non-debt account and collect symbols for a single
   // batched price fetch. Each account's asset series resumes at its own prevT.
   const holdingsByAcct = {};
@@ -247,8 +267,8 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
     if (!holdings.length) continue;
 
     holdingsByAcct[aid] = holdings;
-    // prevT = day after assetTS's last entry (assetTS runs to prevT-1).
-    const assetStart = midnight(d.startDate) + (d.assetTS?.length || 0) * DAY_MS;
+    // Where re-valuing begins (assetTS runs to prevT-1; the last few days are redone).
+    const assetStart = midnight(d.startDate) + reviseFrom(d) * DAY_MS;
     minAssetStart = Math.min(minAssetStart, assetStart);
     for (const h of holdings) {
       const sym = h.assetSymbol?.toUpperCase();
@@ -292,10 +312,13 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
     const cashDays  = Math.round((today - prevT) / DAY_MS);
     const newCashTS = cashDays > 0 ? cashTS.concat(Array(cashDays).fill(lastCash)) : cashTS.slice();
 
-    // Asset: resume at prevT (= docStart + assetTS.length days) … newT-1.
+    // Asset: resume at the revision start … newT-1. If prices failed, nothing is redone.
     let newAssetTS = assetTS.slice();
     if (!isDebt) {
-      const assetStart = docStart + assetTS.length * DAY_MS; // prevT
+      const keep = fetchFailed ? assetTS.length : reviseFrom(d);
+      const assetTS = (d.assetTS || []).slice(0, keep);
+      newAssetTS = assetTS.slice();
+      const assetStart = docStart + assetTS.length * DAY_MS;
       if (assetStart <= t1) {
         const holdings = holdingsByAcct[aid];
         const hasQuoted = holdings?.some(h => !isRateAsset(h.assetType));

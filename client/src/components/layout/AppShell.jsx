@@ -6,6 +6,8 @@ import {
 } from 'lucide-react';
 import ApexLogo from '../ui/ApexLogo';
 import DitherField from '../ui/DitherField';
+import PriceBasis from './PriceBasis';
+import { usePricing } from '../../context/PricingContext';
 import { networthAPI } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
 
@@ -25,6 +27,7 @@ export default function AppShell({ children }) {
   const navigate = useNavigate();
   const toast = useToast();
   const [rebuilding, setRebuilding] = useState(false);
+  const { live } = usePricing();
   // Bumping this remounts the routed page below, re-running its mount-time
   // fetch so the UI reflects freshly rebuilt stores without a full reload.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -112,6 +115,9 @@ export default function AppShell({ children }) {
             </NavLink>
           ))}
         </nav>
+
+        {/* The price basis for every figure in the app, and what it is as of. */}
+        <div style={{ padding: '4px 8px 2px' }}><PriceBasis /></div>
 
         {/* Dev tools */}
         <div style={{ padding: '4px 8px' }}>
@@ -209,7 +215,8 @@ export default function AppShell({ children }) {
         position: 'relative',
         zIndex: 1,
       }}>
-        <div key={refreshKey} style={{
+        {/* Remounted on a rebuild or a flip of the price basis, so every figure refetches. */}
+        <div key={`${refreshKey}-${live}`} style={{
           maxWidth: 1060,
           margin: '0 auto',
           padding: '40px 48px 60px',

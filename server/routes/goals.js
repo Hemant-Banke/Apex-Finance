@@ -7,7 +7,7 @@ const Goal = require('../models/Goal');
 const router = express.Router();
 router.use(protect);
 
-const FIELDS = ['name', 'type', 'priority', 'amount', 'targetDate', 'inflation', 'saved', 'monthly', 'stepUp', 'withdrawal', 'strategy', 'notes'];
+const FIELDS = ['name', 'type', 'priority', 'amount', 'targetDate', 'inflation', 'saved', 'monthly', 'stepUp', 'withdrawal', 'strategy', 'useExisting', 'notes'];
 const pick = (body) => Object.fromEntries(FIELDS.filter(k => body[k] !== undefined).map(k => [k, body[k]]));
 
 function validate(data, creating) {

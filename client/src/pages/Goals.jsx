@@ -1,26 +1,31 @@
 import { useEffect, useState } from 'react';
-import { dashboardAPI } from '../lib/api';
+import { accountsAPI, dashboardAPI } from '../lib/api';
 import SectionHeader from '../components/ui/SectionHeader';
 import Spinner from '../components/ui/Spinner';
 import GoalsView from '../components/goals/GoalsView';
 import { useToast } from '../context/ToastContext';
 
-/** Goals (`/goals`): what the money is for. Surplus is the same income-less-spending the Freedom Plan uses. */
+/** Goals (`/goals`): what the money is for, planned together against what you hold and what you save. */
 export default function Goals() {
   const toast = useToast();
-  const [surplus, setSurplus] = useState(null);
+  const [data, setData] = useState(null);
 
   useEffect(() => {
-    dashboardAPI.getSpendingProfile(12)
-      .then(r => setSurplus(Math.max(0, (r.data.income || 0) - (r.data.expense || 0))))
-      .catch(e => { setSurplus(0); toast.error(e.response?.data?.message || 'Failed to load your spending'); });
+    Promise.all([
+      dashboardAPI.getSpendingProfile(12).then(r => r.data).catch(() => null),
+      accountsAPI.getAll().then(r => r.data).catch(() => []),
+      dashboardAPI.getPortfolio().then(r => r.data).catch(() => null),
+    ]).then(([spending, accounts, portfolio]) => {
+      if (!spending) toast.error('Failed to load your spending');
+      setData({ spending, accounts, portfolio });
+    });
   }, [toast]);
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <SectionHeader eyebrow="Goals" title="What the money is for"
-        sub="Each goal priced, dated, funded and given a mix — and the odds it gets there" />
-      {surplus == null ? <Spinner /> : <GoalsView surplus={surplus} />}
+        sub="Every goal planned together — what each can take from what you hold, what to invest each month, and where" />
+      {!data ? <Spinner /> : <GoalsView {...data} />}
     </div>
   );
 }

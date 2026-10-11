@@ -162,12 +162,12 @@ const chronological = (txns) => txns.sort((a, b) =>
  * no rate). Its market value falls back to its cost basis, so the portfolio total stays
  * honest rather than counting it as zero.
  */
-async function priceBook(book) {
+async function priceBook(book, wantLive = true) {
   if (!book.length) return { live: {}, prev: {}, dayBase: {} };
 
   const t1 = t1Ms();
   const [latest, history] = await Promise.all([
-    fetchLatestPrices(book),
+    wantLive ? fetchLatestPrices(book) : {},
     fetchHistoricPrices(book, t1 - PREV_CLOSE_LOOKBACK_DAYS * DAY_MS, t1),
   ]);
 
@@ -182,8 +182,22 @@ async function priceBook(book) {
     const sym     = pos.assetSymbol;
     const basisMs = midnight(pos.lastTransactionDate || pos.firstPurchaseDate || todayMs());
 
-    const prevQuote = lastOnOrBefore(history[sym] || {}, t1)?.value ?? null;
+    const last = lastOnOrBefore(history[sym] || {}, t1);
+    const prevQuote = last?.value ?? null;
     let dayBaseQuote = latest[sym] != null && sessionPrev[sym] != null ? sessionPrev[sym] : prevQuote;
+
+    // Settled basis: no live quote is asked for, so the day's move is the LAST SETTLED
+    // session — the close before T-1's against T-1's own.
+    if (!wantLive) {
+      const before = last ? lastOnOrBefore(history[sym] || {}, last.day - DAY_MS) : null;
+      const settledPrev = before?.value ?? null;
+      live[sym] = resolveUnitPrice(pos, { marketPrice: prevQuote, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: t1 });
+      prev[sym] = live[sym];
+      dayBase[sym] = settledPrev == null ? live[sym] : resolveUnitPrice(pos, {
+        marketPrice: settledPrev, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: (before?.day ?? t1),
+      });
+      continue;
+    }
 
     // A fund reprices once a day, and its NAV for today is published only at night. All
     // day, then, its "latest" NAV IS yesterday's, and comparing it with yesterday's close
@@ -242,7 +256,8 @@ async function priceBook(book) {
  *   true  — value at the LATEST price (what it is worth right now).
  *   false — value at the last SETTLED close, T-1. The same basis the stores use, so a
  *           settled portfolio total agrees with the settled account balances.
- *   Either way the day change is live-vs-T-1, because that is what a day change IS.
+ *   The day change follows the basis: live against the previous session's close, or —
+ *   settled — the last settled session (T-1's close against the close before it).
  *
  * @returns {Promise<{ holdings: Object[], totals: Object }>}
  */
@@ -267,7 +282,7 @@ async function getPortfolio(userId, { live: wantLive = true, account = null } = 
     };
   }
 
-  const { live, prev, dayBase: dayFrom } = await priceBook(book);
+  const { live, prev, dayBase: dayFrom } = await priceBook(book, wantLive);
 
   // `priced` tells the client whether these are real market numbers or a book-value
   // stand-in, so the UI can say so instead of quietly showing a P&L of exactly zero.

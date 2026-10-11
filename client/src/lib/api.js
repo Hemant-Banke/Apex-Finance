@@ -1,3 +1,4 @@
+import { isLive, takesBasis, notePriced } from './pricing';
 import axios from 'axios';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
@@ -31,6 +32,8 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+    // Live prices on: every endpoint that values assets is asked for them.
+    if (isLive() && takesBasis(config.url)) config.params = { ...config.params, fetchLatestBal: 'true' };
     return config;
   },
   (error) => { _endRequest(); return Promise.reject(error); }
@@ -38,7 +41,11 @@ api.interceptors.request.use(
 
 // Response interceptor — handle 401
 api.interceptors.response.use(
-  (response) => { _endRequest(); return response; },
+  (response) => {
+    _endRequest();
+    if (takesBasis(response.config?.url)) notePriced(response.data);
+    return response;
+  },
   (error) => {
     _endRequest();
     // Don't redirect for login/register — wrong credentials should show an in-page error.

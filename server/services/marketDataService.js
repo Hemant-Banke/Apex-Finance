@@ -2,7 +2,7 @@
  * marketDataService — all Yahoo Finance fetching.
  *
  * fetchHistoricPrices: one HTTP request per symbol, all in parallel.
- * fetchLatestPrices:   single batch request via the v8 spark endpoint.
+ * fetchLatestPrices:   live quotes via livePriceService (spark, cached a minute in `currentprices`).
  *
  * Crypto date rule: midnight IST = UTC 18:30 of the previous UTC day,
  * so we shift the query date back by 5h30m before calling Yahoo.
@@ -18,6 +18,7 @@ const {
 } = require('../utils/currency');
 const mfService = require('./mfService');
 const priceCache = require('./priceCacheService');
+const livePrices = require('./livePriceService');
 
 /**
  * Crypto trades round the clock, so its "daily close" is whatever the price was at
@@ -95,14 +96,10 @@ async function fetchDailyCloses(symbol, startMs, endMs, { assetType = 'stock' } 
   return closes;
 }
 
-// Native live quotes, memoised apart from `fetchLatestPrices`, whose memo can hold an INR figure.
-const _nativeMemo = new Map();
+// Today's native quote for a chart's last point, from the same live cache.
 async function _nativeLive(symbol) {
-  const hit = _nativeMemo.get(symbol);
-  if (hit && Date.now() - hit.at < 60 * 1000) return hit.price;
-  const price = (await fetchQuoteMeta([symbol]))[symbol]?.price ?? null;
-  if (price != null) _nativeMemo.set(symbol, { at: Date.now(), price });
-  return price ?? hit?.price ?? null;
+  const q = (await livePrices.getQuotes([symbol]).catch(() => ({})))[symbol];
+  return q?.price ?? null;
 }
 
 /** A symbol's quote currency: the cached one, else Yahoo's chart meta; null if neither knows. */
@@ -160,9 +157,6 @@ function _rateLookup(rateMap) {
 }
 
 const _round2 = (n) => Math.round(n * 100) / 100;
-
-/** Yahoo's spark endpoint rejects (400) any request naming more symbols than this. */
-const SPARK_MAX = 20;
 
 /** USD/troy-oz spot series → INR/gram series for pure (999) metal. */
 function _perGramSeries(spotMap, fxMap, assetType) {
@@ -259,49 +253,15 @@ async function fetchHistoricPrices(holdings, startMs, endMs) {
   return { ...mfSeries, ...out };
 }
 
-/** Last non-null value of an array, or null. */
-function _lastNonNull(arr) {
-  for (let i = arr.length - 1; i >= 0; i--) {
-    if (arr[i] != null) return arr[i];
-  }
-  return null;
-}
-
-// ─── Live price memo ─────────────────────────────────────────────────────────
+// ─── Live prices ─────────────────────────────────────────────────────────────
 //
-// One page load asks for live prices several times over (the summary tiles, the
-// portfolio table, the accounts list). Each was its own Yahoo call, and quotes move
-// between them — so the same holding could be worth one figure in the header and a
-// different one in the table a moment later. A short memo makes a page's numbers agree.
-//
-// It is also the FALLBACK tier: when the live call fails, a price fetched minutes ago is
-// a real market price and is far better than dropping to book cost. Entries are dropped
-// at the day boundary — yesterday's quote is not "the latest price", and the historic
-// close (which portfolioService falls back to next) is the honest answer for that.
+// Raw quotes come from `livePriceService`, cached in Mongo (`currentprices`) for a minute,
+// so a page's tiles, table and list all read the same number and a restart keeps it.
+// Here they are only converted: INR via the day's FX quote, metals to ₹/gram.
+// Called ONLY when live prices are asked for — the settled basis never touches the network.
 
-const LIVE_TTL_MS = 60 * 1000;
-
-const _liveCache = new Map();   // symbol → { price, at, day }
-
-/** Prices still inside the TTL, plus the day's last-known ones as a failure fallback. */
-function _readCache(symbols, today) {
-  const fresh = {};
-  const stale = {};
-  for (const sym of symbols) {
-    const hit = _liveCache.get(sym);
-    if (!hit || hit.day !== today) { _liveCache.delete(sym); continue; }
-    if (Date.now() - hit.at < LIVE_TTL_MS) fresh[sym] = hit.price;
-    else stale[sym] = hit.price;
-  }
-  return { fresh, stale };
-}
-
-function _writeCache(prices, today, prevs = {}) {
-  const at = Date.now();
-  for (const [sym, price] of Object.entries(prices)) {
-    if (price != null) _liveCache.set(sym, { price, prev: prevs[sym] ?? null, at, day: today });
-  }
-}
+// INR previous-session closes behind the last live prices, for `latestPreviousCloses`.
+const _prevInr = new Map();   // symbol → { prev, day }
 
 /**
  * The previous SESSION's close behind each live quote, on the same basis as the price
@@ -312,138 +272,77 @@ function latestPreviousCloses(symbols) {
   const today = toDateStr(todayMs());
   const out = {};
   for (const sym of symbols) {
-    const hit = _liveCache.get(sym);
+    const hit = _prevInr.get(sym);
     if (hit?.day === today && hit.prev != null) out[sym] = hit.prev;
   }
   return out;
 }
 
 /**
- * Fetch live prices for all symbols in a SINGLE request via the v8 spark
- * endpoint (the v7 /quote batch endpoint is gated without a session crumb).
- * The spark response is a top-level object keyed by symbol, each with a `close`
- * array whose last non-null entry is the current price.
+ * Live INR prices for holdings: listed assets from the cached spark quotes (converted with
+ * the day's FX), metals as ₹ per gram of pure metal, Indian funds from AMFI's latest NAV.
+ * Symbols with no quote are omitted — the caller falls back to the last close.
  *
- * Symbols with no data are simply omitted (caller decides the fallback).
- *
- * @param {Array<{assetSymbol: string, assetType: string}>} holdings
- * @returns {Promise<Object.<string, number>>}  { [symbol]: price }
+ * @param {Array<{assetSymbol: string, assetType: string, currency?: string}>} holdings
+ * @returns {Promise<Object.<string, number>>}  { [symbol]: inrPrice }
  */
 async function fetchLatestPrices(holdings) {
   if (!holdings.length) return {};
-
   const today = toDateStr(todayMs());
-
-  // Anything quoted inside the TTL is answered from memory — no call, and the same
-  // number every caller on this page load already saw.
-  const { fresh, stale } = _readCache(holdings.map(h => h.assetSymbol), today);
-  const wanted = holdings.filter(h => !(h.assetSymbol in fresh));
-  if (!wanted.length) return fresh;
-  holdings = wanted;
+  const out = {};
 
   // Indian mutual funds: latest NAV from AMFI (via mfService), never Yahoo.
-  const mfHoldings = holdings.filter(h => mfService.isMfSymbol(h.assetSymbol));
-  const mfPrices   = {};
-  if (mfHoldings.length) {
-    const codes = mfHoldings.map(h => mfService.schemeCodeOf(h.assetSymbol));
-    const navs  = await mfService.getLatestNavs(codes);
-    for (const h of mfHoldings) {
+  const funds = holdings.filter(h => mfService.isMfSymbol(h.assetSymbol));
+  if (funds.length) {
+    const navs = await mfService.getLatestNavs(funds.map(h => mfService.schemeCodeOf(h.assetSymbol)));
+    for (const h of funds) {
       const nav = navs[mfService.schemeCodeOf(h.assetSymbol)];
-      if (nav != null) mfPrices[h.assetSymbol] = nav;
+      if (nav != null) out[h.assetSymbol] = nav;
     }
   }
 
-  /**
-   * Everything we managed to price, newest first, then the day's last-known values for
-   * whatever this attempt could not reach. A quote from a few minutes ago is a real
-   * market price; book cost is not.
-   */
-  const settle = (fetched = {}, prevs = {}) => {
-    _writeCache({ ...mfPrices, ...fetched }, today, prevs);
-    return { ...stale, ...fresh, ...mfPrices, ...fetched };
-  };
+  const rest = holdings.filter(h => !mfService.isMfSymbol(h.assetSymbol));
+  if (!rest.length) return out;
+  const metalSpots  = _metalSpotsNeeded(rest);
+  const listedItems = rest.filter(h => !isPurityAsset(h.assetType));
+  const fxSymbols   = new Set(distinctCurrencies(listedItems).map(fxSymbol));
+  if (metalSpots.length) fxSymbols.add(FX_SYMBOL);
 
-  holdings = holdings.filter(h => !mfService.isMfSymbol(h.assetSymbol));
-  if (!holdings.length) return settle();
-
+  let quotes = {};
   try {
-    const metalSpots  = _metalSpotsNeeded(holdings);
-    const listedItems = holdings.filter(h => !isPurityAsset(h.assetType));
-    const listed      = [...new Set(listedItems.map(h => h.assetSymbol))];
+    quotes = await livePrices.getQuotes([...listedItems.map(h => h.assetSymbol), ...metalSpots, ...fxSymbols]);
+  } catch (e) { console.error('live quotes failed:', e.message); }
+  const price = (sym) => (quotes[sym]?.price != null ? _round2(quotes[sym].price) : null);
+  const prevOf = (sym) => quotes[sym]?.previousClose ?? null;
+  const keepPrev = (sym, v) => { if (v != null) _prevInr.set(sym, { prev: _round2(v), day: today }); };
 
-    const fxSymbols = new Set(distinctCurrencies(listedItems).map(fxSymbol));
-    if (metalSpots.length) fxSymbols.add(FX_SYMBOL);
-
-    const extras  = [...metalSpots, ...fxSymbols];
-    const symbols = [...listed, ...extras];
-    // Every exit keeps the fund NAVs already resolved — a Yahoo failure must not
-    // drop prices that came from a different source entirely.
-    if (!symbols.length) return settle();
-
-    // Spark answers at most SPARK_MAX symbols per request and 400s the whole request
-    // above that — so a book of twenty-odd holdings (plus its FX and metal spots) got NO
-    // live prices at all, fell back to the last close, and reported every day change as
-    // exactly zero. Batches go out concurrently; a batch that fails costs only its own.
-    const batches = [];
-    for (let i = 0; i < symbols.length; i += SPARK_MAX) batches.push(symbols.slice(i, i + SPARK_MAX));
-    const parts = await Promise.all(batches.map(async (batch) => {
-      const url = `https://query1.finance.yahoo.com/v8/finance/spark`
-                + `?symbols=${encodeURIComponent(batch.join(','))}&range=1d&interval=1d`;
-      try {
-        const resp = await fetch(url, { headers: YF_HEADERS, signal: AbortSignal.timeout(8000) });
-        return resp.ok ? await resp.json() : null;
-      } catch { return null; }
-    }));
-    if (parts.every(d => !d)) return settle();
-    const data = Object.assign({}, ...parts.filter(Boolean));
-
-    const quote = (sym) => {
-      const price = _lastNonNull(data?.[sym]?.close || []);
-      return price != null ? Math.round(price * 100) / 100 : null;
-    };
-    // The close of the session before the quote's own — Yahoo's, so both ends match.
-    const prevClose = (sym) => data?.[sym]?.chartPreviousClose ?? data?.[sym]?.previousClose ?? null;
-    const prevs = {};
-
-    // Listed assets, converted to INR when quoted in a foreign currency. A
-    // foreign holding whose FX rate is missing is omitted rather than passed
-    // through at its native value — the caller must not read USD as INR.
-    const out = {};
-    for (const h of listedItems) {
-      const price = quote(h.assetSymbol);
-      if (price == null) continue;
-      const currency = normalizeCurrency(h.currency);
-      const prev = prevClose(h.assetSymbol);
-      if (!currency) {
-        out[h.assetSymbol] = price;
-        if (prev != null) prevs[h.assetSymbol] = _round2(prev);
-        continue;
-      }
-      // One rate for both ends, so the day's move is the asset's, not the rupee's.
-      const fx = quote(fxSymbol(currency));
-      if (fx != null) {
-        out[h.assetSymbol] = _round2(price * fx);
-        if (prev != null) prevs[h.assetSymbol] = _round2(prev * fx);
-      }
-    }
-
-    // Metals: INR per gram of PURE metal, keyed by each holding's own symbol.
-    // The caller scales this by the holding's purity.
-    if (metalSpots.length) {
-      const usdInr = quote(FX_SYMBOL);
-      for (const h of holdings) {
-        if (!isPurityAsset(h.assetType)) continue;
-        const perGram = metalInrPerGram(quote(METAL_SPOT_SYMBOLS[h.assetType]), usdInr, h.assetType);
-        if (perGram != null) out[h.assetSymbol] = _round2(perGram);
-        const prevGram = metalInrPerGram(prevClose(METAL_SPOT_SYMBOLS[h.assetType]), usdInr, h.assetType);
-        if (prevGram != null) prevs[h.assetSymbol] = _round2(prevGram);
-      }
-    }
-
-    return settle(out, prevs);
-  } catch {
-    return settle();
+  // Listed assets, converted when quoted abroad. A foreign holding with no FX quote is
+  // omitted rather than passed through at its native value — USD must never read as INR.
+  for (const h of listedItems) {
+    const p = price(h.assetSymbol);
+    if (p == null) continue;
+    const currency = normalizeCurrency(h.currency);
+    if (!currency) { out[h.assetSymbol] = p; keepPrev(h.assetSymbol, prevOf(h.assetSymbol)); continue; }
+    // One rate for both ends, so the day's move is the asset's, not the rupee's.
+    const fx = price(fxSymbol(currency));
+    if (fx == null) continue;
+    out[h.assetSymbol] = _round2(p * fx);
+    const prev = prevOf(h.assetSymbol);
+    if (prev != null) keepPrev(h.assetSymbol, prev * fx);
   }
+
+  // Metals: INR per gram of PURE metal, keyed by each holding's own symbol; the caller scales by purity.
+  if (metalSpots.length) {
+    const usdInr = price(FX_SYMBOL);
+    for (const h of rest) {
+      if (!isPurityAsset(h.assetType)) continue;
+      const spot = METAL_SPOT_SYMBOLS[h.assetType];
+      const perGram = metalInrPerGram(price(spot), usdInr, h.assetType);
+      if (perGram != null) out[h.assetSymbol] = _round2(perGram);
+      keepPrev(h.assetSymbol, metalInrPerGram(prevOf(spot), usdInr, h.assetType));
+    }
+  }
+  return out;
 }
 
 /**

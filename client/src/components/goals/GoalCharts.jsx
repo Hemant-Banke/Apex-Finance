@@ -90,35 +90,3 @@ export function GlidePathChart({ rows }) {
     </ResponsiveContainer>
   );
 }
-
-function NeedTip({ active, payload, goals }) {
-  if (!active || !payload?.length) return null;
-  const p = payload[0].payload;
-  const rows = goals.filter(g => p[g.id] > 0);
-  return (
-    <TooltipPanel minWidth={190}>
-      <Head>{p.year}</Head>
-      <div style={{ padding: '8px 12px' }}>
-        {rows.map(g => <Line2 key={g.id} label={g.name} value={money(p[g.id])} />)}
-        {rows.length > 1 && <Line2 label="Total" value={money(p.total)} tone="var(--color-accent)" />}
-      </div>
-    </TooltipPanel>
-  );
-}
-
-/** When the money is needed: each payout year, stacked by goal in its own colour. */
-export function NeedsChart({ data, goals }) {
-  return (
-    <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={data} margin={{ top: 8, right: 4, left: 0, bottom: 0 }} barCategoryGap="22%">
-        <XAxis dataKey="year" tick={AXIS} axisLine={false} tickLine={false} interval="preserveStartEnd" minTickGap={14} />
-        <YAxis tick={AXIS} axisLine={false} tickLine={false} width={56} tickFormatter={v => axisCompact(v, '₹')} />
-        <Tooltip content={<NeedTip goals={goals} />} cursor={{ fill: 'var(--color-bg-elevated)', opacity: 0.4 }} isAnimationActive={false} />
-        {goals.map(g => (
-          <Bar key={g.id} dataKey={g.id} stackId="need" fill={g.color} isAnimationActive={false}
-            stroke="var(--color-bg-card)" strokeWidth={1} />
-        ))}
-      </BarChart>
-    </ResponsiveContainer>
-  );
-}

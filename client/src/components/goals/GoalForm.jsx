@@ -3,6 +3,7 @@ import { CalendarDays, Minus, Plus } from 'lucide-react';
 import ApexLogo from '../ui/ApexLogo';
 import Modal from '../ui/Modal';
 import Button from '../ui/Button';
+import Switch from '../ui/Switch';
 import SegmentedControl from '../ui/SegmentedControl';
 import StepSlider from '../ui/StepSlider';
 import TypePicker from '../forms/TypePicker';
@@ -272,7 +273,11 @@ export default function GoalForm({ open, onClose, onSave, goal, initialType }) {
             </div>
           )}
 
-          <Button type="submit" variant="gold" disabled={!valid || saving} style={{ width: '100%', marginTop: 'auto' }}>
+          {/* Whether the plan may earmark savings already held for this goal, or fund it from monthly money alone. */}
+          <Switch className="goal-existing" on={f.useExisting !== false} onChange={on => set({ useExisting: on })}
+            label="Count money I already have"
+            sub={f.useExisting === false ? 'Starts from scratch — monthly money only' : 'The plan may set some of your savings aside for it'} />
+          <Button type="submit" variant="gold" disabled={!valid || saving} style={{ width: '100%' }}>
             {saving ? 'Saving…' : goal ? 'Save goal' : 'Add goal'}
           </Button>
         </aside>
