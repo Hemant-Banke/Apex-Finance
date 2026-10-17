@@ -44,7 +44,7 @@ export default function PerformancePanel({ totals, account, id, sub }) {
         </p>
       )}
 
-      <Divider gilt margin={26} />
+      <Divider margin={26} />
       <ContributionBreakdown account={account} bare />
     </Card>
   );

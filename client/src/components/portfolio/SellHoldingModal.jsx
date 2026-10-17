@@ -45,16 +45,7 @@ export default function SellHoldingModal({ holding, accounts = [], defaultAccoun
           {holding.symbol}
         </span>
       ) : undefined}
-      titleSuffix={holding.type ? (
-        <span style={{
-          flexShrink: 0, padding: '3px 9px', borderRadius: 999,
-          fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-          color: 'var(--color-accent)', background: 'var(--color-accent-dim)',
-          border: '1px solid var(--color-accent-dim)', whiteSpace: 'nowrap',
-        }}>
-          {assetTypeLabel(holding.type)}
-        </span>
-      ) : undefined}
+      tag={holding.type ? assetTypeLabel(holding.type) : undefined}
       titlePrefix={
         <AssetIcon symbol={holding.symbol} name={holding.name} type={holding.type} size={40} />
       }

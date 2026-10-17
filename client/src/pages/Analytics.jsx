@@ -1,6 +1,6 @@
 import { LineChart } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { dashboardAPI, accountsAPI } from '../lib/api';
+import { dashboardAPI, accountsAPI, networthAPI } from '../lib/api';
 import { getCategoryMap, describeCategory } from '../lib/categoryNames';
 import {
   formatCurrency, compactIfLarge, formatPct, pnlColor,
@@ -21,6 +21,7 @@ import MonthlyLedger from '../components/charts/MonthlyLedger';
 import HoldingsBook from '../components/portfolio/HoldingsBook';
 import AllocationPanel from '../components/portfolio/AllocationPanel';
 import PerformancePanel from '../components/portfolio/PerformancePanel';
+import { paddedDays } from '../lib/indicators';
 
 /**
  * The month ranges, picked ON the section they govern (a `SegmentedControl` in the
@@ -37,6 +38,9 @@ function Empty({ text, height = 220 }) {
     </div>
   );
 }
+
+// The asset book alone, no cash or debt; module-level so PriceGrapher's fetch effect stays stable.
+const fetchNetAssets = (days, growth, opts) => networthAPI.getDaily(paddedDays(days, opts), growth, 'assets').then(res => res.data);
 
 export default function Analytics() {
   const toast = useToast();
@@ -118,7 +122,6 @@ export default function Analytics() {
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       <SectionHeader
-        eyebrow="Analytics"
         title="Performance"
         sub="How the portfolio and the cashflow have actually done"
       />
@@ -182,7 +185,15 @@ export default function Analytics() {
         />
       ) : null}
 
-      <PriceGrapher height={280} emptyText="Add transactions to see your net worth trend" growthCapable />
+      <PriceGrapher
+        height={280}
+        fetchData={fetchNetAssets}
+        title="Net assets"
+        valueLabel="Net assets"
+        viewLabels={{ complete: 'Complete', growth: 'Growth', hint: 'What the investments themselves did, with every buy and sell removed' }}
+        emptyText="Add an asset to see how your investments have grown"
+        growthCapable
+      />
 
       {/* ── Portfolio ─────────────────────────────────────────────────────── */}
       {hasPortfolio ? (
@@ -228,7 +239,7 @@ export default function Analytics() {
           <>
             <CashflowChart rows={ie} />
 
-            <Divider gilt margin={22} />
+            <Divider margin={22} />
 
             <p className="eyebrow" style={{ marginBottom: 14 }}>Month by month</p>
             <MonthlyLedger

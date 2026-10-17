@@ -8,7 +8,7 @@ import Card from './Card';
  * the portfolio's market value — and every one of them had that figure sitting in a
  * plain block with its own components in a SEPARATE card underneath, which put the
  * answer and its parts on equal footing. This is the shape that fixes it, in one place
- * so four pages cannot drift: the gilt top-rule the system reserves for a headline, the
+ * so four pages cannot drift: the headline surface (a brighter edge and deeper shadow), the
  * figure and its identity up top, and the components in a recessed band beneath, where
  * being subordinate is the whole point.
  *
@@ -21,7 +21,7 @@ import Card from './Card';
  */
 export default function Masthead({ lead, action, band, to, title }) {
   const card = (
-    <Card gilt flush>
+    <Card gilt garden flush>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: 16, flexWrap: 'wrap', padding: '22px 24px 20px',
@@ -34,7 +34,7 @@ export default function Masthead({ lead, action, band, to, title }) {
         <div style={{
           padding: '18px 24px 22px',
           borderTop: '1px solid var(--color-border-subtle)',
-          background: 'var(--color-bg-secondary)',
+          background: 'var(--garden-band)',
         }}>
           {band}
         </div>

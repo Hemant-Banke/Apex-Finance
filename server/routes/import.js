@@ -11,6 +11,7 @@ const { getUserCategoryTaxonomy } = require('../services/categoryService');
 const { resolveStatementAssets }  = require('../services/symbolResolver');
 const { MISC_CATEGORY, normalizeCategory }  = require('../lib/categoryRules');
 const conf                = require('../lib/confidence');
+const { buildFeatures }   = require('../lib/txnFeatures');
 
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const dayName = d => { const x = new Date(d); return isNaN(x) ? '' : DOW[x.getUTCDay()]; };
@@ -99,7 +100,16 @@ async function applySmartCategories(userId, result) {
   if (pending.length && llmService.isLLMAvailable()) {
     try {
       const summary = await categoryProfile.getProfileSummary(userId, taxonomy);
-      const items = pending.map(t => ({ id: t.id, type: t.type, narration: t.narration, amount: t.amount, day: dayName(t.date) }));
+      // Payee recurrence is measured over every cash row in the file, not just the pending ones.
+      const feats = buildFeatures(cashRows);
+      const items = pending.map(t => {
+        const f = feats[t.id] || {};
+        return {
+          id: t.id, type: t.type, narration: t.narration, amount: t.amount,
+          day: f.day ?? dayName(t.date), dom: f.dom, hour: f.hour,
+          payee: f.payee, payeeKind: f.payeeKind, payeeCount: f.payeeCount, payeeDays: f.payeeDays, payeeMedian: f.payeeMedian,
+        };
+      });
       const preds = await llmService.categorizeTransactions(items, taxonomy, summary);
       for (const t of pending) {
         const { code, confidence } = preds[t.id] || {};

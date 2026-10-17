@@ -7,7 +7,7 @@ const RULES = [
   { kw: ['STARBUCKS', 'CCD', 'CAFE', 'COFFEE', 'TEA POINT', 'CHAI', 'BLUE TOKAI'], expense: 'tp_food/ts_coffee' },
 
   // ─── Transport ───
-  { kw: ['UBER', 'OLA CABS', 'RAPIDO', 'BOUNCE', 'YULU', 'MERU', 'QUICK RIDE', 'BLUEBIRD'], expense: 'tp_transport/ts_rideshare' },
+  { kw: ['UBER', 'OLA CABS', 'OLACABS', 'ANI TECHNOLOGIES', 'RAPIDO', 'ROPPEN', 'NAMMA YATRI', 'NAMMAYATRI', 'BLUSMART', 'INDRIVE', 'SAVAARI', 'BOUNCE', 'YULU', 'MERU', 'QUICK RIDE', 'BLUEBIRD'], expense: 'tp_transport/ts_rideshare' },
   { kw: ['PETROL', 'DIESEL', 'FUEL', 'BPCL', 'HPCL', 'IOCL', 'HP PETRO', 'BHARAT PETROLEUM', 'INDIAN OIL', 'SHELL', 'NAYARA'], expense: 'tp_transport/ts_fuel' },
   { kw: ['IRCTC', 'RAILWAY', 'METRO', 'BMTC', 'KSRTC', 'REDBUS', 'BUS TICKET', 'TRAIN TICKET'], expense: 'tp_transport/ts_public_transit' },
   { kw: ['FASTAG', 'TOLL', 'PARKING', 'NWD', 'ATM CASH'], expense: 'tp_transport/ts_parking' },

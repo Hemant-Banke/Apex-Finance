@@ -2,18 +2,19 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 import { marketsAPI, marketAPI, dashboardAPI } from '../lib/api';
-import { formatPct, pnlColor, dayLabel, fiscalQuarter, fiscalYear, formatCount } from '../lib/utils';
+import { formatPct, pnlColor, dayLabel, fiscalQuarter, fiscalYear, formatCount, monthLabel } from '../lib/utils';
 import { stockPath, globalStockPath, companyMoney, backTarget, axisFormatFor, MARKET_RANGES, toChartSeries } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
 import Delta from '../components/ui/Delta';
-import BackLink from '../components/ui/BackLink';
+import { PageBar } from '../components/layout/TopBar';
 import ShowMore from '../components/ui/ShowMore';
 import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import Ownership from '../components/stock/Ownership';
+import BusinessProfile from '../components/stock/BusinessProfile';
 import CompanyFinancials from '../components/stock/CompanyFinancials';
 import { StatGrid, RangeBar, Performance } from '../components/stock/PricePerformance';
 import PositionCard from '../components/portfolio/PositionCard';
@@ -47,7 +48,12 @@ function Valuation({ v, h, money }) {
   const de = h?.debtToEquity;
   // The filings' dates, so "latest quarter" and "last balance sheet" say WHICH.
   const q = money.home ? fiscalQuarter(h?.latestQuarter)?.fq : fiscalQuarter(h?.latestQuarter)?.months;
-  const fy = h?.balanceSheetDate ? (money.home ? fiscalYear(h.balanceSheetDate) : `FY${h.balanceSheetDate.slice(2, 4)}`) : null;
+  // A fiscal year-end is named as its year; a half-year balance sheet (Sep) by its month.
+  const yearOf = (d) => (money.home ? fiscalYear(d) : `FY${d.slice(2, 4)}`);
+  const fy = h?.roeDate ? yearOf(h.roeDate) : null;
+  const bsLabel = h?.balanceSheetDate
+    ? (h.balanceSheetDate === h.roeDate ? yearOf(h.balanceSheetDate) : `balance sheet of ${monthLabel(h.balanceSheetDate)}`)
+    : null;
   const unit = money.home ? 'rupee' : 'unit';
 
   return (
@@ -64,7 +70,7 @@ function Valuation({ v, h, money }) {
         { label: 'Operating margin', value: h?.operatingMargin != null ? `${h.operatingMargin.toFixed(1)}%` : null,
           note: h?.netMargin != null ? `Net margin ${h.netMargin.toFixed(1)}% · last four quarters` : null },
         { label: 'Debt to equity', value: de != null ? de.toFixed(2) : null,
-          note: de == null ? null : `${de < 0.5 ? 'Lightly' : de < 1.5 ? 'Moderately' : 'Heavily'} borrowed · ${fy}` },
+          note: de == null ? null : `${de < 0.5 ? 'Lightly' : de < 1.5 ? 'Moderately' : 'Heavily'} borrowed · ${bsLabel}` },
         { label: 'Revenue growth', value: h?.revenueGrowth != null ? formatPct(h.revenueGrowth, 1) : null, tone: pnlColor(h?.revenueGrowth), note: q ? `${q}, year on year` : null },
         { label: 'Profit growth', value: h?.profitGrowth != null ? formatPct(h.profitGrowth, 1) : null, tone: pnlColor(h?.profitGrowth), note: q ? `${q}, year on year` : null },
         { label: 'Dividend yield', value: v.dividendYield != null ? `${v.dividendYield.toFixed(2)}%` : null,
@@ -339,22 +345,21 @@ export default function Stock({ global = false }) {
   const bench = data?.benchmark;
   const benchmarks = useMemo(() => (bench && !BENCHMARKS.some(b => b.symbol === bench.symbol) ? [bench, ...BENCHMARKS] : BENCHMARKS), [bench]);
 
-  // The price chart fetches its own candles per range (memoised on the symbol, or
+  // The price chart fetches its own closes per range (memoised on the symbol, or
   // PriceGrapher's fetch effect would re-run on every render).
-  const fetchPrice = useCallback((days, growth) => marketAPI.ohlc(ysym, days).then(r => toChartSeries(r.data?.candles, growth)), [ysym]);
-  const fetchOHLC  = useCallback((days) => marketAPI.ohlc(ysym, days).then(r => r.data?.candles || []), [ysym]);
+  const fetchPrice = useCallback((days, growth, opts) => marketAPI.ohlc(ysym, days, opts?.pad).then(r => toChartSeries(r.data?.candles, growth)), [ysym]);
 
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <BackLink to={back.to}>{back.label}</BackLink>
+        <PageBar back={back} title={symbol.toUpperCase()} />
         <Card><p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
           {error === 'notfound' ? `No ${global ? '' : 'NSE-listed '}company found for “${symbol}”.` : 'This company could not be loaded right now. Try again shortly.'}
         </p></Card>
       </div>
     );
   }
-  if (!data || data.symbol !== symbol.toUpperCase()) return <Spinner />;
+  if (!data || data.symbol !== symbol.toUpperCase()) return <><PageBar back={back} title={symbol.toUpperCase()} /><Spinner /></>;
 
   const { quote, profile, valuation, health, performance, analysts, earnings, ownership, peers, financials, experience } = data;
   const sameDay = quote.change != null ? quote.change : null;
@@ -363,7 +368,7 @@ export default function Stock({ global = false }) {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <BackLink to={back.to}>{back.label}</BackLink>
+      <PageBar back={back} title={data.name} />
 
       <SectionHeader
         eyebrow={[profile.sector, profile.industry].filter(Boolean).join(' · ') || 'Company'}
@@ -412,11 +417,11 @@ export default function Stock({ global = false }) {
       <PositionCard unitLabel="Shares"
         positions={positions.map(h => ({ qty: h.qty, invested: h.invested, value: h.value, pnl: h.unrealisedPnl, dayChange: h.dayChange }))} />
 
-      {/* The app's one price chart: price or candles, and its growth view against the
+      {/* The app's one price chart: the price line, and its growth view against the
           home index (already overlaid) or any other benchmark via "+". */}
       <PriceGrapher key={data.symbol} title="Share price" valueLabel="Close" formatValue={money.price}
         axisFormat={money.home ? undefined : axisFormatFor(data.money?.currency)}
-        fetchData={fetchPrice} fetchOHLC={fetchOHLC} ranges={MARKET_RANGES} defaultRange="1Y"
+        fetchData={fetchPrice} ranges={MARKET_RANGES} defaultRange="1Y"
         growthCapable benchmarks={benchmarks} viewLabels={{ complete: 'Price', growth: 'vs market', hint: 'Indexed to 100 at the start of the range, against the benchmarks you add' }}
         defaultCompare={[benchmark.symbol]} emptyText="No price history for this stock" />
       {performance?.returns && (
@@ -425,6 +430,7 @@ export default function Stock({ global = false }) {
       )}
       <HoldingExperience exp={experience} name={data.symbol} benchmark={benchmark} currency={data.money?.currency || 'INR'} />
       <CompanyFinancials financials={financials} money={money} />
+      <BusinessProfile symbol={data.symbol} global={global} />
       <Valuation v={valuation} h={health} money={money} />
       {(analysts || earnings?.surprises?.length > 0) && <Analysts a={analysts} price={quote.price} earnings={earnings} money={money} />}
       <Ownership ownership={ownership} money={money} />

@@ -61,7 +61,7 @@ export default function Plan() {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <SectionHeader eyebrow="Freedom Plan" title="Independence"
+      <SectionHeader title="Independence"
         sub="When work becomes optional — from what you have, what you spend and what you put away" />
 
       <FreedomHero m={m} s={s} />

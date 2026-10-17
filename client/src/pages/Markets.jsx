@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, RefreshCw, Search } from 'lucide-react';
+import { ArrowUpRight, RefreshCw } from 'lucide-react';
 import { marketsAPI, marketAPI } from '../lib/api';
 import { formatPct, pnlColor, formatCount } from '../lib/utils';
-import { assetPath, formatLevel, MARKET_RANGES, toChartSeries, viewPathFor } from '../lib/markets';
+import { assetPath, formatLevel, MARKET_RANGES, toChartSeries } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import { useToast } from '../context/ToastContext';
 import Spinner from '../components/ui/Spinner';
@@ -12,12 +11,11 @@ import Delta from '../components/ui/Delta';
 import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import QuoteTile from '../components/markets/QuoteTile';
-import Button from '../components/ui/Button';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import SectorMap from '../components/markets/SectorMap';
 import FlowsPanel from '../components/markets/FlowsPanel';
-import MarketSearch from '../components/market/MarketSearch';
-import Modal from '../components/ui/Modal';
+import { PageBar } from '../components/layout/TopBar';
+import { paddedDays } from '../lib/indicators';
 
 /**
  * The Indian market — not the user's money, the market's.
@@ -31,11 +29,7 @@ import Modal from '../components/ui/Modal';
 // Every benchmark but the line it would be compared against. Module-level, so the
 // chart's colour/label lookups are not rebuilt every render.
 const NIFTY_BENCHMARKS = BENCHMARKS.filter(b => b.symbol !== '^NSEI');
-const fetchNifty = (days, growth) => marketAPI.indexSeries('^NSEI', days).then(r => toChartSeries(r.data, growth));
-
-/** Anything with a market to show — a company, an index, a metal, a coin, a fund. A
- *  self-priced asset (an FD, a flat) has none, so the search does not offer it. */
-const isViewable = (s) => viewPathFor(s) != null;
+const fetchNifty = (days, growth, opts) => marketAPI.indexSeries('^NSEI', paddedDays(days, opts)).then(r => toChartSeries(r.data, growth));
 
 // NSE's "01-Oct-2026 15:30" → "1 Oct, 3:30 pm".
 function nseTime(s) {
@@ -47,7 +41,6 @@ function nseTime(s) {
 
 export default function Markets() {
   const toast = useToast();
-  const navigate = useNavigate();
   const [overview, setOverview] = useState(null);
   const [flows, setFlows]       = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -57,7 +50,6 @@ export default function Markets() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [updatedAt, setUpdatedAt]   = useState(null);
-  const [searchOpen, setSearchOpen] = useState(false);
 
   const load = useCallback((fresh) => Promise.all([
     marketsAPI.overview(fresh)
@@ -89,33 +81,24 @@ export default function Markets() {
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <SectionHeader
-        eyebrow="Markets"
         title="India"
         sub={`Indices, asset classes, sectors and where the money is going${overview?.asof ? ` · NSE as of ${nseTime(overview.asof)}` : ''}`}
-        action={
-          <div className="flex items-center" style={{ gap: 10 }}>
-            {/* Search is the page's call to action — a gold button with its word — and
-                opens the same Find-an-asset dialog the Add-asset flow uses, here offering
-                indices too. Refresh stays a quiet icon beside it. */}
-            <div className="status-pill">
-              <span className="status-pill-text">
-                <span className="status-pill-dot" />
-                {refreshing ? 'Refreshing…' : updatedAt
-                  ? <>Updated <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>{updatedAt.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span></>
-                  : 'Live'}
-              </span>
-              <button type="button" onClick={refresh} disabled={refreshing} className="refresh-btn"
-                aria-label="Refresh" title="Refresh market data">
-                <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
-              </button>
-            </div>
-            <Button variant="gold" icon={Search} onClick={() => setSearchOpen(true)} style={{ height: 38 }}
-              title="Find a company, index, metal, coin or fund">
-              Search
-            </Button>
-          </div>
-        }
       />
+      {/* Freshness and refresh live in the top bar; search there is global. */}
+      <PageBar actions={
+        <div className="status-pill">
+          <span className="status-pill-text">
+            <span className="status-pill-dot" />
+            {refreshing ? 'Refreshing…' : updatedAt
+              ? <>Updated <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>{updatedAt.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}</span></>
+              : 'Live'}
+          </span>
+          <button type="button" onClick={refresh} disabled={refreshing} className="refresh-btn"
+            aria-label="Refresh" title="Refresh market data">
+            <RefreshCw size={14} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+          </button>
+        </div>
+      } />
 
       {/* ── Masthead: the market's one number, and how broad the move under it is ──
           The Nifty says what the fifty largest did; breadth says whether the rest of the
@@ -211,14 +194,6 @@ export default function Markets() {
         Flows are provisional and in ₹ crore.
       </p>
 
-      <Modal open={searchOpen} onClose={() => setSearchOpen(false)}
-        align="top" wide className="modal-fade-down"
-        eyebrow="Markets" title="Find an asset"
-        subtitle="Companies, indices, gold and silver, crypto, ETFs and mutual funds.">
-        <MarketSearch browse filter={isViewable}
-          placeholder="Search a company, index, metal, coin or fund…"
-          onSelect={sec => { setSearchOpen(false); navigate(viewPathFor(sec)); }} />
-      </Modal>
     </div>
   );
 }

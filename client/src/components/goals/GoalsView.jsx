@@ -10,6 +10,7 @@ import Button from '../ui/Button';
 import Spinner from '../ui/Spinner';
 import SectionHeader from '../ui/SectionHeader';
 import ConfirmModal from '../ui/ConfirmModal';
+import { PageBar } from '../layout/TopBar';
 import Masthead, { MastheadFigure } from '../ui/Masthead';
 import GardenEmpty from '../ui/GardenEmpty';
 import GoalForm from './GoalForm';
@@ -122,6 +123,10 @@ export default function GoalsView({ spending, accounts, portfolio }) {
 
   return (
     <>
+      <PageBar actions={<>
+        <Button variant="secondary" icon={Info} disabled={!plan} onClick={() => setMethod(true)}>How it works</Button>
+        <Button variant="gold" icon={Plus} onClick={() => setForm({})}>Add goal</Button>
+      </>} />
       <Masthead
         lead={<>
           <p className="eyebrow" style={{ marginBottom: 12 }}>
@@ -132,12 +137,6 @@ export default function GoalsView({ spending, accounts, portfolio }) {
             what they cost when they fall due · {t ? `${t.onTarget} of ${t.count} on target` : 'planning…'}
           </p>
         </>}
-        action={
-          <div className="flex items-center" style={{ gap: 8 }}>
-            <Button variant="secondary" icon={Info} disabled={!plan} onClick={() => setMethod(true)}>How it works</Button>
-            <Button variant="gold" icon={Plus} onClick={() => setForm({})}>Add goal</Button>
-          </div>
-        }
         band={<>
           {/* This month's goal money, by goal; what is left is spare. */}
           <div style={{ display: 'flex', height: 6, gap: 2, borderRadius: 99, overflow: 'hidden', background: 'var(--color-bg-elevated)', marginBottom: 16 }}

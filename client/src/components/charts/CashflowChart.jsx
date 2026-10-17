@@ -3,7 +3,8 @@ import {
   ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, ReferenceLine,
 } from 'recharts';
 import ChartTooltip from './ChartTooltip';
-import { MONTHS_SHORT, axisCompact, pnlColor } from '../../lib/utils';
+import BandCursor from './BandCursor';
+import { MONTHS_SHORT, axisCompact, pnlColor, chartBandWidth } from '../../lib/utils';
 
 /** "2026-03" → "Mar" (and "Jan 26" at a year's turn, so a 24-month axis stays legible). */
 const monthTick = (key) => {
@@ -20,26 +21,7 @@ function NetDot({ cx, cy, payload }) {
     stroke="var(--color-bg-card)" strokeWidth={1.5} />;
 }
 
-/**
- * The hovered month, as a soft band behind its bars rather than a line through them.
- *
- * In a ComposedChart Recharts draws the tooltip cursor as a full-height hairline, which
- * cut straight through the bars and the net line and read as a fourth series. A band the
- * width of the month's slot says "this month" without drawing over the data. `count` is
- * the number of slots, so the band's width follows the category spacing.
- */
 const Y_AXIS_W = 50;
-const bandWidth = (plotWidth, count) => Math.max(14, (plotWidth / count) * 0.78);
-
-function MonthBand({ points, top, height, left, width, count }) {
-  const x = points?.[0]?.x;
-  if (x == null || !count) return null;
-  const w = bandWidth(width, count);
-  // Clamped into the plot so the first and last months' bands do not overhang it.
-  const bx = Math.min(Math.max(x - w / 2, left), left + width - w);
-  return <rect x={bx} y={top} width={w} height={height} rx={6}
-    fill="var(--color-text-primary)" fillOpacity={0.045} pointerEvents="none" />;
-}
 
 /**
  * Monthly cashflow: income and expense bars with net cashflow as a line on the SAME axis.
@@ -62,7 +44,7 @@ export default function CashflowChart({ rows, height = 260, incomeLabel = 'Incom
     return () => ro.disconnect();
   }, []);
   const tipOffset = chartRows.length && boxWidth
-    ? bandWidth(boxWidth - Y_AXIS_W - 4, chartRows.length) / 2 + 10
+    ? Math.max(14, chartBandWidth(boxWidth - Y_AXIS_W - 4, chartRows.length)) / 2 + 10
     : 10;
   return (
     <div ref={boxRef} style={{ width: '100%' }}>
@@ -72,7 +54,7 @@ export default function CashflowChart({ rows, height = 260, incomeLabel = 'Incom
             tickFormatter={monthTick} interval="preserveStartEnd" />
           <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false}
             tickFormatter={v => axisCompact(v, '₹')} width={Y_AXIS_W} />
-          <Tooltip cursor={<MonthBand count={chartRows.length} />} content={<ChartTooltip />} offset={tipOffset} isAnimationActive={false} />
+          <Tooltip cursor={<BandCursor count={chartRows.length} />} content={<ChartTooltip />} offset={tipOffset} isAnimationActive={false} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
           {/* A month that spent more than it earned has a NEGATIVE cashflow, so the
               zero line is drawn — without it a dot below the bars' floor reads as

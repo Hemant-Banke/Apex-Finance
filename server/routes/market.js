@@ -137,24 +137,28 @@ router.get('/price', asyncHandler(async (req, res) => {
   res.json(await withFx(last.value, toDateStr(last.day)));
 }));
 
-// GET /api/market/ohlc?symbol=AAPL&days=30
+// GET /api/market/ohlc?symbol=AAPL&days=30[&pad=60]
 // OHLC candles over the given number of days. The interval is auto-selected so the
 // series stays a readable length: ≤2 days → hourly, ≤365 → daily, beyond that weekly.
+// `pad` adds history BEFORE the window at the window's own interval — a chart's
+// indicators warm up on it (a 200-day average needs 200 days before its first point).
+// No `days` is the whole history.
 router.get('/ohlc', asyncHandler(async (req, res) => {
   const { symbol, days } = req.query;
   if (!symbol) throw badRequest('symbol is required');
 
   const daysNum = days ? parseInt(days, 10) : null;
+  const pad = Math.min(Math.max(parseInt(req.query.pad, 10) || 0, 0), 2000);
 
   let interval = '1d';
   if (daysNum && daysNum <= 2)        interval = '1h';
   else if (!daysNum || daysNum > 365) interval = '1wk';
 
   const now  = nowMs();
-  const span = (daysNum || 10 * 365) * DAY_MS;   // no window given → 10 years
+  const span = daysNum ? (daysNum + pad) * DAY_MS : now;   // no window → since 1970, i.e. all of it
 
   const result = await fetchChart(symbol, {
-    period1: Math.floor((now - span) / 1000),
+    period1: Math.max(0, Math.floor((now - span) / 1000)),
     period2: Math.floor(now / 1000),
     interval,
   }, 10000);
@@ -185,7 +189,7 @@ router.get('/ohlc', asyncHandler(async (req, res) => {
   res.json({ symbol, interval, candles });
 }));
 
-// GET /api/market/index-series?symbol=%5ENSEI&days=N   (or symbol=_METAL:gold|silver | AMFI:<code>)
+// GET /api/market/index-series?symbol=%5ENSEI&days=N   (or symbol=_METAL:gold|silver | AMFI:<code> | RATE:<pct>)
 // A day-by-day CLOSE series for a market index/benchmark — used by the growth view's
 // comparison overlay, so it needs one close per CALENDAR day (carried forward across
 // non-trading days), not OHLC candles: it gets re-based against the app's own
@@ -200,8 +204,18 @@ router.get('/index-series', asyncHandler(async (req, res) => {
   const inr    = String(req.query.symbol).startsWith('INR:');
   const symbol = inr ? String(req.query.symbol).slice(4) : String(req.query.symbol);
 
-  const daysNum = Math.max(1, parseInt(days, 10) || 3650);
+  // No window is the whole history (60 years covers any index or fund we chart).
+  const daysNum = Math.max(1, parseInt(days, 10) || 60 * 365);
   const now     = nowMs();
+
+  // `RATE:<pct>` — a custom yardstick: a fixed annual return, compounded day by day.
+  const rate = /^RATE:(\d{1,3}(?:\.\d+)?)$/.exec(symbol)?.[1];
+  if (rate) {
+    const end = todayMs(), start = end - daysNum * DAY_MS, daily = Math.pow(1 + Number(rate) / 100, 1 / 365);
+    const out = [];
+    for (let t = start, i = 0; t <= end; t += DAY_MS, i++) out.push({ date: toDateStr(t), close: 100 * Math.pow(daily, i) });
+    return res.json(out);
+  }
 
   // `_METAL:gold` / `_METAL:silver` — DOMESTIC metal, INR per gram, priced exactly as a
   // physical-metal holding is (spot future × the day's rupee × the duty/GST premium).

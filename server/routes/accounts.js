@@ -10,7 +10,7 @@ const { protect }                       = require('../middleware/auth');
 const { asyncHandler }                  = require('../middleware/asyncHandler');
 const { notFound }                      = require('../utils/httpError');
 const { DAY_MS, ACCOUNT_TYPES }         = require('../utils/constants');
-const { midnight, toDateStr, todayStr } = require('../utils/helpers');
+const { midnight, toDateStr, todayStr, todayMs } = require('../utils/helpers');
 const { sliceStartIndex }               = require('../utils/tsHelpers');
 const { getAccountBalance, getAccountAssetBalance, accountSparkline } = require('../services/accountBalance');
 const txService           = require('../services/transactionService');
@@ -117,18 +117,18 @@ router.get('/:id/daily', asyncHandler(async (req, res) => {
   const cashTS     = doc.cashTS  || [];
   const assetTS    = doc.assetTS || [];
   const docStartMs = midnight(doc.startDate);
-  const from       = sliceStartIndex(docStartMs, midnight(doc.endDate), req.query.days);
+  const today      = todayMs();
 
-  const result = [];
-  for (let i = from; i < cashTS.length - 1; i++) {
+  // Every settled day, then a carried-forward row for each day a stale store has not
+  // reached, then today — so a row's index is always its day offset from the start.
+  const rows = [];
+  for (let i = 0; i < cashTS.length - 1; i++) {
     const cashValue  = cashTS[i] ?? 0;
     const assetValue = assetTS[i] ?? null;
-    result.push({
-      date:       toDateStr(docStartMs + i * DAY_MS),
-      cashValue,
-      assetValue,
-      totalValue: cashValue + (assetValue ?? 0),
-    });
+    rows.push({ date: toDateStr(docStartMs + i * DAY_MS), cashValue, assetValue, totalValue: cashValue + (assetValue ?? 0) });
+  }
+  for (let d = docStartMs + rows.length * DAY_MS; rows.length && d < today; d += DAY_MS) {
+    rows.push({ ...rows[rows.length - 1], date: toDateStr(d) });
   }
 
   // Today always ends the series, on the basis asked for: T cash plus the T-1 close, or
@@ -138,32 +138,23 @@ router.get('/:id/daily', asyncHandler(async (req, res) => {
     const assetValue = account.isDebt ? 0 : (await getAccountAssetBalance(
       account, req.user, req.query.fetchLatestBal === 'true', doc, holdingsDoc?.holdings || [],
     )).value;
-    result.push({ date: todayStr(), cashValue, assetValue, totalValue: cashValue + assetValue });
+    rows.push({ date: todayStr(), cashValue, assetValue, totalValue: cashValue + assetValue });
   }
 
-  if (req.query.growth === 'true' && cashTS.length > 1) {
-    // Always the FULL settled history (startDate → T-1), regardless of the `days`
-    // window being displayed — zooming in shows where the index sits today, not a
-    // rebase to 100 for that window.
-    const fullValuesTS = [];
-    for (let i = 0; i < cashTS.length - 1; i++) {
-      fullValuesTS.push((cashTS[i] ?? 0) + (assetTS[i] ?? 0));
-    }
-    // A live today point joins the index too, or it fell past its end and came back null.
-    const today = result[result.length - 1];
-    if (today?.date === todayStr()) fullValuesTS.push(today.totalValue);
-    const endMs    = docStartMs + (fullValuesTS.length - 1) * DAY_MS;
+  if (req.query.growth === 'true' && rows.length > 1) {
+    // Indexed over the FULL history; the client rebases the visible window to 100.
+    const startMs  = midnight(rows[0].date);
     const growthTS = await dvService.computeGrowthIndex(
-      req.user._id, docStartMs, endMs, fullValuesTS, account._id,
+      req.user._id, startMs, today, rows.map(r => r.totalValue), account._id,
     );
-    for (const row of result) {
-      const idx = Math.round((midnight(row.date) - docStartMs) / DAY_MS);
-      row.totalValue = idx >= 0 && idx < growthTS.length ? (growthTS[idx] ?? null) : null;
+    rows.forEach((row, i) => {
+      row.totalValue = growthTS[i] ?? null;
       row.cashValue  = null;
       row.assetValue = null;
-    }
+    });
   }
 
+  const result = rows.slice(sliceStartIndex(midnight(rows[0].date), today, req.query.days));
   res.json(result);
 }));
 

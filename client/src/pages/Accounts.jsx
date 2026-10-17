@@ -17,6 +17,7 @@ import SectionHeader from '../components/ui/SectionHeader';
 // one block of markup — the kind of pair that drifts the moment either is touched.
 import { MastheadFigure } from '../components/ui/Masthead';
 import ConfirmModal from '../components/ui/ConfirmModal';
+import { PageBar } from '../components/layout/TopBar';
 import { Plus } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
 
@@ -140,6 +141,7 @@ export default function Accounts() {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <PageBar actions={<Button variant="gold" icon={Plus} onClick={() => openNew()}>New account</Button>} />
 
       {/* ── Masthead ──────────────────────────────────────────────────────────
           The net position and what it is made of, on ONE surface — the same shape the
@@ -153,7 +155,7 @@ export default function Accounts() {
           out which. Assets is now the label ON the composition bar, where being a
           subtotal is the whole point. */}
       {accounts.length === 0 ? <AccountsEmpty onCreate={openNew} /> : (
-      <Card gilt flush>
+      <Card gilt garden flush>
         {/* `center`, not `flex-start`: the button was pinned to the top of a three-line
             block and floated level with the eyebrow, which is the smallest thing there.
             Centred, it reads as belonging to the whole masthead. */}
@@ -176,14 +178,13 @@ export default function Accounts() {
               </p>
             )}
           </div>
-          <Button variant="gold" icon={Plus} onClick={() => openNew()}>New account</Button>
         </div>
 
         {accounts.length > 0 && (
           <div style={{
             padding: '18px 24px 22px',
             borderTop: '1px solid var(--color-border-subtle)',
-            background: 'var(--color-bg-secondary)',
+            background: 'var(--garden-band)',
           }}>
             {/* Where the money sits, by kind of account — the same colours as the cards below. */}
             {assetsSum > 0 && (

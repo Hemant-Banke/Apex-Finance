@@ -23,7 +23,7 @@ export default function Goals() {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <SectionHeader eyebrow="Goals" title="What the money is for"
+      <SectionHeader title="What the money is for"
         sub="Every goal planned together — what each can take from what you hold, what to invest each month, and where" />
       {!data ? <Spinner /> : <GoalsView {...data} />}
     </div>

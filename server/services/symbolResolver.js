@@ -24,6 +24,7 @@ const { mapQuoteType, resolveQuoteName, midnight } = require('../utils/helpers')
 const { fetchHistoricPrices, fetchQuoteMeta } = require('./marketDataService');
 const mfService = require('./mfService');
 const conf      = require('../lib/confidence');
+const { listedAssetType } = require('../utils/assetPricing');
 
 /** An ISIN, if the statement printed one (they identify a fund plan outright). */
 const _isinIn = (s) => (/\b(IN[A-Z0-9]{10})\b/.exec(String(s || '').toUpperCase()) || [])[1] || null;
@@ -194,6 +195,7 @@ async function resolveAsset({ symbol, name, assetType, pricePerUnit, date }) {
 }
 
 async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
+  assetType = listedAssetType(assetType);
   const dateMs = date ? midnight(date) : null;
 
   // ── Mutual funds resolve against AMFI and NOWHERE ELSE.
@@ -284,7 +286,7 @@ async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
   return {
     assetSymbol: pick.symbol,
     assetName:   pick.name || name,
-    assetType:   pick.type || assetType || 'stock',
+    assetType:   listedAssetType(pick.type || assetType || 'stock'),
     currency:    meta[pick.symbol]?.currency || '',
     navMatched:  !!pick.navMatched,
     resolved:    true,

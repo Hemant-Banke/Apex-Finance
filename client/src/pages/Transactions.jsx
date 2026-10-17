@@ -5,7 +5,7 @@ import {
   formatCurrency, compactIfLarge, formatSigned, pnlColor, todayStr, MONTHS_SHORT, formatCount,
 } from '../lib/utils';
 import { getCategoryMap, describeCategory, useCategoryNames } from '../lib/categoryNames';
-import { transactionTypeLabel } from '../lib/constants';
+import { transactionTypeLabel, assetTypeLabel } from '../lib/constants';
 import { toCreatePayload } from '../lib/undo';
 import { toggleCode, isSelected } from '../lib/categorySelection';
 import { accountOptions } from '../lib/accountPickerOptions';
@@ -29,6 +29,7 @@ import { DateRangePicker } from '../components/forms/DatePicker';
 import TypePicker from '../components/forms/TypePicker';
 import CategoryMultiPicker from '../components/forms/CategoryMultiPicker';
 import ImportModal from '../components/import/ImportModal';
+import { PageBar } from '../components/layout/TopBar';
 import AssetIcon from '../components/market/AssetIcon';
 import {
   ArrowLeftRight, Upload, Search, X, Plus, CalendarRange, SlidersHorizontal, Download, Trash2, ChevronDown,
@@ -380,16 +381,13 @@ export default function Transactions() {
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       <SectionHeader
-        eyebrow="Transactions"
         title="The ledger"
         sub="Every movement of money, and what it adds up to."
-        action={
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Button variant="secondary" icon={Upload} onClick={() => setShowImport(true)}>Import</Button>
-            <Button variant="gold" icon={Plus} onClick={() => setAddAccount(account || '')}>Add transaction</Button>
-          </div>
-        }
       />
+      <PageBar actions={<>
+        <Button variant="secondary" icon={Upload} onClick={() => setShowImport(true)}>Import</Button>
+        <Button variant="gold" icon={Plus} onClick={() => setAddAccount(account || '')}>Add transaction</Button>
+      </>} />
 
       {/* What the window adds up to */}
       <Masthead
@@ -434,17 +432,18 @@ export default function Transactions() {
             </SegmentedControl>
           </div>
         }
-        band={s && (
-          <div style={{ opacity: pending ? 0.6 : 1, transition: 'opacity 0.2s ease', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 20 }}>
-            <MastheadFigure tight label="In" value={compactIfLarge(s.income)} accent="var(--color-success)"
-              sub={prev?.income > 0 && <Delta value={s.income - prev.income} pct={((s.income - prev.income) / prev.income) * 100} amount={false} />} />
-            <MastheadFigure tight label="Out" value={compactIfLarge(s.expense)} accent="var(--color-danger)"
-              sub={prev?.expense > 0 && <Delta value={s.expense - prev.expense} pct={((s.expense - prev.expense) / prev.expense) * 100} amount={false} invert />} />
+        // Drawn before the data arrives, with dashes, so the card opens at its final height.
+        band={(
+          <div style={{ opacity: pending || !s ? 0.6 : 1, transition: 'opacity 0.2s ease', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 20 }}>
+            <MastheadFigure tight label="In" value={s ? compactIfLarge(s.income) : '—'} accent={s ? 'var(--color-success)' : undefined}
+              sub={s && prev?.income > 0 && <Delta value={s.income - prev.income} pct={((s.income - prev.income) / prev.income) * 100} amount={false} />} />
+            <MastheadFigure tight label="Out" value={s ? compactIfLarge(s.expense) : '—'} accent={s ? 'var(--color-danger)' : undefined}
+              sub={s && prev?.expense > 0 && <Delta value={s.expense - prev.expense} pct={((s.expense - prev.expense) / prev.expense) * 100} amount={false} invert />} />
             <MastheadFigure tight label="Kept" value={savedRate == null ? '—' : `${savedRate.toFixed(0)}%`}
               sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>of what came in</span>} />
-            <MastheadFigure tight label="Spend / day" value={compactIfLarge(s.expense / days)}
+            <MastheadFigure tight label="Spend / day" value={s ? compactIfLarge(s.expense / days) : '—'}
               sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>over {formatCount(days)} days</span>} />
-            {(s.invested > 0 || s.divested > 0) && (
+            {s && (s.invested > 0 || s.divested > 0) && (
               <MastheadFigure tight label="Net invested" value={formatSigned(s.invested - s.divested, compactIfLarge)}
                 sub={<span className="text-xs" style={{ color: 'var(--color-text-muted)' }}
                   title={`${formatCurrency(s.invested)} bought, ${formatCurrency(s.divested)} sold`}>
@@ -701,11 +700,12 @@ export default function Transactions() {
 
       {/* Edit — AssetTransactionForm for buy/sell, TransactionForm for everything else */}
       <Modal open={!!editTx} onClose={() => setEditTx(null)}
-        eyebrow="Edit"
-        title={['buy', 'sell'].includes(editTx?.type) ? `${editTx?.type === 'buy' ? 'Buy' : 'Sell'} · ${editTx?.assetSymbol}` : 'Edit transaction'}
-        subtitle={['buy', 'sell'].includes(editTx?.type) ? editTx?.assetName : undefined}
+        eyebrow={['buy', 'sell'].includes(editTx?.type) ? `Edit ${editTx?.type === 'buy' ? 'purchase' : 'sale'}` : 'Edit'}
+        title={['buy', 'sell'].includes(editTx?.type) ? (editTx?.assetName || editTx?.assetSymbol) : 'Edit transaction'}
+        subtitle={['buy', 'sell'].includes(editTx?.type) && editTx?.assetName ? <span className="figure">{editTx.assetSymbol}</span> : undefined}
+        tag={['buy', 'sell'].includes(editTx?.type) ? assetTypeLabel(editTx?.assetType) : undefined}
         titlePrefix={['buy', 'sell'].includes(editTx?.type)
-          ? <AssetIcon symbol={editTx.assetSymbol} type={editTx.assetType} size={40} />
+          ? <AssetIcon symbol={editTx.assetSymbol} name={editTx.assetName} type={editTx.assetType} size={40} />
           : undefined}
         wide={['buy', 'sell'].includes(editTx?.type)}>
         {editTx && (['buy', 'sell'].includes(editTx.type) ? (

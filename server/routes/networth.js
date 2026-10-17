@@ -4,8 +4,8 @@ const DailyNetWorth = require('../models/DailyNetWorth');
 const { protect }             = require('../middleware/auth');
 const { asyncHandler }        = require('../middleware/asyncHandler');
 const { DAY_MS }              = require('../utils/constants');
-const { midnight, toDateStr, todayStr, todayMs } = require('../utils/helpers');
-const { sliceStartIndex }     = require('../utils/tsHelpers');
+const { midnight, toDateStr, todayMs } = require('../utils/helpers');
+const { sliceStartIndex, tsConcat } = require('../utils/tsHelpers');
 const dvService               = require('../services/dailyValueService');
 const { getAllAccountsAssetBalance } = require('../services/accountBalance');
 
@@ -13,7 +13,10 @@ const router = express.Router();
 router.use(protect);
 
 /**
- * GET /api/networth/daily?days=N&growth=true
+ * GET /api/networth/daily?days=N&growth=true&basis=assets
+ *
+ * `basis=assets` charts the asset book alone (Σ account assetTS, no cash or debt); its
+ * growth view treats every buy/sell as the flow.
  *
  * The history comes from `valuesTS`, which is a PURE T-1 series: both cash and assets as
  * they stood at the last close.
@@ -25,39 +28,42 @@ router.use(protect);
  * was in the headline and missing from the line. The chart must end where the number says
  * it ends.
  *
- * `growth=true` swaps every point for a growth-only index (base 100 at the series' own
- * first day, i.e. the user's very first transaction) — the complete series with every
+ * `growth=true` swaps every point for a growth-only index (chained from the first day of
+ * history; PriceGrapher rebases the visible window to 100) — the complete series with every
  * later income/expense/uncashed trade subtracted back out, so what is left is what the
  * money itself did. See dailyValueService.computeGrowthIndex.
  */
 router.get('/daily', asyncHandler(async (req, res) => {
-  const doc = await DailyNetWorth.findOne({ user: req.user._id }).lean();
-  if (!doc?.valuesTS?.length) return res.json([]);
-
-  const startMs = midnight(doc.startDate);
-  const from    = sliceStartIndex(startMs, midnight(doc.endDate), req.query.days);
-
-  const result = [];
-  for (let i = from; i < doc.valuesTS.length; i++) {
-    result.push({ date: toDateStr(startMs + i * DAY_MS), value: doc.valuesTS[i] });
+  const assetsOnly = req.query.basis === 'assets';
+  let valuesTS, startMs, lastCashValue = 0;
+  if (assetsOnly) {
+    ({ valuesTS, startMs } = await dvService.assetTotalSeries(req.user._id));
+  } else {
+    const doc = await DailyNetWorth.findOne({ user: req.user._id }).lean();
+    valuesTS      = doc?.valuesTS || [];
+    startMs       = doc && midnight(doc.startDate);
+    lastCashValue = doc?.lastCashValue || 0;
   }
+  if (!valuesTS.length) return res.json([]);
 
   // Live prices when asked: on the settled basis today's assets ARE yesterday's close, so
   // today's point could never move and a 1D growth view read zero.
   const { value: assetValue } = await getAllAccountsAssetBalance(req.user, req.query.fetchLatestBal === 'true');
-  const todayValue = (doc.lastCashValue || 0) + assetValue;
-  result.push({ date: todayStr(), value: todayValue });
+  const today = todayMs();
 
-  if (req.query.growth === 'true') {
-    // Always indexed from the TRUE start of history, regardless of the `days` window
-    // being displayed — zooming into the last month shows where the index sits today,
-    // not a rebase to 100 for that month (the standard convention for a growth chart).
-    const fullValuesTS = doc.valuesTS.concat([todayValue]);
-    const growthTS = await dvService.computeGrowthIndex(req.user._id, startMs, todayMs(), fullValuesTS);
-    for (const row of result) {
-      const idx = Math.round((midnight(row.date) - startMs) / DAY_MS);
-      row.value = growthTS[idx] ?? null;
-    }
+  // A store not yet extended ends days short of today: carry its last value across the
+  // gap so every point sits at its own day offset (or today's growth point fell off the end).
+  const { result: series } = tsConcat(valuesTS, [lastCashValue + assetValue], startMs, today,
+    startMs + (valuesTS.length - 1) * DAY_MS, today);
+
+  // Growth is indexed over the FULL history; the client rebases the visible window to 100.
+  const values = req.query.growth === 'true'
+    ? await dvService.computeGrowthIndex(req.user._id, startMs, today, series, null, assetsOnly)
+    : series;
+
+  const result = [];
+  for (let i = sliceStartIndex(startMs, today, req.query.days); i < values.length; i++) {
+    result.push({ date: toDateStr(startMs + i * DAY_MS), value: values[i] ?? null });
   }
 
   res.json(result);

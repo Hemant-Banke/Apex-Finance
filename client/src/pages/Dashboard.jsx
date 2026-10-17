@@ -300,7 +300,6 @@ export default function Dashboard() {
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
       <SectionHeader
-        eyebrow="Overview"
         title={`Hello${user ? `, ${user.name.split(' ')[0]}` : ''}`}
         sub={`${summary?.accountCount || 0} account${summary?.accountCount === 1 ? '' : 's'} · ${summary?.holdingsCount || 0} holding${summary?.holdingsCount === 1 ? '' : 's'} · everything in one place`}
       />

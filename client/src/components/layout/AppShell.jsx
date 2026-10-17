@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw, Flame, Target
@@ -7,6 +7,7 @@ import {
 import ApexLogo from '../ui/ApexLogo';
 import DitherField from '../ui/DitherField';
 import PriceBasis from './PriceBasis';
+import TopBar, { TopBarProvider } from './TopBar';
 import { usePricing } from '../../context/PricingContext';
 import { networthAPI } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
@@ -28,6 +29,8 @@ export default function AppShell({ children }) {
   const toast = useToast();
   const [rebuilding, setRebuilding] = useState(false);
   const { live } = usePricing();
+  const { pathname } = useLocation();
+  const section = nav.find(n => (n.to === '/' ? pathname === '/' : pathname === n.to || pathname.startsWith(`${n.to}/`))) || null;
   // Bumping this remounts the routed page below, re-running its mount-time
   // fetch so the UI reflects freshly rebuilt stores without a full reload.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -116,11 +119,8 @@ export default function AppShell({ children }) {
           ))}
         </nav>
 
-        {/* The price basis for every figure in the app, and what it is as of. */}
-        <div style={{ padding: '4px 8px 2px' }}><PriceBasis /></div>
-
         {/* Dev tools */}
-        <div style={{ padding: '4px 8px' }}>
+        <div style={{ padding: '4px 8px 2px' }}>
           <button
             onClick={handleRebuild}
             disabled={rebuilding}
@@ -137,6 +137,9 @@ export default function AppShell({ children }) {
             {rebuilding ? 'Rebuilding…' : 'Rebuild Stores'}
           </button>
         </div>
+
+        {/* The price basis for every figure in the app, and what it is as of. */}
+        <div style={{ padding: '2px 8px 8px' }}><PriceBasis /></div>
 
         {/* User profile */}
         <div style={{
@@ -206,24 +209,32 @@ export default function AppShell({ children }) {
         </div>
       </aside>
 
-      {/* ── Main Content ── */}
+      {/* ── Main Content ── the top bar sticks inside the scroll box, so it stays put like the sidebar. */}
+      <TopBarProvider>
       <main style={{
         flex: 1,
         minWidth: 0,
-        overflowY: 'auto',
+        // The scrollbar is ALWAYS there (its track is transparent): a page loads short (a
+        // spinner), then grows, and a scrollbar appearing then narrowed this box and shifted
+        // everything centred in it 3px on every navigation. `scrollbar-gutter` alone is not
+        // honoured by every browser; `scroll` is.
+        overflowY: 'scroll',
         overflowX: 'hidden',
+        scrollbarGutter: 'stable',
         position: 'relative',
         zIndex: 1,
       }}>
+        <TopBar section={section} />
         {/* Remounted on a rebuild or a flip of the price basis, so every figure refetches. */}
         <div key={`${refreshKey}-${live}`} style={{
           maxWidth: 1060,
           margin: '0 auto',
-          padding: '40px 48px 60px',
+          padding: '32px 48px 60px',
         }}>
           {children}
         </div>
       </main>
+      </TopBarProvider>
     </div>
   );
 }

@@ -169,7 +169,9 @@ function _shapeFinancials(co) {
     }
     return out;
   });
-  return { quarterly: shape(co.quarterly, false), annual: shape(co.annual, true) };
+  const i = co.interim;
+  const interim = i ? { ...i, debtToEquity: !isBank && i.debt != null && i.equity > 0 ? round(i.debt / i.equity, 2) : null } : null;
+  return { quarterly: shape(co.quarterly, false), annual: shape(co.annual, true), interim };
 }
 
 /** The headline health figures, all from the filings — trailing twelve months where possible. */
@@ -180,6 +182,8 @@ function _health(fin, isBank) {
   const revenueTtm = ttm('revenue'), profitTtm = ttm('netIncome'), opTtm = isBank ? null : ttm('operatingProfit');
   const latestQ = q[q.length - 1] || {};
   const latestA = [...a].reverse().find(r => r.equity != null) || {};
+  // Debt from the newest balance sheet — the half-year one when filed after the year-end. ROE stays annual.
+  const bs = fin.interim?.date > (latestA.date || '') ? fin.interim : latestA;
   return {
     revenueTtm, profitTtm,
     latestQuarter: latestQ.date || null,
@@ -187,10 +191,11 @@ function _health(fin, isBank) {
     profitGrowth: latestQ.profitGrowth ?? null,
     operatingMargin: revenueTtm > 0 && opTtm != null ? round((opTtm / revenueTtm) * 100, 1) : null,
     netMargin: revenueTtm > 0 && profitTtm != null ? round((profitTtm / revenueTtm) * 100, 1) : null,
-    balanceSheetDate: latestA.date || null,
+    balanceSheetDate: bs.date || null,
+    roeDate: latestA.date || null,
     roe: latestA.roe ?? null,
-    debt: latestA.debt ?? null,
-    debtToEquity: latestA.debtToEquity ?? null,
+    debt: bs.debt ?? null,
+    debtToEquity: bs.debtToEquity ?? null,
   };
 }
 

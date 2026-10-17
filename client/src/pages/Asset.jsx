@@ -7,7 +7,8 @@ import { BENCHMARKS } from '../lib/constants';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
 import Delta from '../components/ui/Delta';
-import BackLink from '../components/ui/BackLink';
+import { PageBar } from '../components/layout/TopBar';
+import { paddedDays } from '../lib/indicators';
 import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import PriceGrapher from '../components/charts/PriceGrapher';
@@ -17,6 +18,7 @@ import PositionCard from '../components/portfolio/PositionCard';
 import IndexProfile from '../components/asset/IndexProfile';
 import FundProfile from '../components/asset/FundProfile';
 import MetalProfile from '../components/asset/MetalProfile';
+import FundPortfolio from '../components/asset/FundPortfolio';
 import ReturnSplit from '../components/asset/ReturnSplit';
 import HoldingExperience from '../components/asset/HoldingExperience';
 
@@ -74,10 +76,9 @@ export default function Asset() {
   }, [symbol]);
 
   // Memoised on the symbol, or PriceGrapher's fetch effect re-runs every render.
-  const fetchPrice = useCallback((days, growth) => (isYahoo(symbol)
-    ? marketAPI.ohlc(symbol, days).then(r => toChartSeries(r.data?.candles, growth))
-    : marketAPI.indexSeries(symbol, days).then(r => toChartSeries(r.data, growth))), [symbol]);
-  const fetchOHLC = useCallback((days) => marketAPI.ohlc(symbol, days).then(r => r.data?.candles || []), [symbol]);
+  const fetchPrice = useCallback((days, growth, opts) => (isYahoo(symbol)
+    ? marketAPI.ohlc(symbol, days, opts?.pad).then(r => toChartSeries(r.data?.candles, growth))
+    : marketAPI.indexSeries(symbol, paddedDays(days, opts)).then(r => toChartSeries(r.data, growth))), [symbol]);
 
   // Every benchmark but itself, plus the payload's own (a fund's category index) if the catalogue lacks it.
   const bench = data?.benchmark;
@@ -89,14 +90,14 @@ export default function Asset() {
   if (error) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        <BackLink to={back.to}>{back.label}</BackLink>
+        <PageBar back={back} />
         <Card><p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
           {error === 'notfound' ? `No price history found for “${symbol}”.` : 'This could not be loaded right now. Try again shortly.'}
         </p></Card>
       </div>
     );
   }
-  if (!data || data.symbol !== symbol) return <Spinner />;
+  if (!data || data.symbol !== symbol) return <><PageBar back={back} /><Spinner /></>;
 
   const { quote, performance: perf, benchmark, profile, currencyLens: lens } = data;
   const fmt = levelFormatter(data.currency, data.unit);
@@ -106,7 +107,7 @@ export default function Asset() {
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      <BackLink to={back.to}>{back.label}</BackLink>
+      <PageBar back={back} title={data.name} />
 
       <SectionHeader
         eyebrow={typeLabel}
@@ -154,7 +155,7 @@ export default function Asset() {
         positions={positions.map(h => ({ qty: h.qty, invested: h.invested, value: h.value, pnl: h.unrealisedPnl, dayChange: h.dayChange }))} />
 
       <PriceGrapher key={data.symbol} title={typeLabel === 'Index' ? 'Level' : 'Price'} valueLabel={data.type === 'mutual_fund' ? 'NAV' : 'Close'}
-        formatValue={fmt} axisFormat={axisFormatFor(data.currency)} fetchData={fetchPrice} fetchOHLC={isYahoo(data.symbol) ? fetchOHLC : null}
+        formatValue={fmt} axisFormat={axisFormatFor(data.currency)} fetchData={fetchPrice}
         ranges={MARKET_RANGES} defaultRange="1Y"
         growthCapable benchmarks={benchmarks} defaultCompare={benchmark ? [benchmark.symbol] : []}
         viewLabels={{ complete: data.type === 'index' ? 'Level' : 'Price', growth: 'vs market', hint: 'Indexed to 100 at the start of the range, against the benchmarks you add' }}
@@ -167,6 +168,7 @@ export default function Asset() {
 
       {profile?.kind === 'index' && <IndexProfile p={profile} name={data.name} changePct={quote.changePct} />}
       {profile?.kind === 'metal' && <MetalProfile p={profile} name={data.name} />}
+      {data.portfolio && <FundPortfolio p={data.portfolio} name={data.name} />}
       {lens && (
         <ReturnSplit split={lens.split} currency={lens.currency} assetLabel={data.name}
           sub={`What it did in ${lens.currency}, what the rupee did against the ${lens.currency}, and what that made for a rupee investor. Today it is about ${formatCurrency(lens.inrPrice)} in rupees.`} />

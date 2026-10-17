@@ -300,7 +300,27 @@ function buildTransactionsTS(byAccount, pricesBySymbol, accountsById = {}, initi
   return accountStores;
 }
 
+/**
+ * Sum every account's assetTS into one series (T-1), the leading run of empty days trimmed.
+ * @returns {{ valuesTS: number[], startMs: number|null }}
+ */
+function buildAssetTotalTS(acctStores) {
+  let valuesTS = [];
+  let startMs  = null;
+  let endMs    = null;
+  for (const { assetTS = [], startMs: s } of acctStores) {
+    if (!assetTS.length) continue;
+    const e = s + (assetTS.length - 1) * DAY_MS;
+    if (startMs == null) { valuesTS = assetTS.slice(); startMs = s; endMs = e; continue; }
+    ({ result: valuesTS, startMs, endMs } = tsAdder(valuesTS, assetTS, startMs, s, endMs, e));
+  }
+  const lead = valuesTS.findIndex(v => Math.abs(v) >= 1e-9);
+  if (lead < 0) return { valuesTS: [], startMs: null };
+  return { valuesTS: valuesTS.slice(lead), startMs: startMs + lead * DAY_MS };
+}
+
 module.exports = {
+  buildAssetTotalTS,
   buildCashTS,
   buildAssetTS,
   buildNetWorthTS,

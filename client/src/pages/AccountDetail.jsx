@@ -26,6 +26,8 @@ import GardenEmpty from '../components/ui/GardenEmpty';
 import SectionHeader from '../components/ui/SectionHeader';
 import SegmentedControl from '../components/ui/SegmentedControl';
 import BackLink from '../components/ui/BackLink';
+import { PageBar } from '../components/layout/TopBar';
+import { paddedDays } from '../lib/indicators';
 import {
   Plus, Pencil, TrendingUp, Shield, CreditCard,
   Landmark, Wallet, Briefcase, BarChart2, Upload
@@ -57,21 +59,6 @@ const TX_FILTERS = [
 
 // The activity chip a "View all" carries over, as the ledger's own type filter.
 const LEDGER_KIND = { in: 'income', out: 'expense', transfer: 'transfer', trades: 'trades' };
-
-// Small pill showing an asset's type in a modal header.
-function AssetTypePill({ type }) {
-  if (!type) return null;
-  return (
-    <span style={{
-      flexShrink: 0, padding: '3px 9px', borderRadius: 999,
-      fontSize: '0.625rem', fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase',
-      color: 'var(--color-accent)', background: 'var(--color-accent-dim)',
-      border: '1px solid var(--color-accent-dim)', whiteSpace: 'nowrap',
-    }}>
-      {assetTypeLabel(type)}
-    </span>
-  );
-}
 
 // The asset's ticker, for a modal subtitle — the name carries the title, so the
 // symbol reads as the quieter reference line, in the mono figure face.
@@ -107,6 +94,8 @@ const iconMap = {
   bank: Landmark, brokerage: TrendingUp, retirement: Shield,
   debt: CreditCard, wallet: Wallet, other: Briefcase
 };
+
+const TO_ACCOUNTS = { to: '/accounts', label: 'Accounts' };
 
 export default function AccountDetail() {
   const { id } = useParams();
@@ -239,7 +228,7 @@ export default function AccountDetail() {
   // `growth` is threaded straight through — PriceGrapher only ever passes it when
   // its own Complete/Growth toggle is on.
   const fetchDailyBalance = useCallback(
-    (days, growth) => accountsAPI.getDaily(id, days, growth).then(res =>
+    (days, growth, opts) => accountsAPI.getDaily(id, paddedDays(days, opts), growth).then(res =>
       res.data.map(d => ({ date: d.date, value: d.totalValue }))
     ),
     [id]
@@ -263,7 +252,7 @@ export default function AccountDetail() {
     weight: totalInvested ? (h.totalInvested / totalInvested) * 100 : 0,
   }));
 
-  if (loading) return <Spinner />;
+  if (loading) return <><PageBar back={TO_ACCOUNTS} /><Spinner /></>;
   if (!account) return (
     <div className="text-center" style={{ paddingTop: '20vh' }}>
       <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Account not found</p>
@@ -284,17 +273,28 @@ export default function AccountDetail() {
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
 
-      <BackLink to="/accounts">Back to accounts</BackLink>
+      <PageBar back={TO_ACCOUNTS} title={account.name} actions={<>
+            <Button variant="icon" icon={Upload} onClick={openImport} title="Import transactions" aria-label="Import transactions" />
+            {(() => {
+              const addTxn   = <Button key="txn" variant={isAssetAccount ? 'secondary' : 'gold'} icon={Plus} onClick={openModal}>Add transaction</Button>;
+              const addAsset = <Button key="asset" variant={isAssetAccount ? 'gold' : 'secondary'} icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>;
+              // Left → right: import (icon), then secondary, then the gold primary.
+              // Asset accounts make Add asset primary; cash accounts make Add transaction primary.
+              // Debt accounts hold no assets, so only Add transaction.
+              if (account.isDebt) return addTxn;
+              return isAssetAccount ? [addTxn, addAsset] : [addAsset, addTxn];
+            })()}
+      </>} />
 
       {/* ── Masthead ──────────────────────────────────────────────────────────
           Identity and balance were two stacked blocks: a header row, then a card of
           three equal columns. Nothing on the page was bigger than anything else, so
           the one figure the page exists to answer — what is in this account — read as
-          just another cell. They are one surface now, carrying the gilt top-rule the
+          just another cell. They are one surface now, the headline card the
           system reserves for a headline, with the total set in the ledger numerals
           (`display-number`) that were going unused here, and cash/assets demoted to
           the supporting figures they are. */}
-      <Card gilt flush>
+      <Card gilt garden flush>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', padding: '22px 24px 20px' }}>
           <div className="flex items-center gap-4" style={{ minWidth: 0 }}>
             <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0, background: 'var(--color-bg-elevated)', boxShadow: 'var(--elev-ring)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -315,18 +315,6 @@ export default function AccountDetail() {
               </p>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-            <Button variant="icon" icon={Upload} onClick={openImport} title="Import transactions" aria-label="Import transactions" />
-            {(() => {
-              const addTxn   = <Button key="txn" variant={isAssetAccount ? 'secondary' : 'gold'} icon={Plus} onClick={openModal}>Add transaction</Button>;
-              const addAsset = <Button key="asset" variant={isAssetAccount ? 'gold' : 'secondary'} icon={BarChart2} onClick={() => { setSelectedSecurity(null); setAssetModal(true); }}>Add asset</Button>;
-              // Left → right: import (icon), then secondary, then the gold primary.
-              // Asset accounts make Add asset primary; cash accounts make Add transaction primary.
-              // Debt accounts hold no assets, so only Add transaction.
-              if (account.isDebt) return addTxn;
-              return isAssetAccount ? [addTxn, addAsset] : [addAsset, addTxn];
-            })()}
-          </div>
         </div>
 
         {/* The figure, in FULL rupees. Everywhere else a number is a comparison and
@@ -336,7 +324,7 @@ export default function AccountDetail() {
           display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between',
           gap: 32, flexWrap: 'wrap', padding: '20px 24px 22px',
           borderTop: '1px solid var(--color-border-subtle)',
-          background: 'var(--color-bg-secondary)',
+          background: 'var(--garden-band)',
         }}>
           <div style={{ minWidth: 0 }}>
             <p className="heading-sm" style={{ marginBottom: 10 }}>
@@ -393,7 +381,7 @@ export default function AccountDetail() {
           { label: '3M',  days: 90  },
           { label: '6M',  days: 182 },
           { label: '1Y',  days: 365 },
-          { label: 'Max', days: null },
+          { label: 'All', days: null },
         ]}
         emptyText="No transaction history yet"
         // Growth (money-only, deposits/withdrawals removed) only means something for an
@@ -579,7 +567,7 @@ export default function AccountDetail() {
           ? (editTx?.assetName || editTx?.assetSymbol)
           : 'Edit transaction'}
         subtitle={['buy','sell'].includes(editTx?.type) ? <AssetTicker symbol={editTx?.assetSymbol} /> : undefined}
-        titleSuffix={['buy','sell'].includes(editTx?.type) ? <AssetTypePill type={editTx?.assetType} /> : undefined}
+        tag={['buy','sell'].includes(editTx?.type) ? assetTypeLabel(editTx?.assetType) : undefined}
         titlePrefix={['buy','sell'].includes(editTx?.type)
           ? <AssetIcon symbol={editTx.assetSymbol} name={editTx.assetName} type={editTx.assetType} size={40} />
           : undefined}
@@ -672,7 +660,7 @@ export default function AccountDetail() {
                 </span>
               : selectedSecurity.isManual ? undefined : <AssetTicker symbol={selectedSecurity.symbol} exchange={selectedSecurity.exchange} />)
           : 'Search your holdings, or add anything from the market.'}
-        titleSuffix={selectedSecurity ? <AssetTypePill type={selectedSecurity.type} /> : undefined}
+        tag={selectedSecurity?.type ? assetTypeLabel(selectedSecurity.type) : undefined}
         titlePrefix={selectedSecurity ? <AssetIcon symbol={selectedSecurity.symbol} name={selectedSecurity.name} type={selectedSecurity.type} size={40} /> : undefined}
         wide>
         {!selectedSecurity ? (

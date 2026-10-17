@@ -14,9 +14,10 @@ import { ArrowLeft } from 'lucide-react';
  * takes you to — motion pointing the way it goes, which is the only thing motion is
  * really good for here.
  *
- * Give it `to` for a route, or `onClick` for a step back inside a flow.
+ * Give it `to` for a route, or `onClick` for a step back inside a flow. `compact` is the
+ * chip alone at control height (34px) — the top bar, where the breadcrumb says where you are.
  */
-export default function BackLink({ to, onClick, children = 'Back', style }) {
+export default function BackLink({ to, onClick, children = 'Back', compact = false, style }) {
   const inner = (
     <>
       <span
@@ -24,25 +25,26 @@ export default function BackLink({ to, onClick, children = 'Back', style }) {
         className="backlink-chip"
         style={{
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 22, height: 22, borderRadius: 999, flexShrink: 0,
+          width: compact ? 34 : 22, height: compact ? 34 : 22, borderRadius: 999, flexShrink: 0,
           border: '1px solid var(--color-border)',
           background: 'var(--color-bg-elevated)',
           boxShadow: 'var(--elev-ring)',
           transition: 'border-color 0.15s ease, background 0.15s ease',
         }}
       >
-        <ArrowLeft size={12} strokeWidth={2} className="backlink-arrow"
+        <ArrowLeft size={compact ? 15 : 12} strokeWidth={2} className="backlink-arrow"
           style={{ transition: 'transform 0.15s ease' }} />
       </span>
-      <span>{children}</span>
+      {!compact && <span>{children}</span>}
     </>
   );
 
   const shared = {
     className: 'backlink',
+    ...(compact ? { title: typeof children === 'string' ? `Back to ${children}` : 'Back', 'aria-label': typeof children === 'string' ? `Back to ${children}` : 'Back' } : {}),
     style: {
       display: 'inline-flex', alignItems: 'center', gap: 9,
-      alignSelf: 'flex-start',
+      alignSelf: compact ? 'center' : 'flex-start',
       background: 'none', border: 'none', padding: 0,
       cursor: 'pointer', textDecoration: 'none',
       fontFamily: 'inherit', fontSize: '0.8125rem', fontWeight: 500,

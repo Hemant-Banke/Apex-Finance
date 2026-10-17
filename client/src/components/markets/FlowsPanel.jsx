@@ -5,6 +5,7 @@ import {
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import ChartTooltip from '../charts/ChartTooltip';
+import BandCursor from '../charts/BandCursor';
 import SegmentedControl from '../ui/SegmentedControl';
 import { CHART_COLORS, formatCrore, pnlColor, axisCompact, dayLabel, formatCount } from '../../lib/utils';
 
@@ -120,7 +121,12 @@ function FlowChart({ daily }) {
             tickFormatter={d => dayLabel(d)} minTickGap={28} />
           <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} width={44} tickFormatter={v => axisCompact(v)} />
           <ReferenceLine y={0} stroke="var(--color-border-hover)" />
-          <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }} isAnimationActive={false}
+          {/* A soft band behind the session's bars; over lines, a faint dashed rule. Never the
+              ComposedChart default — a bright full-height line, drawn even over bars. */}
+          <Tooltip isAnimationActive={false}
+            cursor={view === 'daily'
+              ? <BandCursor count={rows.length} />
+              : { stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' }}
             content={<ChartTooltip formatValue={v => formatCrore(v, { signed: true })} />} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
           {view === 'daily' ? (
@@ -130,9 +136,9 @@ function FlowChart({ daily }) {
             </>
           ) : (
             <>
-              <Line dataKey="fii" name="FII / FPI" stroke={C.fii} strokeWidth={2} dot={false} isAnimationActive={false} />
-              <Line dataKey="dii" name="DII" stroke={C.dii} strokeWidth={2} dot={false} isAnimationActive={false} />
-              <Line dataKey="mfEquity" name="Mutual funds (equity)" stroke={C.mf} strokeWidth={2} dot={false} connectNulls={false} isAnimationActive={false} />
+              <Line dataKey="fii" name="FII / FPI" stroke={C.fii} strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+              <Line dataKey="dii" name="DII" stroke={C.dii} strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+              <Line dataKey="mfEquity" name="Mutual funds (equity)" stroke={C.mf} strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} connectNulls={false} isAnimationActive={false} />
             </>
           )}
         </ComposedChart>
@@ -212,12 +218,12 @@ function Positioning({ positioning }) {
                 <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={{ fill: '#878D97', fontSize: 11 }}
                   axisLine={false} tickLine={false} width={38} tickFormatter={v => `${v}%`} />
                 <ReferenceLine y={50} stroke="var(--color-border-hover)" strokeDasharray="3 3" />
-                <Tooltip isAnimationActive={false} cursor={{ stroke: 'var(--color-border-hover)' }}
+                <Tooltip isAnimationActive={false} cursor={{ stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' }}
                   content={<ChartTooltip formatValue={v => (v == null ? '—' : `${v.toFixed(1)}% long`)} />} />
                 <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 10 }} iconType="circle" iconSize={7} />
-                <Line dataKey="client" name="Retail & HNI" stroke={C.client} strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line dataKey="fii"    name="FIIs"         stroke={C.fii}    strokeWidth={2} dot={false} isAnimationActive={false} />
-                <Line dataKey="pro"    name="Prop desks"   stroke={C.pro}    strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                <Line dataKey="client" name="Retail & HNI" stroke={C.client} strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+                <Line dataKey="fii"    name="FIIs"         stroke={C.fii}    strokeWidth={2} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+                <Line dataKey="pro"    name="Prop desks"   stroke={C.pro}    strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>

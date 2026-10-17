@@ -577,7 +577,7 @@ async function searchYahoo(q, { indices = false } = {}) {
       // HDFCSILVER"). Typed as a stock, the asset form would book a fund as a company and
       // the Markets search would offer it a company page.
       type:     x.quoteType === 'INDEX' ? 'index'
-              : /\b(ETF|BEES)\b|AMC\s*-\s/i.test(resolveQuoteName(x) || '') ? 'etf' : mapQuoteType(x.quoteType),
+              : /\bETF\b|BEES\b|AMC\s*-\s/i.test(resolveQuoteName(x) || '') ? 'etf' : mapQuoteType(x.quoteType),
       exchange: x.exchDisp || x.exchange || '',
       currency: x.currency || '',
     }));

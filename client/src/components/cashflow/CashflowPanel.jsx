@@ -67,7 +67,7 @@ export default function CashflowPanel({ accountId, balance, isDebt, refreshKey }
 
         {active.length > 0 && (
           <>
-            <Divider gilt margin={26} />
+            <Divider margin={26} />
             <p className="eyebrow" style={{ marginBottom: 14 }}>{isDebt ? 'Charges and inflows' : 'Income and spending'}</p>
             <CashflowChart rows={rows} height={240} incomeLabel={isDebt ? 'Inflows' : 'Income'} />
             <Divider margin={22} />

@@ -32,7 +32,10 @@ export function AuthProvider({ children }) {
         localStorage.setItem('apex_user', JSON.stringify(res.data));
         networthAPI.ensure().catch(() => {}); // extend store to today on session restore
       })
-      .catch(() => {
+      .catch((err) => {
+        // Only a rejected token ends the session. A network blip, a server restart or a
+        // request aborted by a page reload is not a logout — keep the saved user.
+        if (err?.response?.status !== 401) return;
         localStorage.removeItem('apex_token');
         localStorage.removeItem('apex_user');
         setUser(null);

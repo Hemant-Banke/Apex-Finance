@@ -87,6 +87,17 @@ const RESULT_FIELDS = {
   eps:             ['EPS in Rs'],
 };
 
+/** The annual reports Screener links (BSE PDFs), newest first: [{ year, url }]. */
+function _annualReports(html) {
+  const docs = _section(html, 'documents');
+  const out = [];
+  for (const m of docs.matchAll(/href="([^"]+\.pdf)"[^>]*>([\s\S]*?)<\/a>/g)) {
+    const year = /Annual Report (\d{4})/.exec(_text(m[2]))?.[1];
+    if (year && !out.some(r => r.year === +year)) out.push({ year: +year, url: m[1] });
+  }
+  return out.sort((a, b) => b.year - a.year);
+}
+
 function _parse(html) {
   const quarterly = _series(_table(_section(html, 'quarters')), RESULT_FIELDS);
   const annualPl  = _series(_table(_section(html, 'profit-loss')), RESULT_FIELDS);
@@ -107,7 +118,14 @@ function _parse(html) {
     row.equity = r.equityCapital != null && r.reserves != null ? r.equityCapital + r.reserves : null;
   }
   for (const r of cash) Object.assign((byDate[r.date] ??= { date: r.date }), { ocf: r.ocf, fcf: r.fcf });
-  const annual = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+  const joined = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+  // A fiscal year is a date the P&L prints. Screener also shows the half-year balance sheet
+  // (Sep) beside them — a column with no revenue, profit or cash flow — so it is kept apart.
+  const plDates = new Set(annualPl.map(r => r.date));
+  const annual = plDates.size ? joined.filter(r => plDates.has(r.date)) : joined;
+  const lastYear = annual.at(-1)?.date || '';
+  const half = joined.filter(r => !plDates.has(r.date) && r.date > lastYear && (r.debt != null || r.equity != null)).at(-1);
+  const interim = half ? { date: half.date, debt: half.debt ?? null, equity: half.equity ?? null } : null;
 
   const shp = (id) => _series(_table(_div(_section(html, 'shareholding'), id)), {
     promoters: ['Promoters'], fiis: ['FIIs'], diis: ['DIIs'], government: ['Government'],
@@ -122,7 +140,8 @@ function _parse(html) {
     // a heavy-provisioning quarter. Neither it nor debt-to-equity means for a lender what
     // it means for a manufacturer, so the page needs to know which it is reading.
     kind: quarterTable && _pick(quarterTable.rows, 'Financing Profit') ? 'bank' : 'company',
-    quarterly, annual,
+    quarterly, annual, interim,
+    annualReports: _annualReports(html),
     shareholding: { quarterly: shp('quarterly-shp'), yearly: shp('yearly-shp') },
   };
 }
@@ -141,6 +160,14 @@ async function _fetchPage(path) {
   return null;
 }
 
+const STALE_MS = 270 * 24 * 3600 * 1000;
+
+/** The most recent period with reported revenue, in ms (0 when none). */
+function _latest(data) {
+  const dates = [...data.quarterly, ...data.annual].filter(p => p.revenue != null).map(p => Date.parse(p.date));
+  return dates.length ? Math.max(...dates) : 0;
+}
+
 /**
  * A company's filings and shareholding, or null when Screener has no page for it.
  * The CONSOLIDATED figures are preferred (the group, as investors are told about it);
@@ -154,11 +181,12 @@ async function getCompany(symbol) {
   const consolidated = await _fetchPage({ symbol, consolidated: true });
   if (consolidated) {
     data = _parse(consolidated);
-    // Screener serves the consolidated URL even for standalone-only companies, with an
-    // empty results table — fall back to the standalone page then.
-    if (!data.quarterly.some(q => q.revenue != null)) {
+    // Standalone-only companies get an empty consolidated table, and ones that stopped
+    // consolidating (Tata Elxsi after FY15) a stale one — keep whichever page is newer.
+    if (_latest(data) < Date.now() - STALE_MS) {
       const standalone = await _fetchPage({ symbol, consolidated: false });
-      if (standalone) data = _parse(standalone);
+      const alt = standalone && _parse(standalone);
+      if (alt && _latest(alt) > _latest(data)) data = alt;
     }
   }
   if (data && !data.quarterly.length && !data.annual.length) data = null;

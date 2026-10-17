@@ -6,10 +6,11 @@
 - `auth/OAuthButtons.jsx` — Google / Apple sign-in buttons for the login page.
 
 ### charts
-- `charts/PriceGrapher.jsx` — The one price/value chart (net worth, accounts, markets, stocks) with benchmark overlays and drag-to-measure; `axisFormat` for non-rupee prices.
+- `charts/PriceGrapher.jsx` — The one price/value chart (net worth, accounts, markets, stocks) with benchmark overlays, editable technical indicators (lines + an RSI pane), drag-to-measure, preset ranges ending in All and a calendar for custom dates; a price axis floors at 0; no candlestick view; `axisFormat` for non-rupee prices. Fetchers are `(days, growth, { pad })` — `pad` = warm-up days before the window.
 - `charts/ChartTooltip.jsx` — Shared solid chart tooltip (+ `TooltipPanel`), with % change from window start.
-- `charts/CompareIndexDialog.jsx` — Picker for benchmark overlays on a chart.
+- `charts/CompareIndexDialog.jsx` — Picker for what a chart draws besides its line; tabs Benchmarks · Fixed return (`RATE:<pct>`) · Indicators (an editor: the chart's instances with their period/σ fields, then types to add), + a search icon opening the shared Find-an-asset modal; `onAdd` adds and selects; `initialTab` per opening.
 - `charts/CashflowChart.jsx` — Monthly income/expense bars + net cashflow line (`incomeLabel`/`expenseLabel`); Analytics, the Dashboard, cash account pages.
+- `charts/BandCursor.jsx` — Tooltip cursor for bar charts: a soft band over the hovered slot instead of ComposedChart's bright full-height line (`count` = slots). Width from `chartBandWidth` (lib/utils).
 - `charts/CategoryBreakdown.jsx` — Ranked category ledger: stacked share bar (hover-linked), rows with icon, count/avg, trend sparkline (when `series`), share and prior-window change; `onSelect`/`active` make rows filters (Analytics, Transactions).
 - `charts/MonthlyLedger.jsx` — Month-by-month In · Out · Net · Saved ledger with best/worst markers and an Average-month line; Analytics and cash account pages.
 
@@ -64,7 +65,8 @@
 - `import/ConfidenceBadge.jsx` — Single confidence pill for the whole parsed file.
 
 ### layout
-- `layout/AppShell.jsx` — App frame: sidebar navigation + page outlet.
+- `layout/AppShell.jsx` — App frame: sidebar navigation, the top bar, and the page outlet.
+- `layout/TopBar.jsx` — The sticky top bar: back link, a one-line breadcrumb (section icon + section › page name), page actions, global market search (⌘K). Pages fill it with `<PageBar back title actions>` — back/title as data through context, actions portalled; `TopBarProvider` holds the state.
 - `layout/PriceBasis.jsx` — Sidebar card: the Live prices switch and what every figure is really as of ("Assets at close of Mon 5 Oct · cash as of today", "Live · 18:02", or "Quotes unavailable · showing close of …" when a live fetch fell back), read from the last priced response's `asof`.
 - `layout/DesktopOnly.jsx` — Gates the app to wide, hover-capable screens.
 
@@ -94,10 +96,12 @@
 - `stock/PricePerformance.jsx` — `StatGrid`, `RangeBar`, `Performance` for stock/asset pages (`benchLabel={null}` drops the benchmark rows).
 - `asset/IndexProfile.jsx` — NSE index valuation, breadth, sector split and members with day contribution.
 - `asset/FundProfile.jsx` — Fund house, category, plan/option, ISIN and sibling plans.
+- `asset/FundPortfolio.jsx` — A fund / ETF / foreign index's holdings, sectors, asset mix and terms (`data.portfolio`).
 - `asset/MetalProfile.jsx` — Gold/silver price by purity, world price, domestic premium, gold-silver ratio.
 - `asset/ReturnSplit.jsx` — A rupee return split into asset-in-own-currency and the currency's move.
 - `asset/HoldingExperience.jsx` — Monthly SIP outcomes (XIRR) and rolling 1Y/3Y returns vs benchmark.
 - `stock/CompanyFinancials.jsx` — Annual/quarterly results, debt and cash-flow chart + table (`money` from `companyMoney`).
+- `stock/BusinessProfile.jsx` — "The business" card: a summary band (largest line, largest market, exports, net trade), then Revenue (a mix bar per year + table) · Trade · Value chain tabs, then what changed; loads `/markets/stocks/:symbol/business` on its own.
 - `stock/Ownership.jsx` — Shareholding pattern over 12 quarters; abroad, insiders/institutions + largest holders.
 
 ### transactions
@@ -106,7 +110,7 @@
 
 ### ui
 - `ui/Button.jsx` — Button primitive (variants, sizes, icon).
-- `ui/Card.jsx` — Surface primitive (gilt / compact / flush).
+- `ui/Card.jsx` — Surface primitive (gilt / garden / compact / flush); `garden` puts the money garden behind a page's top card.
 - `ui/Badge.jsx` — Small status chip.
 - `ui/Checkbox.jsx` — Square checkbox (`accent` master / `plain` row); is a `<button role=checkbox>`.
 - `ui/Modal.jsx` — Portaled titled dialog; nests.
@@ -122,7 +126,7 @@
 - `ui/AssumptionControls.jsx` — The controls of an assumptions board, shared by the Freedom Plan and the goal plan: `Dial` (slider with its value), `Field` (typed number with unit), `GroupHead` (section title with its figure), `Choice` (radio/check card).
 - `ui/ShowMore.jsx` — Collapses long lists (head or both-ends mode).
 - `ui/Sparkline.jsx` — Tiny SVG trend line.
-- `ui/BackLink.jsx` — The one "back" control.
+- `ui/BackLink.jsx` — The one "back" control; `compact` = a 34px chip alone, centred (the top bar).
 - `ui/Spinner.jsx` — The view/panel loader: a disc of gold dots on the dither lattice with a ripple running outward (`Bloom`, also exported). `height`, optional `label`. PriceGrapher uses it while loading.
 - `ui/TopProgressBar.jsx` — Top-of-page bar driven by in-flight API requests.
 - `ui/AppLoader.jsx` — Branded full-screen boot loader.
@@ -165,6 +169,7 @@
 - `planModel.js` — `planModel(data, settings)`: the whole FIRE plan from summary + portfolio + spending profile; `loadPlanSettings`, `journeyMarks`, `PLAN_DEFAULTS`, `PLAN_STORE_KEY`. Shared by Plan and Dashboard.
 - `fire.js` — Pure FIRE maths in today's rupees: `realRate`, `fireNumber`, `yearsToTarget`, `coastNumber`, `requiredMonthly`, `corpusForYears`, `project`.
 - `portfolioStyle.js` — `STYLES` bands and `portfolioStyle(profile, cash)` → growth share + verdict (PortfolioProfile, Dashboard).
+- `indicators.js` — Technical indicators, pure: `INDICATOR_TYPES` (sma, ema, bb, rsi + their editable `params`), instances `{ id, type, period, width? }` via `newIndicator`, `indicatorLabel`, `clampParam`, `computeIndicator(ind, values)`, `lookbackDays(inds)` (warm-up to fetch, 50-day buckets), `paddedDays(days, opts)` for daily-series fetchers.
 - `accountPickerOptions.jsx` — account-type icons (`TYPE_ICON`), per-type colour + group name (`ACCOUNT_TYPE_STYLE`), TypePicker options.
 - `utils.js` — the shared client helpers:
   - Money: `formatCurrency`, `formatNativeCurrency`, `formatCompact`, `formatCrore`, `compactIfLarge`, `formatSigned`.
@@ -191,16 +196,20 @@
 - `tsHelpers.js` — `tsAdder` (merge), `tsConcat` (append), `sliceStartIndex`.
 - `assetClass.js` — `classify(holding, ctx)`: asset-class fractions (hybrids split), SEBI cap tier, region, sector, locked.
 - `spendClass.js` — `spendClass(code)`: essential / discretionary / other from a category code (longest prefix wins).
-- `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`.
+- `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`, `listedAssetType` (a traded gold/silver instrument → `etf`).
 - `currency.js` — FX symbol + currency normalisation.
 - `recurrence.js` — `FREQUENCIES`, `occurrencesBetween`.
 - `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `holdingExperience` (SIP + rolling, shared by stock and asset pages).
 
 ### Server lib (`server/lib/`)
-- `llmService.js` — All Claude calls: extraction (text/image) and categorisation.
-- `statementParsers.js` — `parseStatement`: regex/HTML parsers with LLM fallback.
+- `llmService.js` — All Claude calls: extraction (text/image) and categorisation. Long text is split into ~12k-char chunks, 4 at a time, and merged.
+- `statementParsers.js` — `parseStatement`: regex parsers (HDFC lines, `parseLedgerBlocks` for date-block layouts like Union Bank) and HTML, with LLM fallback.
+- `txnFeatures.js` — `buildFeatures(rows)`: per-row payee, payee kind (business / vendor QR / person), file-wide payee count, days and median, weekday, day of month, hour — the behavioural signals the LLM categoriser reasons from.
 - `categoryRules.js` — Keyword category rules, merchant tokens, Misc fallback.
 - `confidence.js` — Per-stage scoring and file-level confidence summary.
+
+### Server scripts (`server/scripts/`)
+- `fixListedMetals.js` — Retypes purity-less gold/silver rows (misfiled ETFs) to `etf` and rebuilds; dry run unless `--apply`.
 
 ---
 
@@ -242,6 +251,7 @@
 - `UserCategoryProfile.js` — Learned merchant→category profile.
 - `MfScheme.js` / `MfNav.js` — AMFI fund index / NAV history caches.
 - `PriceHistory.js` — Daily closes per Yahoo symbol (native), with covered range and quote currency.
+- `CompanyReport.js` — One annual report / 10-K's LLM extract, keyed by URL; a shared cache kept for good.
 - `CurrentPrice.js` — The latest live quote per Yahoo symbol (native price, previous session's close, IST day, fetchedAt). A shared cache; closes never go here.
 - `MarketFlow.js` — Daily FII/DII/MF flows + participant OI.
 
@@ -252,8 +262,8 @@
 - `subscriptions.js` — Subscription list/create/pause/delete.
 - `goals.js` — Goal list/create/update/delete (`/api/goals`).
 - `dashboard.js` — Summary, portfolio, holdings, contribution, income-expense, categories.
-- `networth.js` — Net worth series, ensure, rebuild.
-- `market.js` — Asset search, price, OHLC, index series (`INR:<symbol>` = a foreign index converted to ₹ day by day).
+- `networth.js` — Net worth series (`basis=assets` → the asset book alone, Analytics' chart), ensure, rebuild.
+- `market.js` — Asset search, price, OHLC, index series (`INR:<symbol>` = a foreign index converted to ₹ day by day; `RATE:<pct>` = a fixed annual return).
 - `markets.js` — Markets page: overview, sectors, stocks, assets, flows.
 - `categories.js` — Category list/create/delete.
 - `import.js` — Statement parse → resolve symbols → categorise.
@@ -262,8 +272,8 @@
 - `transactionService.js` — Transaction lifecycle; asset pricing on save.
 - `transactionQueryService.js` — The shared transaction filter (`buildFilter`), paged list + totals, and insights (daily flows, categories, largest, type counts, prior window).
 - `cashflowService.js` — `getCashflow(user, account, months)`: one account's monthly flows incl. transfers, sources/destinations, categories vs the prior window, daily in/out, recurring payments, main income's rhythm, saving potential (discretionary categories vs their own lean months). The window never reaches back past the account's first month (`window.available`).
-- `dailyValueService.js` — Store orchestration: rebuild, extend, delta merge, NW.
-- `tsService.js` — Pure cash/asset/net-worth series builders.
+- `dailyValueService.js` — Store orchestration: rebuild, extend, delta merge, NW, `assetTotalSeries`.
+- `tsService.js` — Pure cash/asset/net-worth series builders, `buildAssetTotalTS` (Σ assetTS).
 - `holdingsService.js` — AVCO holdings maintenance.
 - `accountBalance.js` — O(1) settled/live balances, sparklines.
 - `portfolioService.js` — Mark-to-market portfolio, P&L, contribution.
@@ -278,7 +288,9 @@
 - `categoryProfileService.js` — Learn/predict categories from user history.
 - `oauthService.js` — Verify Google/Apple identity tokens.
 - `indiaMarketService.js` — NSE indices, asset classes, breadth, flows.
-- `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights), `peekClassification` (cache-only sector + cap rank; warms in background).
+- `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights), `peekClassification` (cache-only sector + cap rank; warms in background), `matchUniverseName` (exact normalised name → NSE symbol).
 - `stockService.js` — One company (NSE, or abroad with `global`): price, risk, financials, valuation, holders, peers, SIP/rolling.
-- `screenerService.js` — Screener.in filings and shareholding.
-- `assetService.js` — Price page data for non-NSE instruments, plus per-kind `profile`, `currencyLens` and `experience`.
+- `screenerService.js` — Screener.in filings, shareholding and annual-report links; falls back to standalone when consolidated is empty or stale; the half-year balance sheet is `interim`, not an annual row.
+- `businessService.js` — `getBusiness(symbol, {global})`: last 3 annual reports (BSE via Screener; SEC 10-K for US) → keyword excerpts → `llmService.extractBusinessProfile` → merged by year.
+- `assetService.js` — Price page data for non-NSE instruments, plus per-kind `profile`, `portfolio`, `currencyLens` and `experience`.
+- `fundPortfolioService.js` — `getPortfolio(symbol, type)`: holdings/sectors/mix/terms — Groww for AMFI funds and Indian ETFs, Yahoo `topHoldings` abroad, a tracking ETF for a foreign index.

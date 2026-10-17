@@ -4,6 +4,7 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const { badRequest } = require('../utils/httpError');
 const indiaMarket = require('../services/indiaMarketService');
 const sectorService = require('../services/sectorService');
+const businessService = require('../services/businessService');
 const stockService = require('../services/stockService');
 const assetService = require('../services/assetService');
 
@@ -44,6 +45,17 @@ router.get('/stocks/:symbol', asyncHandler(async (req, res) => {
   // Anything else is not a symbol, and must not reach a URL we build.
   if (!(global ? /^[A-Z0-9&.-]{1,24}$/ : /^[A-Z0-9&-]{1,20}$/).test(symbol)) throw badRequest('Not a stock symbol');
   res.json(await stockService.getStock(symbol, { ...fresh(req), global }));
+}));
+
+// @route GET /api/markets/stocks/:symbol/business[?global=true]
+// Where the money comes from — segments, geography, exports/imports, inputs, customers and
+// suppliers — read from the company's last few annual reports (10-Ks abroad). Separate from
+// the page payload: a report never read before takes ~30s. See businessService.
+router.get('/stocks/:symbol/business', asyncHandler(async (req, res) => {
+  const symbol = String(req.params.symbol || '').toUpperCase();
+  const global = req.query.global === 'true';
+  if (!(global ? /^[A-Z0-9&.-]{1,24}$/ : /^[A-Z0-9&-]{1,20}$/).test(symbol)) throw badRequest('Not a stock symbol');
+  res.json(await businessService.getBusiness(symbol, { global }));
 }));
 
 // @route GET /api/markets/assets/:symbol

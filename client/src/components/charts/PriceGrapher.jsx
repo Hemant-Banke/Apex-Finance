@@ -2,14 +2,16 @@ import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo, use
 import { createPortal } from 'react-dom';
 import {
   AreaChart, Area, Line, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  ReferenceLine, ReferenceArea, CartesianGrid, ComposedChart, Bar,
+  ReferenceLine, CartesianGrid, ComposedChart,
   usePlotArea, useYAxisScale
 } from 'recharts';
-import { TrendingUp, TrendingDown, Plus, Activity, CandlestickChart } from 'lucide-react';
+import { TrendingUp, TrendingDown, Plus, Calendar } from 'lucide-react';
 import { networthAPI, marketAPI } from '../../lib/api';
-import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT as MONTHS } from '../../lib/utils';
+import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT as MONTHS, todayStr } from '../../lib/utils';
+import { indicatorTypeOf, indicatorLabel, computeIndicator, lookbackDays, paddedDays } from '../../lib/indicators';
+import { DateRangePicker } from '../forms/DatePicker';
 import { BENCHMARKS } from '../../lib/constants';
-import ChartTooltip, { TooltipPanel } from './ChartTooltip';
+import ChartTooltip from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
 import SegmentedControl from '../ui/SegmentedControl';
 import Spinner from '../ui/Spinner';
@@ -22,7 +24,7 @@ const DEFAULT_RANGES = [
   { label: '1M',  days: 30  },
   { label: '6M',  days: 182 },
   { label: '1Y',  days: 365 },
-  { label: 'Max', days: null },
+  { label: 'All', days: null },
 ];
 
 
@@ -118,43 +120,13 @@ function formatTick(dateStr, span) {
   return `${mon} ${parseInt(d, 10)}`;                               // "Jan 5"
 }
 
-/**
- * X-axis tick selection for OHLC data.
- * Handles both hourly ("YYYY-MM-DDTHH:MM") and daily dates.
- */
-function getOhlcTicks(data) {
-  if (!data.length) return [];
-  if (data[0]?.date?.includes('T')) {
-    // Hourly: ~7 evenly-spaced ticks
-    const step = Math.max(1, Math.floor(data.length / 7));
-    return data.filter((_, i) => i % step === 0).map(d => d.date);
-  }
-  return getTicks(data);
-}
+/** A growth index has no currency and no lakh/crore compacting — a plain number around 100. */
+const formatIndex = (v) => (v == null ? '—' : v.toFixed(2));
 
-/**
- * X-axis tick label for OHLC data.
- */
-function formatOhlcTick(dateStr, span) {
-  if (!dateStr) return '';
-  if (dateStr.includes('T')) return dateStr.split('T')[1]?.slice(0, 5) || '';
-  return formatTick(dateStr, span);
-}
-
-/**
- * Full human-readable date/time label for the OHLC tooltip header.
- * "2024-01-15"         → "Jan 15, 2024"
- * "2024-01-15T09:30"   → "Jan 15, 2024 · 09:30"
- */
-function formatOhlcDate(dateStr) {
-  if (!dateStr) return '';
-  if (dateStr.includes('T')) {
-    const [datePart, timePart] = dateStr.split('T');
-    const [y, m, d] = datePart.split('-');
-    return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y} · ${timePart.slice(0, 5)}`;
-  }
-  const [y, m, d] = dateStr.split('-');
-  return `${MONTHS[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
+/** Every growth view opens at 100: scale the series by its first real value. */
+function rebaseTo100(rows) {
+  const base = rows.find(d => d.value != null && d.value !== 0)?.value;
+  return base ? rows.map(d => (d.value == null ? d : { ...d, value: (d.value / base) * 100 })) : rows;
 }
 
 /** Pad single-point data to 2 points so Recharts renders a line. */
@@ -191,6 +163,16 @@ const benchmarkLookups = (list, slots) => ({
 
 /** The Recharts dataKey a benchmark's rebased series is merged into. */
 const cmpKey = (symbol) => `cmp:${symbol}`;
+
+/** Indicators hold palette slots alongside benchmarks under this prefix, so no two lines share a hue. */
+const indSlot = (key) => `ind:${key}`;
+
+const DAY = 86400000;
+/** "2026-01-03" days before today (the app's day), inclusive of both ends. */
+const daysSince = (iso) => Math.max(1, Math.round((Date.parse(todayStr()) - Date.parse(iso)) / DAY) + 1);
+const isoDaysAgo = (n) => new Date(Date.parse(todayStr()) - n * DAY).toISOString().slice(0, 10);
+/** "3 Jan – 15 Mar '26" for a custom range's button. */
+const shortDate = (iso) => { const [y, m, d] = iso.split('-'); return `${+d} ${MONTHS[+m - 1]} '${y.slice(2)}`; };
 
 /** Vertical room a label needs before it collides with its neighbour. */
 const END_LABEL_GAP = 14;
@@ -252,79 +234,6 @@ function EndLabels({ series = [], base }) {
         </text>
       ))}
     </g>
-  );
-}
-
-// ── Candlestick shape factory ─────────────────────────────────────────────────
-
-/**
- * Returns a Recharts Bar shape that draws OHLC candlesticks.
- * yMinVal — YAxis domain minimum (passed via closure for pixel-scale math).
- *
- * Recharts gives us:
- *   y      = pixel y-coordinate of `close` (bar top, since baseline = yMin)
- *   height = pixel distance from yMin to close
- * Therefore: scale = height / (close − yMin)
- *            yAt(p) = y + (close − p) × scale
- */
-function makeCandleShape(yMinVal) {
-  return function CandleShape({ x, y, width, height, payload }) {
-    if (!payload || height <= 0) return null;
-    const { open, high, low, close } = payload;
-    if (close == null) return null;
-
-    const isUp  = close >= open;
-    const color = isUp ? '#22c55e' : '#ef4444';
-    const scale = height / Math.max(close - yMinVal, 1e-9);
-    const yAt   = (v) => y + (close - v) * scale;
-
-    const yH      = yAt(high);
-    const yL      = yAt(low);
-    const yO      = yAt(open);
-    const bodyTop = Math.min(yO, y);        // y = yAt(close)
-    const bodyH   = Math.max(1, Math.abs(yO - y));
-    const bw      = Math.max(2, width - 2);
-    const wickX   = x + width / 2;
-
-    return (
-      <g>
-        <line x1={wickX} y1={yH} x2={wickX} y2={yL} stroke={color} strokeWidth={1} />
-        <rect x={x + (width - bw) / 2} y={bodyTop} width={bw} height={bodyH} fill={color} />
-      </g>
-    );
-  };
-}
-
-// ── OHLC tooltip ──────────────────────────────────────────────────────────────
-
-function OhlcTooltip({ active, payload, formatValue }) {
-  if (!active || !payload?.[0]?.payload) return null;
-  const d    = payload[0].payload;
-  const isUp = d.close >= d.open;
-  const rows = [
-    { label: 'Open',  value: d.open,  color: 'var(--color-text-secondary)' },
-    { label: 'High',  value: d.high,  color: 'var(--color-success)' },
-    { label: 'Low',   value: d.low,   color: 'var(--color-danger)' },
-    { label: 'Close', value: d.close, color: isUp ? 'var(--color-success)' : 'var(--color-danger)' },
-  ];
-  return (
-    <TooltipPanel minWidth={175}>
-      <div style={{ padding: '6px 12px', background: 'var(--color-bg-elevated)', borderBottom: '1px solid var(--color-border-subtle)' }}>
-        <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', margin: 0, fontFamily: 'var(--font-mono)' }}>
-          {formatOhlcDate(d.date)}
-        </p>
-      </div>
-      <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        {rows.map(({ label, value, color }) => (
-          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
-            <span style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{label}</span>
-            <span style={{ fontSize: 12, fontWeight: 600, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)', color, whiteSpace: 'nowrap' }}>
-              {formatValue(value)}
-            </span>
-          </div>
-        ))}
-      </div>
-    </TooltipPanel>
   );
 }
 
@@ -465,7 +374,6 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
  *   fetchData(days, growth) — async fn returning [{date,value}]. Defaults to networthAPI.
  *                             `growth` is only ever passed through when `growthCapable`.
  *   staticData              — static [{date,value}] array; bypasses fetching.
- *   fetchOHLC(days)         — async fn returning [{date,open,high,low,close}]. Enables candlestick toggle.
  *   title                   — small label above the current value.
  *   valueLabel              — label shown in the tooltip (default: 'Value').
  *   formatValue(n)          — number formatter (default: formatCurrency).
@@ -496,7 +404,6 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
 export default function PriceGrapher({
   fetchData        = null,
   staticData       = null,
-  fetchOHLC        = null,
   title            = null,
   valueLabel       = 'Value',
   formatValue      = formatCurrency,
@@ -522,98 +429,171 @@ export default function PriceGrapher({
 
   const initRange = ranges.find(r => r.label === defaultRange) ?? ranges[ranges.length - 2] ?? ranges[0];
   const [range,       setRange]       = useState(initRange);
-  const [chartMode,   setChartMode]   = useState('line');  // 'line' | 'candle'
+  const [custom,      setCustom]      = useState(null);    // { from, to } — dates picked on the calendar
+  const [draft,       setDraft]       = useState({ from: null, to: null });
   const [view,        setView]        = useState(defaultView); // 'complete' | 'growth'
-  const [data,        setData]        = useState([]);
-  const [ohlcData,    setOhlcData]    = useState([]);
+  const [rawData,     setRawData]     = useState([]);      // as fetched, incl. any warm-up history
   const [loading,     setLoading]     = useState(!staticData);
+  const [indicators,  setIndicators]  = useState([]);      // [{ id, type, period, width? }] — see lib/indicators
+
+  // The window on screen: a preset, or the calendar's dates (fetched as "since `from`").
+  const win = useMemo(() => (custom
+    ? { label: 'Custom', days: daysSince(custom.from), from: custom.from, to: custom.to }
+    : range), [custom, range]);
 
   // ── Benchmark comparison (growth view only) ───────────────────────────────
   const [compareOpen,    setCompareOpen]    = useState(false);
   const [compareSymbols, setCompareSymbols] = useState(defaultCompare); // selected symbols
   const [compareSeries,  setCompareSeries]  = useState({});       // symbol -> [{date,close}]
+  const [addedBenchmarks, setAddedBenchmarks] = useState([]);   // any ticker or fixed rate the user brought
+  const allBenchmarks = useMemo(() => [...addedBenchmarks, ...benchmarks], [addedBenchmarks, benchmarks]);
+  const addBenchmark = useCallback((b) => {
+    setAddedBenchmarks(list => (list.some(x => x.symbol === b.symbol) || benchmarks.some(x => x.symbol === b.symbol) ? list : [b, ...list]));
+    setCompareSymbols(sel => (sel.includes(b.symbol) ? sel : [...sel, b.symbol]));
+    setView('growth');   // a comparison only means something rebased
+  }, [benchmarks]);
   const slotsRef = useRef({});
   const { colorOf: benchmarkColor, labelOf: benchmarkLabel } = useMemo(
-    () => benchmarkLookups(benchmarks, { ...assignSlots(slotsRef.current, compareSymbols) }),
-    [benchmarks, compareSymbols]);
+    () => benchmarkLookups(allBenchmarks, { ...assignSlots(slotsRef.current, [...compareSymbols, ...indicators.map(i => indSlot(i.id))]) }),
+    [allBenchmarks, compareSymbols, indicators]);
 
   const growth = growthCapable && view === 'growth';
 
-  const doFetch = useCallback(async (r, mode, isGrowth) => {
-    if (staticData) { setData(staticData); setLoading(false); return; }
-    setLoading(true);
-    try {
-      if (mode === 'candle' && fetchOHLC) {
-        const res = await fetchOHLC(r.days);
-        setOhlcData(res ?? []);
-      } else {
-        // The default series is net worth: T cash + the T-1 close, with today's row
-        // always appended (see networthAPI.getDaily).
-        const fn  = fetchData ?? ((d, g) => networthAPI.getDaily(d, g).then(res => res.data));
-        const res = await fn(r.days, isGrowth);
-        setData(res ?? []);
-      }
-    } catch {
-      if (mode === 'candle') setOhlcData([]);
-      else setData([]);
-    } finally { setLoading(false); }
-  }, [fetchData, fetchOHLC, staticData]);
+  // Warm-up history ahead of the window, so a 200-day average runs from the first point
+  // on screen. Not for intraday windows (hourly points) or All (nothing comes before it).
+  const warmup = win.days > 2 ? lookbackDays(indicators) : 0;
 
-  useEffect(() => { doFetch(range, chartMode, growth); }, [range, doFetch, refreshKey, chartMode, growth]);
+  // Only the latest request may land: a slow Complete response arriving after Growth
+  // was picked painted rupees under the index.
+  const fetchSeq = useRef(0);
+  const doFetch = useCallback(async (r, isGrowth, padDays) => {
+    if (staticData) { setRawData(staticData); setLoading(false); return; }
+    const seq = ++fetchSeq.current;
+    setLoading(true);
+    // A custom window ends where the calendar says, not today.
+    const inWindow = (rows) => (r.to ? rows.filter(d => d.date.slice(0, 10) <= r.to) : rows);
+    try {
+      // The default series is net worth: T cash + the T-1 close, with today's row
+      // always appended (see networthAPI.getDaily).
+      const fn  = fetchData ?? ((d, g, o) => networthAPI.getDaily(paddedDays(d, o), g).then(res => res.data));
+      const res = await fn(r.days, isGrowth, { pad: padDays });
+      if (seq === fetchSeq.current) setRawData(inWindow(res ?? []));
+    } catch {
+      if (seq === fetchSeq.current) setRawData([]);
+    } finally { if (seq === fetchSeq.current) setLoading(false); }
+  }, [fetchData, staticData]);
+
+  useEffect(() => { doFetch(win, growth, warmup); }, [win, doFetch, refreshKey, growth, warmup]);
+
+  // The first day ON SCREEN — rows before it are warm-up history for the indicators.
+  const windowFrom = win.from || (warmup && win.days ? isoDaysAgo(win.days) : null);
+  const firstShown = useMemo(() => {
+    if (!windowFrom) return 0;
+    const i = rawData.findIndex(d => d.date.slice(0, 10) >= windowFrom);
+    return i < 0 ? rawData.length : i;
+  }, [rawData, windowFrom]);
+
+  // Every growth view opens at 100 at the window's first point; `scale` carries that
+  // same factor to the indicators, which were computed on the unscaled series.
+  const { data, scale } = useMemo(() => {
+    const shown = rawData.slice(firstShown);
+    if (!growth) return { data: shown, scale: 1 };
+    const base = shown.find(d => d.value != null && d.value !== 0)?.value;
+    return base ? { data: rebaseTo100(shown), scale: 100 / base } : { data: shown, scale: 1 };
+  }, [rawData, firstShown, growth]);
 
   // Fetch every selected benchmark's raw close series over (roughly) the same window
   // as the primary series — re-based against it client-side once fetched (see
   // `compareRebased` below), so this only ever needs the RAW prices, not an index.
+  // Reaches back to the window's own first point, wherever a custom or All range put it.
+  const firstDate = data[0]?.date?.slice(0, 10);
   useEffect(() => {
-    if (!growth || !compareSymbols.length) { setCompareSeries({}); return; }
+    if (!growth || !compareSymbols.length || !firstDate) { setCompareSeries({}); return; }
     let cancelled = false;
-    const days = range.days ? range.days + 10 : 3650; // +10: buffer for the anchor day
+    const days = daysSince(firstDate) + 10; // +10: buffer for the anchor day
     Promise.all(compareSymbols.map(sym =>
       marketAPI.indexSeries(sym, days).then(res => [sym, res.data ?? []]).catch(() => [sym, []])
     )).then(entries => { if (!cancelled) setCompareSeries(Object.fromEntries(entries)); });
     return () => { cancelled = true; };
-  }, [growth, compareSymbols, range]);
+  }, [growth, compareSymbols, firstDate]);
 
-  // ── Drag-to-measure selection (line mode) ─────────────────────────────────
-  // A click-drag across the plot highlights a range and shows its % / absolute
-  // change. Refs mirror the live drag so mouse-up logic never reads stale state.
-  const [selStart, setSelStart] = useState(null); // x-label (date) where drag began
-  const [selEnd,   setSelEnd]   = useState(null); // x-label under the cursor
+  // ── Drag-to-measure selection ─────────────────────────────────────────────
+  // A click-drag across the plot highlights a range and shows its change. The live drag
+  // lives in a ref and reaches state at most once a frame, and only when the day under
+  // the cursor changes; the chart itself is memoised (see `chartBody`), so a drag
+  // re-renders the band and its label, never the thousands of points beneath them.
+  const [sel, setSel] = useState(null);           // { a, b } — each { label (date), x (px) }
   const [selecting, setSelecting] = useState(false);
-  const selectingRef = useRef(false);
-  const dragStartRef = useRef(null);
+  const dragRef = useRef(null);
+  const rafRef  = useRef(0);
   const chartAreaRef = useRef(null);
 
   const clearSelection = useCallback(() => {
-    selectingRef.current = false;
-    dragStartRef.current = null;
+    dragRef.current = null;
+    cancelAnimationFrame(rafRef.current); rafRef.current = 0;
     setSelecting(false);
-    setSelStart(null);
-    setSelEnd(null);
+    setSel(null);
   }, []);
 
-  const handleSelectDown = (e) => {
-    if (chartMode !== 'line' || !e || e.activeLabel == null) return;
-    selectingRef.current = true;
-    dragStartRef.current = e.activeLabel;
+  const pointOf = (e) => (e && e.activeLabel != null && e.activeCoordinate
+    ? { label: e.activeLabel, x: e.activeCoordinate.x } : null);
+  // The day under a page x, pinned to the first/last day past the plot's edges, so a drag
+  // keeps tracking once the cursor leaves the chart. The x axis is a point scale with no padding.
+  const rowsRef = useRef([]);
+  useEffect(() => { rowsRef.current = chartData; });
+  const pointAtX = (clientX) => {
+    const host = chartAreaRef.current, rows = rowsRef.current;
+    const svg = host?.querySelector('svg.recharts-surface');
+    const clip = svg?.querySelector('clipPath rect');
+    if (!clip || rows.length < 2) return null;
+    const left = +clip.getAttribute('x'), width = +clip.getAttribute('width');
+    const step = width / (rows.length - 1);
+    const i = Math.min(rows.length - 1, Math.max(0, Math.round((clientX - svg.getBoundingClientRect().left - left) / step)));
+    return { label: rows[i].date, x: left + i * step };
+  };
+  const listenersRef = useRef(null);
+  const detach = () => {
+    const l = listenersRef.current;
+    if (!l) return;
+    window.removeEventListener('mousemove', l.move);
+    window.removeEventListener('mouseup', l.up);
+    listenersRef.current = null;
+  };
+  const handleSelectDown = useCallback((e) => {
+    const p = pointOf(e);
+    if (!p) return;
+    dragRef.current = { a: p, b: p };
     setSelecting(true);
-    setSelStart(e.activeLabel);
-    setSelEnd(e.activeLabel);
-  };
-  const handleSelectMove = (e) => {
-    if (!selectingRef.current || !e || e.activeLabel == null) return;
-    setSelEnd(e.activeLabel);
-  };
-  const handleSelectUp = (e) => {
-    if (!selectingRef.current) return;
-    selectingRef.current = false;
-    setSelecting(false);
-    const end = e && e.activeLabel != null ? e.activeLabel : selEnd;
-    // A plain click (no drag) clears any existing selection instead of leaving
-    // a zero-width band.
-    if (end == null || end === dragStartRef.current) clearSelection();
-    else setSelEnd(end);
-  };
+    setSel({ a: p, b: p });
+    // Tracked on the window while the button is down: leaving the chart must not end or freeze the drag.
+    detach();
+    const move = (ev) => {
+      const d = dragRef.current, q = pointAtX(ev.clientX);
+      if (!d || !q || q.label === d.b.label) return;
+      d.b = q;
+      if (rafRef.current) return;
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        const cur = dragRef.current;
+        if (cur) setSel({ a: cur.a, b: cur.b });
+      });
+    };
+    const up = (ev) => {
+      detach();
+      const d = dragRef.current;
+      if (!d) return;
+      dragRef.current = null;
+      cancelAnimationFrame(rafRef.current); rafRef.current = 0;
+      const end = pointAtX(ev.clientX) || d.b;
+      setSelecting(false);
+      // A plain click (no drag) clears any selection instead of leaving a zero-width band.
+      setSel(end.label === d.a.label ? null : { a: d.a, b: end });
+    };
+    listenersRef.current = { move, up };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }, []);
+  useEffect(() => () => { cancelAnimationFrame(rafRef.current); detach(); }, []);
 
   // ── Pad single point so Recharts renders a line ───────────────────────────
   const displayData = useMemo(() => (
@@ -650,21 +630,48 @@ export default function PriceGrapher({
     return out;
   }, [growth, compareSymbols, compareSeries, displayData]);
 
+  // ── Indicators: computed over the whole fetched series (warm-up included), then cut
+  //    to the window and scaled like the line they describe. Each becomes one or more
+  //    `ind:<key>:<part>` columns on the chart data; RSI goes to its own pane.
+  const indicatorLines = useMemo(() => {
+    if (!indicators.length || !rawData.length) return [];
+    const values = rawData.map(d => d.value);
+    const lines = [];
+    for (const ind of indicators) {
+      const meta = indicatorTypeOf(ind.type);
+      if (!meta) continue;
+      for (const [part, arr] of Object.entries(computeIndicator(ind, values))) {
+        const shown = arr.slice(firstShown);
+        lines.push({
+          id: ind.id, part, meta,
+          dataKey: `ind:${ind.id}:${part}`,
+          name: meta.kind === 'band' ? `${indicatorLabel(ind)} ${part}` : indicatorLabel(ind),
+          pane: meta.kind === 'pane',
+          // RSI is scale-free; everything else moves with the line it sits on.
+          values: meta.kind === 'pane' ? shown : shown.map(v => (v == null ? null : v * scale)),
+        });
+      }
+    }
+    return lines;
+  }, [indicators, rawData, firstShown, scale]);
+  const overlays  = useMemo(() => indicatorLines.filter(l => !l.pane), [indicatorLines]);
+  const paneLines = useMemo(() => indicatorLines.filter(l => l.pane), [indicatorLines]);
+
   const chartData = useMemo(() => {
     const symbols = Object.keys(compareRebased);
-    if (!symbols.length) return displayData;
+    if (!symbols.length && !indicatorLines.length) return displayData;
     return displayData.map((row, i) => {
       const extra = {};
       for (const sym of symbols) extra[cmpKey(sym)] = compareRebased[sym][i];
+      for (const l of indicatorLines) extra[l.dataKey] = l.values[i] ?? null;
       return { ...row, ...extra };
     });
-  }, [displayData, compareRebased]);
+  }, [displayData, compareRebased, indicatorLines]);
 
   // ── Derived values ────────────────────────────────────────────────────────
   // An index has no currency and no compacting to lakhs/crores — it is a plain
   // number centred on 100, so it gets its own formatter rather than reusing
   // whatever the caller passes for rupee figures.
-  const formatIndex  = (v) => (v == null ? '—' : v.toFixed(2));
   // The value every growth percentage is measured from. Null/0 would make the ratio
   // meaningless, so the tooltip simply omits the percentage in that case.
   const growthBase   = displayData.find(d => d.value != null && d.value !== 0)?.value ?? null;
@@ -679,15 +686,19 @@ export default function PriceGrapher({
   const values  = [
     ...data.map(d => d.value),
     ...Object.values(compareRebased).flat(),
+    ...overlays.flatMap(l => l.values),
   ].filter(v => v != null);
-  const openVal = chartMode === 'candle' ? (ohlcData[0]?.open ?? 0)                    : (data[0]?.value ?? 0);
-  const lastVal = chartMode === 'candle' ? (ohlcData[ohlcData.length - 1]?.close ?? 0) : (data[data.length - 1]?.value ?? 0);
+  // A missing point is not a zero: read the ends off the first and last real values.
+  const firstReal = data.find(d => d.value != null)?.value;
+  const lastReal  = data.findLast(d => d.value != null)?.value;
+  const openVal = firstReal ?? 0;
+  const lastVal = lastReal ?? 0;
   const absChng = lastVal - openVal;
   const pctChng = openVal !== 0 ? (absChng / Math.abs(openVal)) * 100 : 0;
   const isPos   = absChng >= 0;
   const maxVal  = values.length ? Math.max(...values) : 0;
   const minVal  = values.length ? Math.min(...values) : 0;
-  const isFlat  = data.length > 0 && maxVal === minVal && chartMode === 'line';
+  const isFlat  = data.length > 0 && maxVal === minVal;
 
   // Animated stats
   const aLast = useAnimatedValue(lastVal);
@@ -706,9 +717,9 @@ export default function PriceGrapher({
   // Rebasing does not affect any of this: a rebased series is the raw closes scaled by a
   // constant, and a constant cancels in a ratio.
   const selection = useMemo(() => {
-    if (selStart == null || selEnd == null) return null;
-    const iA = displayData.findIndex(d => d.date === selStart);
-    const iB = displayData.findIndex(d => d.date === selEnd);
+    if (!sel) return null;
+    const iA = displayData.findIndex(d => d.date === sel.a.label);
+    const iB = displayData.findIndex(d => d.date === sel.b.label);
     if (iA < 0 || iB < 0 || iA === iB) return null;
     const lo = Math.min(iA, iB), hi = Math.max(iA, iB);
     const startVal = displayData[lo].value;
@@ -739,12 +750,18 @@ export default function PriceGrapher({
       };
     }).filter(Boolean);
 
-    return { x1: displayData[lo].date, x2: displayData[hi].date, abs, pct, pos: abs >= 0, benchmarks: measured };
-  }, [selStart, selEnd, displayData, compareRebased, benchmarkColor, benchmarkLabel]);
+    return {
+      left: Math.min(sel.a.x, sel.b.x), right: Math.max(sel.a.x, sel.b.x),
+      abs, pct, pos: abs >= 0, benchmarks: measured,
+    };
+  }, [sel, displayData, compareRebased, benchmarkColor, benchmarkLabel]);
 
   // ── Line chart: Y domain + gradient stop at opening price ─────────────────
   const pad  = (maxVal - minVal) * 0.05 || Math.abs(maxVal) * 0.02 || 1;
-  const yMin = minVal - pad;
+  // A price (or an index of one) is never below zero, so neither is its axis: the 5% pad
+  // must not invent negative ticks. A net worth that really is negative still gets them.
+  const nonNegative = data.every(d => d.value == null || d.value >= 0);
+  const yMin = nonNegative ? Math.max(0, minVal - pad) : minVal - pad;
   const yMax = maxVal + pad;
   // The green/red split must sit exactly on the opening-value reference line.
   // A gradient's 0–100% spans the bounding box of the ELEMENT it paints, not the
@@ -771,26 +788,14 @@ export default function PriceGrapher({
   const strokeColor = isFlat ? '#C9A96A' : `url(#${pgStrokeId})`;
   const fillColor   = isFlat ? `url(#${pgFlatFillId})` : `url(#${pgFillId})`;
 
-  // ── OHLC Y domain ─────────────────────────────────────────────────────────
-  const ohlcMinRaw = ohlcData.length ? Math.min(...ohlcData.map(d => d.low))  : 0;
-  const ohlcMaxRaw = ohlcData.length ? Math.max(...ohlcData.map(d => d.high)) : 1;
-  const ohlcPad    = (ohlcMaxRaw - ohlcMinRaw) * 0.05 || Math.abs(ohlcMaxRaw) * 0.02 || 1;
-  const ohlcYMin   = ohlcMinRaw - ohlcPad;
-  const ohlcYMax   = ohlcMaxRaw + ohlcPad;
-
-  // Memoised candle shape (changes only when ohlcYMin changes)
-  const candleShape = useMemo(() => makeCandleShape(ohlcYMin), [ohlcYMin]);
-
   // ── X-axis ticks + span (computed from actual data, not just range.days) ──
-  const ticks     = getTicks(displayData);
-  const ohlcTicks = getOhlcTicks(ohlcData);
+  const ticks     = useMemo(() => getTicks(displayData), [displayData]);
   const lineSpan  = useMemo(() => computeSpan(displayData), [displayData]);
-  const ohlcSpan  = useMemo(() => computeSpan(ohlcData),    [ohlcData]);
 
   // ── Misc ──────────────────────────────────────────────────────────────────
   const Icon           = isPos ? TrendingUp : TrendingDown;
   const clr            = isFlat ? '#C9A96A' : isPos ? 'var(--color-success)' : 'var(--color-danger)';
-  const activeEmpty    = chartMode === 'candle' ? ohlcData.length === 0 : data.length === 0;
+  const activeEmpty    = data.length === 0;
   // Each line's LAST real value, for the end-of-line labels. Read backwards rather
   // than taking `chartData.at(-1)`: a benchmark whose market was shut on the final day
   // is null there (the line is drawn with `connectNulls`), and labelling it "—" while
@@ -818,179 +823,17 @@ export default function PriceGrapher({
     ].filter(s => s.value != null);
   }, [comparing, chartData, compareRebased, clr, benchmarkColor]);
 
-  const wrapStyle = showCard ? {
-    background: 'var(--color-bg-card)',
-    border: '1px solid var(--color-border-subtle)',
-    borderRadius: 16,
-    overflow: 'hidden',
-  } : { overflow: 'hidden' };
-
-  return (
-    <div style={wrapStyle}>
-
-      {/* ── Header ──────────────────────────────────────────────────────── */}
-      <div style={{ padding: '20px 24px 14px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-
-        {/* Left: value + change */}
-        <div>
-          {title && (
-            <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', marginBottom: 6 }}>
-              {title}
-            </p>
-          )}
-          <p className="figure" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8 }}>
-            {growth ? effFormatValue(aLast) : compactIfLarge(aLast, formatValue)}
-          </p>
-          {(chartMode === 'line' ? data.length > 1 : ohlcData.length > 1) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              {/* percentage · trend icon · absolute change — all equal weight */}
-              <span className="figure" style={{ fontSize: 13, fontWeight: 600, color: clr }}>
-                {isFlat ? '0.00%' : `${aPct >= 0 ? '+' : '−'}${Math.abs(aPct).toFixed(2)}%`}
-              </span>
-              {!isFlat && <Icon size={14} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
-              <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
-                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${growth ? effFormatValue(Math.abs(aAbs)) : compactIfLarge(Math.abs(aAbs), formatValue)}`}
-              </span>
-            </div>
-          )}
-        </div>
-
-        {/* Right: complete/growth toggle + chart-type toggle + range selector + compare */}
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
-
-          {/* Complete vs growth view — growth reindexes to 100 at the series' own
-              first day, with every deposit/withdrawal after that subtracted back
-              out, so it plots what the money did rather than how much there was.
-              The "+" (growth only) opens the benchmark-comparison picker. */}
-          {growthCapable && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <SegmentedControl size="sm" ariaLabel="View" value={view} onChange={setView} options={[
-                { key: 'complete', label: viewLabels.complete },
-                { key: 'growth', label: viewLabels.growth, title: viewLabels.hint || 'Growth of the money itself, with deposits and withdrawals removed' },
-              ]} />
-              {growth && (
-                <button
-                  onClick={() => setCompareOpen(true)}
-                  title="Compare against an index"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    width: 22, height: 22, borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: comparing ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
-                    color: comparing ? 'var(--color-accent)' : 'var(--color-text-muted)',
-                    transition: 'all 0.15s',
-                  }}
-                >
-                  <Plus size={13} />
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Selected benchmarks — colour-matched chips, each removable without
-              reopening the picker. */}
-          {growth && compareSymbols.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 5, maxWidth: 220 }}>
-              {compareSymbols.map(sym => (
-                <button
-                  key={sym}
-                  onClick={() => setCompareSymbols(s => s.filter(x => x !== sym))}
-                  title="Remove from comparison"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
-                    border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-elevated)',
-                  }}
-                >
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: benchmarkColor(sym), flexShrink: 0 }} />
-                  <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                    {benchmarkLabel(sym)}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-
-            {/* Chart type toggle (only when OHLC data source provided) */}
-            {fetchOHLC && (
-              <SegmentedControl size="sm" ariaLabel="Chart type" value={chartMode}
-                onChange={m => { setChartMode(m); clearSelection(); }}
-                options={[
-                  { key: 'line',   icon: Activity,         title: 'Line chart' },
-                  { key: 'candle', icon: CandlestickChart, title: 'Candlestick chart' },
-                ]} />
-            )}
-
-            {/* Range selector */}
-            <SegmentedControl size="sm" ariaLabel="Range" value={range.label}
-              onChange={l => { setRange(ranges.find(r => r.label === l)); clearSelection(); }}
-              options={ranges.map(r => ({ key: r.label, label: r.label }))} />
-          </div>
-        </div>
-      </div>
-
-      {/* ── Chart area ──────────────────────────────────────────────────── */}
-      {loading ? (
-        <Spinner height={height} />
-      ) : activeEmpty ? (
-        <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{emptyText}</p>
-        </div>
-      ) : chartMode === 'candle' ? (
-
-        /* ── Candlestick chart ──────────────────────────────────────────── */
-        <ResponsiveContainer width="100%" height={height}>
-          <ComposedChart data={ohlcData} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
-            <defs>
-              <pattern id={`${pgFillId}-dots-c`} width="22" height="22" patternUnits="userSpaceOnUse">
-                <circle cx="1" cy="1" r="1" fill="rgba(180,196,220,0.10)" />
-              </pattern>
-            </defs>
-            <CartesianGrid vertical={false} horizontal={false} fill={`url(#${pgFillId}-dots-c)`} fillOpacity={1} />
-            <XAxis
-              dataKey="date"
-              ticks={ohlcTicks}
-              tickFormatter={d => formatOhlcTick(d, ohlcSpan)}
-              tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-              axisLine={false} tickLine={false} dy={8}
-            />
-            <YAxis
-              domain={[ohlcYMin, ohlcYMax]}
-              tickFormatter={axisFormat}
-              tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
-              axisLine={false} tickLine={false}
-              width={56} tickCount={5}
-            />
-            <Tooltip
-              content={<OhlcTooltip formatValue={formatValue} />}
-              cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
-              isAnimationActive={false}
-              wrapperStyle={{ transition: 'none', outline: 'none' }}
-            />
-            <Bar
-              dataKey="close"
-              shape={candleShape}
-              maxBarSize={20}
-              minPointSize={1}
-              isAnimationActive={false}
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-
-      ) : (
-
-        /* ── Line / area chart ──────────────────────────────────────────── */
-        <div ref={chartAreaRef} style={{ position: 'relative', cursor: 'crosshair', userSelect: 'none', WebkitUserSelect: 'none' }}>
+  // ── The chart itself, memoised: nothing a drag changes is in here (only `measuring`,
+  //    which flips at its start and end), so dragging never re-renders the plot.
+  const measuring = selecting || !!sel;
+  const chartBody = useMemo(() => (
+    <>
         <ResponsiveContainer width="100%" height={height}>
           <AreaChart
             data={chartData}
+            syncId={`pgsync${uid}`}
             margin={{ top: 4, right: comparing ? 58 : 16, bottom: 0, left: 0 }}
             onMouseDown={handleSelectDown}
-            onMouseMove={handleSelectMove}
-            onMouseUp={handleSelectUp}
-            onMouseLeave={handleSelectUp}
           >
             <defs>
               {/* Faint dot lattice for the plot background */}
@@ -1033,6 +876,7 @@ export default function PriceGrapher({
             />
             <YAxis
               domain={[yMin, yMax]}
+              allowDataOverflow
               tickFormatter={growth ? fmtYIndex : axisFormat}
               tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }}
               axisLine={false} tickLine={false}
@@ -1043,12 +887,12 @@ export default function PriceGrapher({
                 comparing, each series carries its own `name` (set below) instead
                 of one shared label, so `valueLabel` is left unset and ChartTooltip
                 falls back to per-series names. */}
-            {!selecting && !selection && (
+            {!measuring && (
               <Tooltip
                 content={
                   <ChartTooltip
                     formatValue={effFormatValue}
-                    valueLabel={comparing ? undefined : effValueLabel}
+                    valueLabel={comparing || overlays.length ? undefined : effValueLabel}
                     // Growth only. The anchor is the first VISIBLE point, which is also
                     // what every benchmark overlay was rebased to — so the primary line
                     // and its comparisons all report percentages from the same instant.
@@ -1077,7 +921,7 @@ export default function PriceGrapher({
               stroke={strokeColor} strokeWidth={1.75}
               fill={fillColor}
               dot={false}
-              activeDot={(selecting || selection) ? false : (props) => {
+              activeDot={measuring ? false : (props) => {
                 // Colour the hover dot by the region it sits in (above/below the
                 // opening reference line), matching the line's own colour there.
                 // Suppressed while measuring so it never covers the selection box.
@@ -1108,37 +952,247 @@ export default function PriceGrapher({
               />
             ))}
 
+            {/* Indicators — thin lines in their own palette slot: averages solid (EMA
+                dashed), Bollinger's two bands dotted. Never filled, never animated. */}
+            {overlays.map(l => (
+              <Line
+                key={l.dataKey}
+                type="monotone"
+                dataKey={l.dataKey}
+                name={l.name}
+                stroke={benchmarkColor(indSlot(l.id))}
+                strokeWidth={l.meta.kind === 'band' ? 1 : 1.25}
+                strokeDasharray={l.meta.kind === 'band' ? '2 3' : l.meta.type === 'ema' ? '5 3' : undefined}
+                strokeOpacity={0.9}
+                dot={false}
+                activeDot={false}
+                connectNulls
+                isAnimationActive={false}
+              />
+            ))}
+
             {/* Each line's percentage, at the line's own end. Last child so it paints
                 over the series rather than under them. */}
             {comparing && endLabelSeries.length > 0 && (
               <EndLabels series={endLabelSeries} base={growthBase} />
             )}
 
-            {/* Drag-selected range — tinted band + change summary */}
-            {selection && (
-              <ReferenceArea
-                x1={selection.x1}
-                x2={selection.x2}
-                fill={selection.pos ? '#22c55e' : '#ef4444'}
-                fillOpacity={0.1}
-                stroke={selection.pos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}
-                strokeWidth={1}
-                isAnimationActive={false}
-                label={(
-                  <SelectionLabel
-                    pct={selection.pct}
-                    abs={selection.abs}
-                    pos={selection.pos}
-                    benchmarks={selection.benchmarks}
-                    formatValue={effFormatValue}
-                    host={chartAreaRef.current}
-                    name={valueLabel !== 'Value' ? valueLabel : null}
-                  />
-                )}
-              />
-            )}
           </AreaChart>
         </ResponsiveContainer>
+        {/* RSI in its own pane: a 0–100 oscillator cannot share the price axis. Same
+            margins and data as the chart above, synced to it, so its points line up. */}
+        {paneLines.length > 0 && (
+          <div style={{ position: 'relative', borderTop: '1px solid var(--color-border-subtle)', marginTop: 6 }}>
+            <span className="text-xs" style={{ position: 'absolute', top: 4, left: 60, color: 'var(--color-text-muted)', pointerEvents: 'none', zIndex: 1 }}>
+              {paneLines.map(l => l.name).join(' · ')}
+            </span>
+            <ResponsiveContainer width="100%" height={84}>
+              <ComposedChart data={chartData} syncId={`pgsync${uid}`} margin={{ top: 8, right: comparing ? 58 : 16, bottom: 4, left: 0 }}>
+                <XAxis dataKey="date" hide />
+                <YAxis domain={[0, 100]} ticks={[30, 70]} width={56}
+                  tick={{ fill: '#878D97', fontSize: 10, fontFamily: 'var(--font-mono)' }} axisLine={false} tickLine={false} />
+                <ReferenceLine y={70} stroke="rgba(255,255,255,0.14)" strokeDasharray="3 3" />
+                <ReferenceLine y={30} stroke="rgba(255,255,255,0.14)" strokeDasharray="3 3" />
+                <Tooltip isAnimationActive={false} position={{ y: 0 }}
+                  cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
+                  content={({ active, payload }) => {
+                    const vals = active ? (payload || []).filter(p => p.value != null) : [];
+                    return vals.length ? (
+                      <span className="figure" style={{ fontSize: 11, color: 'var(--color-text-primary)', background: 'var(--color-bg-popover)', border: '1px solid var(--color-border-hover)', borderRadius: 6, padding: '2px 7px' }}>
+                        {vals.map(p => p.value.toFixed(1)).join(' · ')}
+                      </span>
+                    ) : null;
+                  }} />
+                {paneLines.map(l => (
+                  <Line key={l.dataKey} type="monotone" dataKey={l.dataKey} name={l.name} stroke={benchmarkColor(indSlot(l.id))}
+                    strokeWidth={1.25} dot={false} activeDot={{ r: 2.5, strokeWidth: 0 }} connectNulls isAnimationActive={false} />
+                ))}
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+    </>
+  ), [axisFormat, benchmarkColor, benchmarkLabel, chartData, compareRebased, comparing, data.length,
+    effFormatValue, effValueLabel, endLabelSeries, fillColor, fillOffsetRed, growth, growthBase,
+    handleSelectDown, height, isFlat, lineSpan, measuring, openVal,
+    overlays, paneLines, pgFillId, pgFlatFillId, pgStrokeId, stopOffsetRed, strokeColor, ticks, uid,
+    yMax, yMin]);
+
+  const wrapStyle = showCard ? {
+    background: 'var(--color-bg-card)',
+    border: '1px solid var(--color-border-subtle)',
+    borderRadius: 16,
+    overflow: 'hidden',
+  } : { overflow: 'hidden' };
+
+  return (
+    <div style={wrapStyle}>
+
+      {/* ── Header ──────────────────────────────────────────────────────── */}
+      <div style={{ padding: '20px 24px 14px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+
+        {/* Left: value + change */}
+        <div>
+          {title && (
+            <p style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--color-text-muted)', marginBottom: 6 }}>
+              {title}
+            </p>
+          )}
+          <p className="figure" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8 }}>
+            {growth ? effFormatValue(aLast) : compactIfLarge(aLast, formatValue)}
+          </p>
+          {data.length > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {/* percentage · trend icon · absolute change — all equal weight */}
+              <span className="figure" style={{ fontSize: 13, fontWeight: 600, color: clr }}>
+                {isFlat ? '0.00%' : `${aPct >= 0 ? '+' : '−'}${Math.abs(aPct).toFixed(2)}%`}
+              </span>
+              {!isFlat && <Icon size={14} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
+              <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
+                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${growth ? effFormatValue(Math.abs(aAbs)) : compactIfLarge(Math.abs(aAbs), formatValue)}`}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Right: complete/growth toggle + chart-type toggle + range selector + compare */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
+
+          {/* Complete vs growth view — growth reindexes to 100 at the series' own
+              first day, with every deposit/withdrawal after that subtracted back
+              out, so it plots what the money did rather than how much there was.
+              The "+" opens benchmarks and indicators; a benchmark flips to growth. */}
+          {growthCapable && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <SegmentedControl size="sm" ariaLabel="View" value={view} onChange={setView} options={[
+                { key: 'complete', label: viewLabels.complete },
+                { key: 'growth', label: viewLabels.growth, title: viewLabels.hint || 'Growth of the money itself, with deposits and withdrawals removed' },
+              ]} />
+              <button
+                onClick={() => setCompareOpen(true)}
+                title="Compare against a benchmark, or add an indicator"
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 22, height: 22, borderRadius: 6, border: 'none', cursor: 'pointer',
+                  background: comparing || indicators.length ? 'var(--color-accent-dim)' : 'var(--color-bg-elevated)',
+                  color: comparing || indicators.length ? 'var(--color-accent)' : 'var(--color-text-muted)',
+                  transition: 'all 0.15s',
+                }}
+              >
+                <Plus size={13} />
+              </button>
+            </div>
+          )}
+
+          {/* Selected benchmarks — colour-matched chips, each removable without
+              reopening the picker. */}
+          {((growth && compareSymbols.length > 0) || indicators.length > 0) && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 5, maxWidth: 260 }}>
+              {indicators.map(ind => (
+                <button
+                  key={ind.id}
+                  onClick={() => setIndicators(s => s.filter(x => x.id !== ind.id))}
+                  title="Remove indicator (edit it from +)"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
+                    border: '1px dashed var(--color-border-hover)', background: 'transparent',
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: benchmarkColor(indSlot(ind.id)), flexShrink: 0 }} />
+                  <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                    {indicatorLabel(ind)}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
+                </button>
+              ))}
+              {growth && compareSymbols.map(sym => (
+                <button
+                  key={sym}
+                  onClick={() => setCompareSymbols(s => s.filter(x => x !== sym))}
+                  title="Remove from comparison"
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
+                    border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-elevated)',
+                  }}
+                >
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: benchmarkColor(sym), flexShrink: 0 }} />
+                  <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
+                    {benchmarkLabel(sym)}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+            {/* Range selector — a preset, or any dates from the calendar beside it. */}
+            <SegmentedControl size="sm" ariaLabel="Range" value={custom ? null : range.label}
+              onChange={l => { setRange(ranges.find(r => r.label === l)); setCustom(null); clearSelection(); }}
+              options={ranges.map(r => ({ key: r.label, label: r.label }))} />
+            <DateRangePicker
+              value={draft}
+              max={todayStr()}
+              onChange={(v) => {
+                setDraft(v);
+                clearSelection();
+                // Clear goes back to the preset; a From alone runs to today; reversed dates swap.
+                if (!v.from && !v.to) { setCustom(null); return; }
+                if (!v.from) return;
+                const to = v.to || todayStr();
+                setCustom(v.from <= to ? { from: v.from, to } : { from: to, to: v.from });
+              }}
+              trigger={({ toggle, open }) => (
+                <button type="button" onClick={toggle} className={`chart-range-cal${custom || open ? ' active' : ''}`}
+                  title={custom ? 'Change the dates' : 'Pick custom dates'} aria-label="Custom date range">
+                  <Calendar size={12} strokeWidth={2} />
+                  {custom && <span className="figure">{shortDate(custom.from)} – {shortDate(custom.to)}</span>}
+                </button>
+              )}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Chart area ──────────────────────────────────────────────────── */}
+      {loading ? (
+        <Spinner height={height} />
+      ) : activeEmpty ? (
+        <div style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <p style={{ fontSize: 13, color: 'var(--color-text-muted)' }}>{emptyText}</p>
+        </div>
+      ) : (
+
+        /* ── Line / area chart ──────────────────────────────────────────── */
+        <div ref={chartAreaRef} style={{ position: 'relative', cursor: 'crosshair', userSelect: 'none', WebkitUserSelect: 'none' }}>
+        {chartBody}
+        {/* The measured range: an HTML band and label over the memoised chart, so a drag
+            never re-renders the chart beneath it. Spans the plot's height (below the top
+            margin, above the x-axis). */}
+        {selection && (
+          <>
+            <div style={{
+              position: 'absolute', pointerEvents: 'none', top: 4, height: height - 34,
+              left: selection.left, width: Math.max(1, selection.right - selection.left),
+              background: selection.pos ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
+              borderLeft: `1px solid ${selection.pos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}`,
+              borderRight: `1px solid ${selection.pos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}`,
+            }} />
+            <SelectionLabel
+              viewBox={{ x: selection.left, width: selection.right - selection.left, y: 4 }}
+              pct={selection.pct}
+              abs={selection.abs}
+              pos={selection.pos}
+              benchmarks={selection.benchmarks}
+              formatValue={effFormatValue}
+              host={chartAreaRef.current}
+              name={valueLabel !== 'Value' ? valueLabel : null}
+            />
+          </>
+        )}
         {/* Discoverability hint for the drag-to-measure gesture — top-right so
             it clears the x-axis labels along the bottom. Prompts to measure when
             idle, and to release once a range is selected. Kept mounted and driven
@@ -1161,9 +1215,18 @@ export default function PriceGrapher({
           open={compareOpen}
           onClose={() => setCompareOpen(false)}
           selected={compareSymbols}
-          onChange={setCompareSymbols}
+          onChange={(next) => {
+            // A comparison only means something rebased: picking one from Price view switches to growth.
+            if (next.length > compareSymbols.length) setView('growth');
+            setCompareSymbols(next);
+          }}
           colorOf={benchmarkColor}
-          options={benchmarks}
+          options={allBenchmarks}
+          onAdd={addBenchmark}
+          indicators={indicators}
+          onIndicatorsChange={setIndicators}
+          indicatorColorOf={(id) => benchmarkColor(indSlot(id))}
+          initialTab={growth ? 'list' : 'indicators'}
         />
       )}
     </div>

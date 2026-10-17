@@ -148,7 +148,8 @@ export const marketAPI = {
   // assetType/purity are only needed for physical metal, which is priced per gram
   // by type rather than by symbol.
   price:  (symbol, date, opts = {}) => api.get('/market/price', { params: { symbol, date, ...opts } }),
-  ohlc:   (symbol, days) => api.get('/market/ohlc',   { params: days ? { symbol, days } : { symbol } }),
+  // `pad` — extra days before the window, at the window's own interval (indicator warm-up).
+  ohlc:   (symbol, days, pad) => api.get('/market/ohlc',   { params: days ? { symbol, days, ...(pad ? { pad } : {}) } : { symbol } }),
   // A day-by-day close series for a benchmark index, carried forward across
   // non-trading days — feeds the growth view's comparison overlay.
   indexSeries: (symbol, days) => api.get('/market/index-series', { params: days ? { symbol, days } : { symbol } }),
@@ -159,6 +160,7 @@ export const marketsAPI = {
   // `fresh` — the Markets refresh button: bypass the server's caches (it throttles).
   overview: (fresh)              => api.get('/markets/overview', { params: fresh ? { fresh: true } : {} }),
   sectors:  (fresh)              => api.get('/markets/sectors',  { params: fresh ? { fresh: true } : {} }),
+  business: (symbol, global) => api.get(`/markets/stocks/${encodeURIComponent(symbol)}/business`, { params: global ? { global: true } : {}, timeout: 180000 }),
   stock:    (symbol, fresh, global) => api.get(`/markets/stocks/${encodeURIComponent(symbol)}`, { params: { ...(fresh ? { fresh: true } : {}), ...(global ? { global: true } : {}) } }),
   asset:    (symbol, fresh)      => api.get(`/markets/assets/${encodeURIComponent(symbol)}`, { params: fresh ? { fresh: true } : {} }),
   flows:    (sessions = 60, fresh) => api.get('/markets/flows',  { params: { sessions, ...(fresh ? { fresh: true } : {}) } }),
@@ -186,8 +188,9 @@ export const networthAPI = {
   // Today is always appended to the settled series (T cash + T-1 close), so the chart
   // ends where the headline figure does instead of a day short of it.
   // `growth` swaps the series for a growth-only index (base 100) — see PriceGrapher.
-  getDaily: (days, growth) => api.get('/networth/daily', {
-    params: { ...(days ? { days } : {}), ...(growth ? { growth: 'true' } : {}) },
+  // `basis: 'assets'` charts the invested book alone — no cash, no debt.
+  getDaily: (days, growth, basis) => api.get('/networth/daily', {
+    params: { ...(days ? { days } : {}), ...(growth ? { growth: 'true' } : {}), ...(basis ? { basis } : {}) },
   }),
   ensure:   ()     => api.post('/networth/ensure'),
   rebuild:  ()     => api.post('/networth/rebuild'),

@@ -1,6 +1,7 @@
 const { autoCategory } = require('./categoryRules');
 const llmService = require('./llmService');
 const conf = require('./confidence');
+const { listedAssetType } = require('../utils/assetPricing');
 
 // ─── Shared helpers ────────────────────────────────────────────────────────
 
@@ -27,7 +28,7 @@ function cleanNarration(raw) {
   
   let s = raw
     // 1. Payment rail identifiers + trailing separators
-    .replace(/\b(UPI(INT)?|IMPS|NEFT|RTGS|NWD|FT|NACH|ECS|AUTOPAY|MANDATE|ACH|INB|MMT|CMS)\b[-–_/]*/gi, ' ')
+    .replace(/\b(UPI(INT|A[BR])?|IMPS(A[BR])?|NEFT|RTGS|NWD|FT|NACH|ECS|AUTOPAY|MANDATE|ACH|INB|MMT|CMS)\b[-–_/]*/gi, ' ')
     // 2. Any IFSC code (4 letters + 0 + 6 alphanumeric is the RBI format)
     .replace(/\b[A-Z]{4}0[A-Z0-9]{6}\b/gi, ' ')
     // 3. UPI handles (vpa@bank). The local part excludes '-' so we don't swallow
@@ -64,7 +65,7 @@ function cleanNarration(raw) {
  * @param directionVerified false when income/expense was assumed rather than checked
  *                          against the running balance
  */
-function buildTx({ date, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit,
+function buildTx({ date, time, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit,
                    parseSource = 'llm_text', modelScore, directionVerified = true }) {
   const isAsset = type === 'buy' || type === 'sell';
   const u = units       != null ? Number(units)       : undefined;
@@ -78,6 +79,8 @@ function buildTx({ date, narration, amount, type, source, accountRef, assetSymbo
   const tx = {
     id: uid(),
     date,
+    // Clock time when the statement prints one; a categorisation signal only, never persisted.
+    time: time || undefined,
     narration,
     description: cleanNarration(narration),
     // Asset amount is derived from units × price (0 when price is unknown yet).
@@ -101,7 +104,7 @@ function buildTx({ date, narration, amount, type, source, accountRef, assetSymbo
     // to the name here would produce a symbol that prices to nothing.
     tx.assetSymbol  = (assetSymbol || '').toUpperCase();
     tx.assetName    = assetName || assetSymbol || '';
-    tx.assetType    = assetType || 'stock';
+    tx.assetType    = listedAssetType(assetType || 'stock');
     tx.units        = u;
     tx.pricePerUnit = p;
   }
@@ -121,6 +124,7 @@ function finalizeAiResult(parsed, source) {
   const transactions = (parsed.transactions || [])
     .map(tx => buildTx({
       date:         tx.date,
+      time:         /^\d{2}:\d{2}/.test(tx.time || '') ? tx.time.slice(0, 5) : undefined,
       narration:    tx.narration || '',
       amount:       parseFloat(tx.amount) || 0,
       type:         tx.type || 'expense',
@@ -191,6 +195,10 @@ async function buildResultFromText(text, source) {
   const regexTxns = parseBankText(text);
   if (regexTxns.length) {
     return { transactions: regexTxns, ...extractBankMeta(text), source };
+  }
+  const ledgerTxns = parseLedgerBlocks(text);
+  if (ledgerTxns.length) {
+    return { transactions: ledgerTxns, ...extractBankMeta(text), source };
   }
 
   // 2. Fall back to the LLM for formats the regex parser can't handle.
@@ -312,6 +320,83 @@ function parseBankText(text) {
   return transactions;
 }
 
+/**
+ * Statements that print each row as a block: a DD-MM-YYYY line, an optional time,
+ * wrapped remarks, then "[-] <amount> <balance>" (Union Bank and similar).
+ * Direction comes from the running balance; the first row falls back to a /CR/ or /DR/ marker.
+ */
+function parseLedgerBlocks(text) {
+  const lines = text.split('\n').map(l => l.trim());
+  const DATE_RE = /^(\d{2})[-/](\d{2})[-/](\d{4})$/;
+  const TIME_RE = /^\d{2}:\d{2}(:\d{2})?$/;
+  const AMT_RE  = /^(?:-\s+)?([\d,]+\.\d{2})\s+(-?[\d,]+\.\d{2})(?:\s*(Cr|Dr))?$/i;
+  const WRAP_AT = 16;
+
+  // "NAME SO FATHER" — the holder is the part before the relation.
+  const holderLine = lines[lines.findIndex(l => /^Statement of Account$/i.test(l)) + 1] || '';
+  const holderWords = /^[A-Z][A-Z ]+$/.test(holderLine)
+    ? holderLine.split(/\s+(?:S|D|W|C)\/?O\s+/)[0].split(/\s+/).filter(w => w.length > 3)
+    : [];
+
+  const rows = [];
+  for (let i = 0; i < lines.length; i++) {
+    const dm = DATE_RE.exec(lines[i]);
+    if (!dm) continue;
+    let j = i + 1;
+    const time = TIME_RE.test(lines[j] || '') ? lines[j++].slice(0, 5) : undefined;
+    const parts = [];
+    let amt = null;
+    for (; j < lines.length && j < i + 20; j++) {
+      if (DATE_RE.test(lines[j])) break;
+      const am = AMT_RE.exec(lines[j]);
+      if (am) { amt = am; break; }
+      if (lines[j]) parts.push(lines[j]);
+    }
+    if (!amt || !parts.length) continue;
+    // Remarks wrap at a fixed width, often mid-word; a short line ended at a word break.
+    let narration = parts[0].replace(/^\S+\t/, '');
+    for (let k = 1; k < parts.length; k++) {
+      narration += (parts[k - 1].length >= WRAP_AT ? '' : ' ') + parts[k];
+    }
+    rows.push({
+      date: `${dm[3]}-${dm[2]}-${dm[1]}`,
+      time,
+      narration: narration.trim(),
+      amount: parseAmount(amt[1]),
+      balance: parseAmount(amt[2]) * (/dr/i.test(amt[3] || '') ? -1 : 1),
+    });
+    i = j;
+  }
+
+  const transactions = [];
+  let prev = null;
+  for (const r of rows) {
+    let type, verified = true;
+    if (prev !== null) {
+      type = r.balance > prev + 0.005 ? 'income' : 'expense';
+    } else if (/\/CR\/|\bCR\b/.test(r.narration)) {
+      type = 'income';
+    } else if (/\/DR\/|\bDR\b/.test(r.narration)) {
+      type = 'expense';
+    } else {
+      type = 'expense';
+      verified = false;
+    }
+    if (type === 'expense' && holderWords.length >= 2) {
+      const upper = r.narration.toUpperCase();
+      if (holderWords.every(w => upper.includes(w))) type = 'transfer';
+    }
+    if (r.amount > 0.01) {
+      transactions.push(buildTx({
+        date: r.date, time: r.time, narration: r.narration, amount: r.amount, type, source: 'pdf',
+        parseSource: 'bank_block', directionVerified: verified,
+      }));
+    }
+    prev = r.balance;
+  }
+  return transactions;
+}
+
 function resolveType(prevBalance, closing, narration, holderWords) {
   const type = prevBalance !== null
     ? (closing > prevBalance + 0.5 ? 'income' : 'expense')
@@ -327,8 +412,8 @@ function resolveType(prevBalance, closing, narration, holderWords) {
 }
 
 function extractBankMeta(text) {
-  const fromMatch = text.match(/From\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
-  const toMatch   = text.match(/To\s*:\s*(\d{2}\/\d{2}\/\d{4})/i);
+  const fromMatch = text.match(/From\s*[:-]\s*-?(\d{2}\/\d{2}\/\d{4})/i);
+  const toMatch   = text.match(/\bTo\s*[:-]?\s*(\d{2}\/\d{2}\/\d{4})/i);
   const bankMatch = text.match(/(HDFC BANK|AXIS BANK|STATE BANK|SBI|ICICI BANK|KOTAK|YES BANK|UNION BANK|CANARA BANK|PUNJAB NATIONAL BANK|IDFC|FEDERAL BANK)/i);
   const nameMatch = text.match(/(MR|MS|MRS|DR)\.?\s+([A-Z][A-Z\s]{3,}?)(?:\n|WELLS FARGO|Account No|Cust ID)/);
 

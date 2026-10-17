@@ -31,7 +31,7 @@ const { fetchHistoricPrices } = require('./marketDataService');
 const { DAY_MS }              = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder }             = require('../utils/tsHelpers');
-const { buildAccountTxnsMap, externalFlowImpact, isFlatUnits } = require('../utils/transactionHelpers');
+const { buildAccountTxnsMap, externalFlowImpact, assetFlowImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { accruedPrice, isRateAsset } = require('../utils/assetPricing');
 // Subscriptions materialise into transactions at the start of every `ensureUpToToday`.
 // One-way dependency: subscriptionService must NOT require this module back.
@@ -92,9 +92,10 @@ function fetchPrices(assets, assetStartMs) {
  *                          transfer in/out counts); omitted = the whole system's
  *                          boundary (a transfer between the user's own accounts nets
  *                          to zero and is not a flow).
+ * @param {boolean} [assetsOnly]  The series is the asset book alone: buys and sells are its flows.
  * @returns {Promise<(number|null)[]>}
  */
-async function computeGrowthIndex(userId, startMs, endMs, valuesTS, accountId = null) {
+async function computeGrowthIndex(userId, startMs, endMs, valuesTS, accountId = null, assetsOnly = false) {
   if (!valuesTS.length) return [];
 
   const filter = {
@@ -108,7 +109,7 @@ async function computeGrowthIndex(userId, startMs, endMs, valuesTS, accountId = 
 
   const impactsByDay = {};
   for (const tx of txns) {
-    const impact = externalFlowImpact(tx, accountId);
+    const impact = assetsOnly ? assetFlowImpact(tx) : externalFlowImpact(tx, accountId);
     if (!impact) continue;
     const day = midnight(tx.date);
     impactsByDay[day] = (impactsByDay[day] || 0) + impact;
@@ -149,6 +150,12 @@ async function rebuildNW(userId) {
   // it is stamped to T (today) so `ensureUpToToday` treats a same-day store as up
   // to date. (Account cashTS likewise runs to T.)
   await upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, globalStartMs, todayMs());
+}
+
+/** Every account's asset value summed into one T-1 series (no cash, no debt). */
+async function assetTotalSeries(userId) {
+  const docs = await DailyAccountBalance.find({ user: userId }).select('startDate assetTS').lean();
+  return tsService.buildAssetTotalTS(docs.map(d => ({ assetTS: d.assetTS || [], startMs: midnight(d.startDate) })));
 }
 
 /** Full rebuild of all account stores, net worth, and holdings from history. */
@@ -502,4 +509,5 @@ module.exports = {
   upsertAccountBalance,
   upsertNetWorth,
   computeGrowthIndex,
+  assetTotalSeries,
 };

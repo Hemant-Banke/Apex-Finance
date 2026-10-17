@@ -67,6 +67,9 @@ const PURITY_OPTIONS = {
 };
 
 const isPurityAsset = (assetType) => PURITY_ASSET_TYPES.includes(assetType);
+
+// A traded instrument is never physical metal: a gold/silver ETF is a unit, not grams.
+const listedAssetType = (assetType) => (isPurityAsset(assetType) ? 'etf' : assetType);
 const isMarketAsset = (assetType) => MARKET_ASSET_TYPES.includes(assetType);
 
 /** True when the asset should carry an annual rate (coupon or expected return). */
@@ -135,6 +138,7 @@ module.exports = {
   FX_SYMBOL,
   PURITY_OPTIONS,
   isPurityAsset,
+  listedAssetType,
   isRateAsset,
   purityFactor,
   metalInrPerGram,

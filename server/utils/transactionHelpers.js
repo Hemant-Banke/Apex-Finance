@@ -73,6 +73,13 @@ function externalFlowImpact(tx, accountId) {
   return 0;
 }
 
+/** Money crossing the ASSET book's boundary: every buy brings value in, every sell takes it out. */
+function assetFlowImpact(tx) {
+  if (tx.type === 'buy')  return  tx.amount;
+  if (tx.type === 'sell') return -tx.amount;
+  return 0;
+}
+
 /** Directional asset-quantity impact of a transaction (+1 acquires units, -1 releases). */
 function directionalAssetImpact(txType) {
   switch (txType) {
@@ -218,6 +225,7 @@ module.exports = {
   isFlatUnits,
   accountCashImpact,
   externalFlowImpact,
+  assetFlowImpact,
   directionalAssetImpact,
   flipTx,
   buildCashImpactMap,

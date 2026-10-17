@@ -29,6 +29,7 @@ const { notFound } = require('../utils/httpError');
 const { round, toSorted, valueAt, windowReturns, holdingExperience } = require('../utils/series');
 const { PURITY_OPTIONS } = require('../utils/assetPricing');
 const { fetchChart, closesByDay, fetchHistoricPrices } = require('./marketDataService');
+const fundPortfolioService = require('./fundPortfolioService');
 const mfService = require('./mfService');
 const indiaMarketService = require('./indiaMarketService');
 const sectorService = require('./sectorService');
@@ -228,10 +229,11 @@ async function getAsset(symbol, { fresh = false } = {}) {
 
   const bench = benchmarkFor(symbol, asset);
   const foreign = asset.quoteCurrency && asset.quoteCurrency !== 'INR' ? asset.quoteCurrency : null;
-  const [b, profile, lens] = await Promise.all([
+  const [b, profile, lens, portfolio] = await Promise.all([
     bench ? _load(bench.symbol).then(x => x.series).catch(() => []) : [],
     _profile(symbol, asset).catch(() => null),
     foreign ? _currencyLens(foreign, s).catch(() => null) : null,
+    fundPortfolioService.getPortfolio(symbol, asset.type),
   ]);
   const aRet = windowReturns(s), bRet = windowReturns(b);
   const last = s[s.length - 1][1];
@@ -266,6 +268,8 @@ async function getAsset(symbol, { fresh = false } = {}) {
     },
 
     profile,
+    // What a fund, ETF or foreign index holds (an NSE index carries its own in `profile`).
+    portfolio,
     currencyLens: lens,
     experience: holdingExperience(s, b),
   };

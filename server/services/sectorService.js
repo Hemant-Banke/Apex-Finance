@@ -441,6 +441,19 @@ async function getComposition(listFile) {
  * NSE row for anything in the index. Every typed token must start a word of the name or
  * the symbol ("tata mot" → Tata Motors).
  */
+const _normName = (n) => String(n || '').toLowerCase()
+  .replace(/\b(ltd|limited|corporation|corpn?|company|co|inc|plc|the|of india)\b/g, ' ')
+  .replace(/[^a-z0-9]+/g, ' ').trim();
+
+/** The NSE symbol of a company named EXACTLY (once normalised) as a Nifty 500 member, else null. */
+async function matchUniverseName(name) {
+  const universe = await _getUniverse().catch(() => null);
+  if (!universe) return null;
+  if (_nameIndex?.of !== universe) _nameIndex = { of: universe, map: new Map(universe.map(u => [_normName(u.name), u.symbol])) };
+  return _nameIndex.map.get(_normName(name)) || null;
+}
+let _nameIndex = null;
+
 async function searchUniverse(q, limit = 8) {
   const tokens = String(q || '').toLowerCase().split(/[^a-z0-9&]+/).filter(Boolean);
   if (!tokens.length) return [];
@@ -473,4 +486,4 @@ function peekClassification() {
   return { ready: !!universe, bySymbol, rank };
 }
 
-module.exports = { getSectors, getPeers, getComposition, searchUniverse, peekClassification, _csv, _weighted };
+module.exports = { getSectors, getPeers, getComposition, searchUniverse, matchUniverseName, peekClassification, _csv, _weighted };

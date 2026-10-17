@@ -164,6 +164,9 @@ export function fiscalQuarter(iso) {
  * A compact axis tick in Indian units — "1.8L", "90k", "−3.2k", "450" — with an optional
  * prefix ("₹"). For axes only: it drops precision a reader of a tick does not need.
  */
+/** Width of a category's hover band (and its tooltip offset): most of the slot, never under 4px. */
+export const chartBandWidth = (plotWidth, count) => Math.max(4, Math.min(plotWidth / count * 0.78, plotWidth / count - 2));
+
 export function axisCompact(v, prefix = '') {
   const a = Math.abs(v), s = v < 0 ? '−' : '';
   if (a >= 1_00_00_000) return `${s}${prefix}${+(a / 1_00_00_000).toFixed(1)}Cr`;

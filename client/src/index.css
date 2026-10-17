@@ -193,15 +193,6 @@ body {
   color: var(--color-text-muted);
 }
 
-/* Gilt rule — a fine champagne hairline. The signature divider. */
-.gilt-rule {
-  height: 1px;
-  border: none;
-  background: linear-gradient(90deg,
-    var(--color-accent) 0%,
-    rgba(201, 169, 106, 0.15) 40%,
-    transparent 100%);
-}
 
 /* ═══ CARDS ═══ */
 .card {
@@ -220,31 +211,29 @@ body {
 .card-compact {
   padding: 16px 20px;
 }
-/* A card that is itself a link (Markets quote tiles): a gilt edge on hover says "opens". */
+/* A card that is itself a link (Markets quote tiles): a brighter edge and a lift on hover say "opens" — never gold. */
 .quote-tile-link { color: inherit; text-decoration: none; cursor: pointer; }
-.quote-tile-link:hover { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); transform: translateY(-1px); }
-.quote-tile-link:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 2px; }
+.quote-tile-link:hover { border-color: var(--color-border-hover); transform: translateY(-1px); }
+.quote-tile-link:focus-visible { outline: 1px solid var(--color-border-hover); outline-offset: 2px; }
 .masthead-link { display: block; color: inherit; text-decoration: none; border-radius: var(--radius-lg); }
-.masthead-link > .card { transition: border-color 0.15s ease, transform 0.15s ease; }
-.masthead-link:hover > .card { border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); transform: translateY(-1px); }
-.masthead-link:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 2px; }
+.masthead-link > .card { transition: border-color 0.15s ease; }
+.masthead-link:hover > .card { border-color: var(--color-border-hover); }
+.masthead-link:focus-visible { outline: 1px solid var(--color-border-hover); outline-offset: 2px; }
 
-/* Gilt card — a fine champagne top-rule, like the gilt edge of a private-bank
-   statement. The signature applied to a card. Reserved for headline surfaces. */
-.card-gilt::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 18px;
-  right: 18px;
-  height: 1px;
-  background: linear-gradient(90deg,
-    transparent,
-    var(--color-accent) 22%,
-    var(--color-accent-strong) 50%,
-    var(--color-accent) 78%,
-    transparent);
-  opacity: 0.7;
+/* Headline card — set apart by depth, not decoration: a brighter edge and a deeper shadow. No rule, no gradient. */
+/* A top card with the money garden behind it (Card `garden`): content sits above the field, its
+   text lifted off the dots by a soft dark shadow, and the recessed band is translucent so the garden runs through it. */
+.card-garden { --garden-band: color-mix(in srgb, var(--color-bg-secondary) 62%, transparent); text-shadow: 0 0 14px rgba(11, 13, 16, 0.9), 0 1px 2px rgba(11, 13, 16, 0.85); }
+.card-garden > * { position: relative; }
+/* The metal-card motion (Card `garden`, driven by useTilt): a slight turn toward the pointer. The transform is applied ONLY while hovered or settling back, never left on the card. */
+.card-tilt.is-tilting {
+  transform: perspective(1400px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg));
+  transition: transform 0.18s ease-out, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.card-tilt.is-settling { transition: transform 0.65s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.card-gilt, .card-gilt:hover {
+  border-color: var(--color-border-hover);
+  box-shadow: var(--shadow-lg), var(--elev-ring);
 }
 
 /* ═══ BUTTONS ═══ */
@@ -398,6 +387,31 @@ body {
 .pill-label { display: inline-flex; align-items: baseline; gap: 6px; }
 .pill-label > svg { align-self: center; }
 .pill-count { font-size: 10px; opacity: 0.65; }
+
+/* The calendar beside a chart's range pills — the same height and track as a small pill
+   group; a custom window in force raises it the way a picked pill is raised. */
+.chart-range-cal {
+  display: inline-flex; align-items: center; gap: 6px; align-self: center;
+  padding: 6px 10px; border-radius: var(--radius-pill); line-height: 1.25;
+  font-family: inherit; font-size: 11px; font-weight: 500; white-space: nowrap; cursor: pointer;
+  background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-muted);
+  transition: all 0.2s ease;
+}
+.chart-range-cal svg { flex-shrink: 0; }
+.chart-range-cal:hover { color: var(--color-text-secondary); }
+.chart-range-cal.active {
+  background: var(--color-bg-elevated); color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--color-border);
+}
+.chart-range-cal:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
+/* Group headings in the compare dialog's list; the pinned copy sits over the scroller's top edge. */
+.group-head { margin: 0 -6px; padding: 8px 18px; background: var(--color-bg-modal); }
+.group-head-pinned { position: absolute; top: 0; left: 0; margin: 0; z-index: 1; pointer-events: none; }
+.indicator-add:hover { background: var(--color-bg-elevated) !important; }
+.param-input { -moz-appearance: textfield; appearance: textfield; }
+.param-input::-webkit-inner-spin-button, .param-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.param-input:focus { border-color: var(--color-border-hover) !important; }
+.indicator-add:hover svg { color: var(--color-text-primary) !important; }
 .pill-hint { font-size: 0.6875rem; font-weight: 400; color: var(--color-text-muted); margin-top: 1px; }
 
 .pill-sm .pill-item { font-size: 11px; padding: 6px 12px; }
@@ -588,6 +602,18 @@ select.input-field {
   line-height: 1.15;
   color: var(--color-text-primary);
 }
+.modal-tag {
+  flex-shrink: 0;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  box-shadow: var(--elev-ring);
+}
 .modal-header-badge {
   width: 40px; height: 40px; flex-shrink: 0;
   border-radius: 11px;
@@ -624,18 +650,60 @@ select.input-field {
   from { opacity: 0; transform: translateY(-24px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
-/* The fade-down dialog also dissolves vertically: fully opaque through the top
-   half (so the search field stays solid), fading to transparent at the bottom.
-   The min-height keeps the field within that opaque upper half. */
+/* The search dialogs' entrance. Results scroll inside the dialog (`.search-panel`), which fades its own lower edge. */
 .modal-content.modal-fade-down {
   animation: modalDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
-  min-height: 430px;
-  -webkit-mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 50%, transparent 100%);
 }
 
+/* MarketSearch — the field, the in-dialog results panel, board rows and quiet tags. */
+.search-field {
+  display: flex; align-items: center; gap: 12px; padding: 13px 14px 13px 16px;
+  background: var(--color-bg-input); border: 1px solid var(--color-border); border-radius: var(--radius);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.25);
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
+}
+.search-field.is-sm { gap: 8px; padding: 8px 12px; border-radius: 9px; }
+.search-field.is-focused {
+  border-color: var(--color-border-hover);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.25), 0 0 0 4px rgba(255,255,255,0.03);
+}
+.search-clear {
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  width: 22px; height: 22px; border-radius: 999px; border: none; cursor: pointer; padding: 0;
+  background: var(--color-bg-elevated); color: var(--color-text-muted);
+  transition: color 0.15s, background 0.15s;
+}
+.search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-card-hover); }
+.search-panel {
+  height: min(56vh, 500px); margin: 14px -8px 0; padding: 0 8px;
+  overflow-y: auto; overscroll-behavior: contain;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent);
+}
+.search-group-head { display: flex; align-items: baseline; justify-content: space-between; padding: 6px 10px 8px; }
+.search-board { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; }
+.search-chip {
+  display: flex; align-items: center; gap: 11px; min-width: 0; padding: 8px 10px;
+  border: none; border-radius: var(--radius-sm); background: transparent;
+  cursor: pointer; font-family: inherit; text-align: left;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+.search-chip:hover, .search-row:hover { background: var(--color-bg-elevated); box-shadow: var(--shadow-sm); }
+.search-row { background: transparent; transition: background 0.12s, box-shadow 0.12s; }
+.search-chip-name {
+  font-size: 0.8125rem; font-weight: 500; color: var(--color-text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.search-tag {
+  display: inline-block; font-size: 0.625rem; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--color-text-muted); background: rgba(255,255,255,0.04); border-radius: 5px; padding: 3px 6px; white-space: nowrap;
+}
+
+/* `backwards`, not `forwards`: the start state applies before the animation, and nothing
+   is left behind after it. `forwards` kept a transform on every page for good, a compositing
+   layer that Safari then painted ABOVE the sticky glass top bar, whatever its z-index. */
 .animate-in {
-  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) backwards;
 }
 
 /* Stagger */
@@ -899,8 +967,7 @@ select.input-field {
   height: 100%;
   width: 35%;
   border-radius: 0 2px 2px 0;
-  background: linear-gradient(90deg, transparent, var(--color-accent) 55%, var(--color-accent-strong));
-  box-shadow: 0 0 10px rgba(201, 169, 106, 0.6);
+  background: var(--color-accent);
   animation: topProgressSweep 1.05s cubic-bezier(0.45, 0, 0.25, 1) infinite;
 }
 @keyframes topProgressSweep {
@@ -998,6 +1065,80 @@ select.input-field {
 }
 .refresh-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-card-hover); }
 .refresh-btn:disabled { cursor: default; opacity: 0.7; }
+
+/* The top bar: sticky inside <main>, aligned to the page column; every control 34px and
+   centred on one line. Glass — the page scrolls beneath it, so the bar is a flat tint over a
+   light blur: clear rather than frosted, and unlit (no top glow or highlight). */
+.topbar {
+  position: sticky; top: 0; z-index: 30; height: 64px;
+  transform: translateZ(0);   /* its own layer, so Safari stacks it above the page as its z-index says */
+  background: rgba(13, 16, 20, 0.58);
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 10px 30px -18px rgba(0, 0, 0, 0.6);
+}
+/* Glass controls: a faint flat fill and a light edge, instead of a dark well. */
+.topbar .topbar-search,
+.topbar .status-pill,
+.topbar .btn-ghost,
+.topbar .btn-icon,
+.topbar .backlink-chip {
+  background: rgba(255, 255, 255, 0.035) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  box-shadow: none !important;
+}
+.topbar .topbar-search:hover,
+.topbar .btn-ghost:hover,
+.topbar .btn-icon:hover,
+.topbar .backlink:hover .backlink-chip {
+  background: rgba(255, 255, 255, 0.065) !important;
+  border-color: rgba(255, 255, 255, 0.13) !important;
+}
+.topbar .topbar-search kbd { background: rgba(255, 255, 255, 0.06); box-shadow: none; }
+.topbar .refresh-btn { border-left-color: rgba(255, 255, 255, 0.08); }
+.topbar .refresh-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.06); }
+.topbar-inner {
+  max-width: 1060px; height: 100%; margin: 0 auto; padding: 0 48px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+}
+.topbar-lead { display: flex; align-items: center; gap: 14px; min-width: 0; flex: 1; height: 34px; }
+.topbar-crumbs { display: flex; align-items: center; gap: 8px; min-width: 0; height: 100%; }
+.topbar-crumb {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; line-height: 1;
+  font-size: 0.875rem; font-weight: 500; color: var(--color-text-muted); text-decoration: none;
+  white-space: nowrap; transition: color 0.15s ease;
+}
+.topbar-crumb svg { flex-shrink: 0; color: var(--color-accent); }
+a.topbar-crumb:hover { color: var(--color-text-primary); }
+.topbar-crumb.is-current { color: var(--color-text-primary); }
+.topbar-page {
+  min-width: 0; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;
+  font-size: 0.875rem; font-weight: 500; color: var(--color-text-primary);
+}
+.topbar-sep { flex-shrink: 0; color: var(--color-text-muted); opacity: 0.6; }
+.topbar-search {
+  display: inline-flex; align-items: center; gap: 9px; height: 34px; min-width: 220px; padding: 0 5px 0 14px;
+  box-sizing: border-box; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-bg-input);
+  color: var(--color-text-muted); font: inherit; font-size: 0.8125rem; line-height: 1; cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.topbar-search:hover { border-color: var(--color-border-hover); color: var(--color-text-secondary); background: var(--color-bg-secondary); }
+.topbar-search:hover svg { color: var(--color-accent); }
+.topbar-search svg { flex-shrink: 0; display: block; }
+.topbar-search > span { flex: 1; text-align: left; line-height: 1; display: block; }
+.topbar-search kbd {
+  display: inline-flex; align-items: center; height: 24px; padding: 0 8px; box-sizing: border-box;
+  font-family: var(--font-mono); font-size: 0.6875rem; line-height: 1; border-radius: 999px;
+  background: var(--color-bg-elevated); color: var(--color-text-muted); box-shadow: var(--elev-ring);
+}
+.topbar .status-pill { height: 34px; border-radius: 999px; border-color: var(--color-border); }
+/* A page's buttons in the bar match the search field: 34px pills, its type size. */
+.topbar :is(.btn-primary, .btn-gold, .btn-ghost) {
+  height: 34px; min-height: 34px; padding: 0 16px; border-radius: 999px; font-size: 0.8125rem; line-height: 1;
+}
+.topbar .refresh-btn { width: 34px; }
+.topbar .btn-icon { width: 34px; height: 34px; min-height: 34px; padding: 0; border-radius: 999px; }
 
 /* The header cell of every ledger / table column — one style, previously repeated inline
    in a dozen tables. Pair with text-align as the column needs. */
@@ -1479,7 +1620,7 @@ select.input-field {
   display: block; height: 100%; border-radius: 99px; background: var(--color-border-hover);
   transition: width 0.35s cubic-bezier(.2,.7,.2,1);
 }
-.goal-compare-track > span.is-gold { background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 45%, transparent), var(--color-accent)); }
+.goal-compare-track > span.is-gold { background: var(--color-accent); }
 .goal-compare-value { font-size: 0.78rem; color: var(--color-text-secondary); min-width: 52px; text-align: right; }
 .goal-facts { display: flex; flex-direction: column; gap: 8px; padding-top: 14px; border-top: 1px solid var(--color-border-subtle); }
 .goal-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 0.78rem; }
@@ -1489,7 +1630,7 @@ select.input-field {
 .goal-bars { display: flex; align-items: flex-end; gap: 2px; height: 64px; }
 .goal-bar {
   flex: 0 1 22px; min-width: 2px; border-radius: 3px 3px 1px 1px;
-  background: linear-gradient(to top, color-mix(in srgb, var(--color-accent) 45%, transparent), var(--color-accent));
+  background: color-mix(in srgb, var(--color-accent) 72%, var(--color-bg-card));
 }
 .goal-bar.is-today { flex: 0 0 22px; background: var(--color-border-hover); }
 /* The dotted run between today and the payouts is the wait; the payouts sit at the far (right) end. */

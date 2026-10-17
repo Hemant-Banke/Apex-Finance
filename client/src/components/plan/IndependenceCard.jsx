@@ -39,7 +39,7 @@ export default function IndependenceCard({ m, s }) {
         <span className="text-xs" style={{ color: 'var(--color-text-muted)' }}>of <span className="figure">{money(m.target)}</span> FIRE number</span>
       </div>
       <div style={{ height: 6, borderRadius: 99, background: 'var(--color-bg-elevated)', overflow: 'hidden', margin: '12px 0 16px' }}>
-        <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, borderRadius: 99, background: 'linear-gradient(90deg, var(--color-accent-muted, var(--color-accent)), var(--color-accent))' }} />
+        <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, borderRadius: 99, background: 'var(--color-accent)' }} />
       </div>
 
       <Line label="Independent at"

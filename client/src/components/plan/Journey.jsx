@@ -18,7 +18,7 @@ export default function Journey({ m, s, inset = { left: 56, right: 12 } }) {
     <div style={{ position: 'relative', height: TRACK + 92, marginLeft: inset.left, marginRight: inset.right }}>
       {/* Building, then drawing down — two segments of one track. */}
       <div style={{ position: 'absolute', top: TRACK - 2, left: 0, width: x(retire), height: 4, borderRadius: '99px 0 0 99px',
-        background: 'linear-gradient(90deg, var(--color-accent-muted), var(--color-accent))' }} />
+        background: 'var(--color-accent)' }} />
       <div style={{ position: 'absolute', top: TRACK - 2, left: x(retire), right: 0, height: 4, borderRadius: '0 99px 99px 0',
         background: 'var(--color-bg-elevated)' }} />
 
