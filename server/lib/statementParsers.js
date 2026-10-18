@@ -65,7 +65,7 @@ function cleanNarration(raw) {
  * @param directionVerified false when income/expense was assumed rather than checked
  *                          against the running balance
  */
-function buildTx({ date, time, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit,
+function buildTx({ date, time, narration, amount, type, source, accountRef, assetSymbol, assetName, assetType, units, pricePerUnit, isin, usesCashBalance,
                    parseSource = 'llm_text', modelScore, directionVerified = true }) {
   const isAsset = type === 'buy' || type === 'sell';
   const u = units       != null ? Number(units)       : undefined;
@@ -107,6 +107,8 @@ function buildTx({ date, time, narration, amount, type, source, accountRef, asse
     tx.assetType    = listedAssetType(assetType || 'stock');
     tx.units        = u;
     tx.pricePerUnit = p;
+    if (isin) tx.isin = isin;
+    if (usesCashBalance != null) tx.usesCashBalance = usesCashBalance;
   }
   return tx;
 }
@@ -192,6 +194,10 @@ async function parsePDF(buffer, password) {
  */
 async function buildResultFromText(text, source) {
   // 1. Try to parse it ourselves first — deterministic and free.
+  const demat = parseDematText(text);
+  if (demat.length) {
+    return { transactions: demat, ...extractBankMeta(text), source };
+  }
   const regexTxns = parseBankText(text);
   if (regexTxns.length) {
     return { transactions: regexTxns, ...extractBankMeta(text), source };
@@ -318,6 +324,64 @@ function parseBankText(text) {
   }
 
   return transactions;
+}
+
+/**
+ * Depository (CDSL/NSDL) holding statements, e.g. Zerodha's "Transaction with holding statement":
+ * a block per "ISIN: … Symbol: …" of dated unit movements "Buy/Cr  Sell/Dr  Balance".
+ * They print units only, never a price; symbolResolver prices each row at its day's close.
+ */
+function parseDematText(text) {
+  const lines = text.split('\n').map(l => l.trim());
+  const HEAD_RE = /^ISIN\s*:\s*(IN[A-Z0-9]{10})\s+Symbol\s*:\s*(.+)$/i;
+  const DATE_RE = /^(\d{4}-\d{2}-\d{2}|\d{2}[-/]\d{2}[-/]\d{4})\b\s*(.*)$/;
+  const QTY_RE  = /(-?[\d,]+(?:\.\d+)?)\s+(-?[\d,]+(?:\.\d+)?)\s+(-?[\d,]+(?:\.\d+)?)\s*$/;
+  const OPEN_RE = /^Opening balance\s*:?\s*(-?[\d,]+(?:\.\d+)?)/i;
+  const END_RE  = /^(Closing balance|ISIN\s*:|Holdings as on)/i;
+  // Units that arrive without a trade: nothing was paid from this account's cash.
+  const NO_CASH = /inter depository|off[- ]?market|\bIDT\b|transmission|bonus|split|\bCA\b|corporate action/i;
+  const isoDate = d => (/^\d{4}/.test(d) ? d : `${d.slice(6, 10)}-${d.slice(3, 5)}-${d.slice(0, 2)}`);
+
+  const out = [];
+  for (let i = 0; i < lines.length; i++) {
+    const head = HEAD_RE.exec(lines[i]);
+    if (!head) continue;
+    const isin = head[1].toUpperCase();
+    const name = head[2].replace(/\s*-\s*(EQ|BE|SM|ST)\b.*$/i, '').replace(/\s+/g, ' ').trim();
+    const assetType = /^INF/.test(isin) ? (/\b(ETF|BEES)\b/i.test(name) ? 'etf' : 'mutual_fund') : 'stock';
+    let bal = null;
+    let j = i + 1;
+    for (; j < lines.length && !HEAD_RE.test(lines[j]); j++) {
+      const open = OPEN_RE.exec(lines[j]);
+      if (open) { bal = parseAmount(open[1]); continue; }
+      if (END_RE.test(lines[j])) break;
+      const dm = DATE_RE.exec(lines[j]);
+      if (!dm) continue;
+      // A description may wrap; the row ends on the line carrying the three quantities.
+      const parts = [dm[2]];
+      let k = j, qty = QTY_RE.exec(dm[2]);
+      while (!qty && k + 1 < lines.length && k < j + 6 && !DATE_RE.test(lines[k + 1]) && !END_RE.test(lines[k + 1])) {
+        parts.push(lines[++k]);
+        qty = QTY_RE.exec(lines[k]);
+      }
+      j = k;
+      if (!qty) continue;
+      const cr = parseAmount(qty[1]), dr = parseAmount(qty[2]), after = parseAmount(qty[3]);
+      const narration = parts.join(' ').replace(QTY_RE, '').replace(/\s+/g, ' ').trim();
+      const verified = bal != null && Math.abs(bal + cr - dr - after) < 1e-6;
+      bal = after;
+      const units = cr > 0 ? cr : dr;
+      if (!(units > 0)) continue;
+      out.push(buildTx({
+        date: isoDate(dm[1]), narration, type: cr > 0 ? 'buy' : 'sell', source: 'pdf',
+        assetName: name, assetType, units, isin,
+        usesCashBalance: NO_CASH.test(narration) ? false : undefined,
+        parseSource: 'demat', directionVerified: verified,
+      }));
+    }
+    i = j - 1;
+  }
+  return out;
 }
 
 /**

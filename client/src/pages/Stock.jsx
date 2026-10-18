@@ -3,7 +3,7 @@ import { useParams, Link, useLocation } from 'react-router-dom';
 import { ExternalLink } from 'lucide-react';
 import { marketsAPI, marketAPI, dashboardAPI } from '../lib/api';
 import { formatPct, pnlColor, dayLabel, fiscalQuarter, fiscalYear, formatCount, monthLabel } from '../lib/utils';
-import { stockPath, globalStockPath, companyMoney, backTarget, axisFormatFor, MARKET_RANGES, toChartSeries } from '../lib/markets';
+import { companyMoney, backTarget, axisFormatFor, toChartSeries } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
@@ -14,8 +14,8 @@ import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import Ownership from '../components/stock/Ownership';
-import BusinessProfile from '../components/stock/BusinessProfile';
 import CompanyFinancials from '../components/stock/CompanyFinancials';
+import Peers from '../components/stock/Peers';
 import { StatGrid, RangeBar, Performance } from '../components/stock/PricePerformance';
 import PositionCard from '../components/portfolio/PositionCard';
 import AssetIcon from '../components/market/AssetIcon';
@@ -24,12 +24,8 @@ import HoldingExperience from '../components/asset/HoldingExperience';
 /**
  * One company, in full: the share, the business, and how both compare.
  *
- * Read top to bottom it answers, in order: what is it worth and how did it move today
- * (masthead), how has the SHARE done against the market (chart, returns, risk), how has
- * the BUSINESS done (revenue, profit, margins), what does the market pay for that and
- * can the company carry it (valuation, health), what do analysts expect, who owns it,
- * and how it stands among its sector peers. The profile closes the page rather than
- * opening it — anyone who reached a company page knows roughly what the company does.
+ * Performance first: the share against the market, the company's own results, what the
+ * market pays for them and how it stands among peers. Then analysts, owners, and the profile.
  *
  * Every figure that has a natural yardstick is printed AGAINST it — a return against the
  * Nifty, a P/E against the sector's median — because a number alone ("P/E 25") cannot be
@@ -59,7 +55,7 @@ function Valuation({ v, h, money }) {
   return (
     <Card>
       <SectionHeader eyebrow="Valuation & health" size="sm" sub="What the market pays for the business, and whether the business can carry it" style={{ marginBottom: 6 }} />
-      <StatGrid initial={8} stats={[
+      <StatGrid initial={Infinity} stats={[
         { label: 'P/E (trailing)', value: v.pe?.toFixed(1), note: relNote(vsMedian(v.pe, v.sectorMedianPe), v.sectorMedianPe, `per ${unit} of profit`) },
         // Forward P/E below trailing means the forward EPS estimate is ABOVE the
         // trailing one (same price, smaller multiple).
@@ -219,59 +215,6 @@ function Analysts({ a, price, earnings, money }) {
   );
 }
 
-// ── Peers ───────────────────────────────────────────────────────────────────────
-
-const PEER_COLS = 'minmax(160px, 1.6fr) 96px 64px 64px 70px 70px';
-
-function PeerRow({ p, self, money, global }) {
-  const cells = (
-    <>
-      <span style={{ minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span className="text-sm truncate" style={{ color: self ? 'var(--color-accent)' : 'var(--color-text-primary)' }}>{p.name}</span>
-        <span className="figure text-xs" style={{ color: 'var(--color-text-muted)', flexShrink: 0 }}>{p.symbol}</span>
-      </span>
-      <span className="figure text-xs" style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{global ? companyMoney({ unit: 'unit', currency: p.currency }).big(p.cap) : money.big(p.cap)}</span>
-      <span className="figure text-xs" style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{p.pe?.toFixed(1) ?? '—'}</span>
-      <span className="figure text-xs" style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{p.pb?.toFixed(1) ?? '—'}</span>
-      <span className="figure text-xs" style={{ textAlign: 'right', color: pnlColor(p.chg1m) }}>{formatPct(p.chg1m, 1)}</span>
-      <span className="figure text-xs" style={{ textAlign: 'right', color: pnlColor(p.chg1y) }}>{formatPct(p.chg1y, 1)}</span>
-    </>
-  );
-  // Rows carry their own inline padding so a highlighted or hovered row's wash has room
-  // around its text instead of running flush to the first and last figures.
-  const style = { display: 'grid', gridTemplateColumns: PEER_COLS, gap: 12, padding: '10px 12px', alignItems: 'baseline', borderBottom: '1px solid var(--color-border-subtle)', textDecoration: 'none' };
-  return self
-    ? <div style={{ ...style, borderRadius: 8, background: 'color-mix(in srgb, var(--color-accent) 7%, transparent)' }}>{cells}</div>
-    : <Link to={global ? globalStockPath(p.symbol) : stockPath(p.symbol)} className="sector-row" style={style}>{cells}</Link>;
-}
-
-function Peers({ peers, money, global }) {
-  if (!peers?.items?.length) return null;
-  const self = peers.items.find(p => p.self);
-  const others = peers.items.filter(p => !p.self);
-  return (
-    <Card>
-      <SectionHeader eyebrow={global ? 'Often compared with' : 'Sector peers'} size="sm"
-        sub={global
-          ? `The companies investors most often look at alongside it · #${peers.rank} of ${peers.count} by market cap`
-          : `${peers.sector.label} · ${peers.count} Nifty 500 companies · #${peers.rank} by market cap · sector ${formatPct(peers.sector.chg1y, 1)} over a year`}
-        style={{ marginBottom: 16 }} />
-      <div style={{ overflowX: 'auto' }}>
-        <div style={{ minWidth: 560 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: PEER_COLS, gap: 12, padding: '0 12px 9px', borderBottom: '1px solid var(--color-border-subtle)' }}>
-            <span className="col-head">Company</span>
-            {['Market cap', 'P/E', 'P/B', '1M', '1Y'].map(h => <span key={h} className="col-head" style={{ textAlign: 'right' }}>{h}</span>)}
-          </div>
-          {/* This company is pinned on top, so it is always there to compare against —
-              however far down the size ranking it sits. The rest fold. */}
-          {self && <PeerRow p={self} self money={money} global={global} />}
-          <ShowMore items={others} initial={6} noun="peers" render={(p) => <PeerRow key={p.symbol} p={p} money={money} global={global} />} />
-        </div>
-      </div>
-    </Card>
-  );
-}
-
 // ── About ───────────────────────────────────────────────────────────────────────
 
 function About({ profile }) {
@@ -421,7 +364,7 @@ export default function Stock({ global = false }) {
           home index (already overlaid) or any other benchmark via "+". */}
       <PriceGrapher key={data.symbol} title="Share price" valueLabel="Close" formatValue={money.price}
         axisFormat={money.home ? undefined : axisFormatFor(data.money?.currency)}
-        fetchData={fetchPrice} ranges={MARKET_RANGES} defaultRange="1Y"
+        fetchData={fetchPrice} defaultRange="1Y"
         growthCapable benchmarks={benchmarks} viewLabels={{ complete: 'Price', growth: 'vs market', hint: 'Indexed to 100 at the start of the range, against the benchmarks you add' }}
         defaultCompare={[benchmark.symbol]} emptyText="No price history for this stock" />
       {performance?.returns && (
@@ -429,12 +372,13 @@ export default function Stock({ global = false }) {
           sub={`The share's return over each window, against the ${benchmark.label}${money.home ? '' : ` · in ${data.money.currency}`}`} />
       )}
       <HoldingExperience exp={experience} name={data.symbol} benchmark={benchmark} currency={data.money?.currency || 'INR'} />
+      {/* Performance first — the share, the company, its price and its peers — then who
+          expects and owns what, and finally what the company is. */}
       <CompanyFinancials financials={financials} money={money} />
-      <BusinessProfile symbol={data.symbol} global={global} />
       <Valuation v={valuation} h={health} money={money} />
+      <Peers key={`peers:${data.symbol}`} peers={peers} symbol={data.symbol} global={global} money={money} sectorMedianPe={global ? null : valuation.sectorMedianPe} />
       {(analysts || earnings?.surprises?.length > 0) && <Analysts a={analysts} price={quote.price} earnings={earnings} money={money} />}
       <Ownership ownership={ownership} money={money} />
-      <Peers peers={peers} money={money} global={global} />
       <About profile={profile} />
 
       <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>

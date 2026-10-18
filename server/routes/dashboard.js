@@ -9,10 +9,10 @@ const { protect } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { badRequest } = require('../utils/httpError');
 const { holdingsToArray } = require('../services/holdingsService');
-const { getPortfolio, getContribution, allocationByType } = require('../services/portfolioService');
+const { getPortfolio, getContribution, allocationByType, assetValuesByAccount } = require('../services/portfolioService');
 const { getProfile } = require('../services/portfolioProfileService');
-const { getAllAccountsAssetBalance } = require('../services/accountBalance');
-const { t1Str, t1Ms } = require('../utils/helpers');
+const { getCalendar } = require('../services/calendarService');
+const { todayMs } = require('../utils/helpers');
 const { DAY_MS } = require('../utils/constants');
 
 const { spendClass } = require('../utils/spendClass');
@@ -27,26 +27,38 @@ router.use(protect);
  * says so — a two-week-old account has no one-year change, and inventing one by
  * comparing against zero would report a spectacular fake gain.
  */
-function netWorthChange(doc, daysAgo, live = null) {
+function netWorthChange(doc, daysAgo, current) {
   const ts = doc?.valuesTS || [];
   if (ts.length < 2) return null;
 
-  // Live basis: from today's live figure back to the same day N days ago. Settled: between
-  // closes, so 1D is the last settled session's move rather than a near-zero "today".
-  const current = live ?? ts[ts.length - 1];
-  const idx     = ts.length - (live != null ? 0 : 1) - daysAgo;
+  // From the headline back to exactly N days before today (`valuesTS` ends at T-1) — the
+  // same start day the chart's N-day range opens on, so the two figures are one.
+  const idx     = ts.length - daysAgo;
   const partial = idx < 0;
   const past    = ts[Math.max(0, idx)];
-
-  const abs = current - past;
-  return {
-    abs,
-    // Against a zero or negative base a percentage is meaningless (going from -1000 to
-    // +500 is not "150% growth"), so it is simply withheld.
-    pct: past > 0 ? (abs / past) * 100 : null,
-    partial,
-  };
+  return change(current, past, partial);
 }
+
+/**
+ * Net worth's 1D: everything that moved since yesterday's point, with the book's calendar
+ * move swapped for its SESSION move — so it is the portfolio's 1D plus the day's cash
+ * flows, and the two figures on the dashboard cannot disagree (on a weekend, a calendar
+ * day had the stocks flat while the portfolio reported Friday's session).
+ */
+function netWorthDayChange(doc, current, values) {
+  const ts = doc?.valuesTS || [];
+  if (ts.length < 2) return null;
+  const abs = current - ts[ts.length - 1] - values.calendarChange + values.dayChange;
+  return change(current, current - abs, false);
+}
+
+// Against a zero or negative base a percentage is meaningless (going from -1000 to +500
+// is not "150% growth"), so it is simply withheld.
+const change = (current, past, partial) => ({
+  abs: current - past,
+  pct: past > 0 ? ((current - past) / past) * 100 : null,
+  partial,
+});
 
 // Months from the user's first income/expense to now, so a window never pads empty months.
 async function monthsAvailable(userId) {
@@ -67,46 +79,38 @@ const startOfMonthsAgo = (n) => {
 
 // @route   GET /api/dashboard/summary
 // Reads the pre-computed stores rather than re-aggregating transactions per request.
-// Assets = Σ account settledValue — T cash + the T-1 close.
+// Assets = T cash + the book from `assetValuesByAccount` — the portfolio's own valuation, so
+// "Portfolio" on the dashboard and the net worth it sums into are one number.
 router.get('/summary', asyncHandler(async (req, res) => {
   const userId = req.user._id;
+  const live   = req.query.fetchLatestBal === 'true';
 
-  const [accounts, dailyBalances, holdingsDocs, nwDoc] = await Promise.all([
+  const [accounts, dailyBalances, holdingsDocs, nwDoc, values] = await Promise.all([
     Account.find({ user: userId }).lean(),
-    DailyAccountBalance.find({ user: userId }).select('account settledValue lastCashValue').lean(),
+    DailyAccountBalance.find({ user: userId }).select('account lastCashValue').lean(),
     AccountHoldings.find({ user: userId }).select('holdings').lean(),
     DailyNetWorth.findOne({ user: userId }).lean(),
+    assetValuesByAccount(userId, { live }),
   ]);
 
-  const settledByAccount = {};
-  const cashByAccount    = {};
-  dailyBalances.forEach(d => {
-    settledByAccount[d.account.toString()] = d.settledValue  || 0;
-    cashByAccount[d.account.toString()]    = d.lastCashValue || 0;
-  });
+  const cashByAccount = {};
+  dailyBalances.forEach(d => { cashByAccount[d.account.toString()] = d.lastCashValue || 0; });
 
   // Debt balances are already stored negative, so liabilities is just their sum flipped
   // for display (a positive "you owe"). Nothing is forced: an OVERPAID debt account
   // reports a negative liability, which is the truth.
-  let totalAssets = 0, totalLiabilities = 0, totalCash = 0;
+  let totalAssets = 0, totalLiabilities = 0, totalCash = 0, totalInvestments = 0;
   accounts.forEach(acc => {
     const id = acc._id.toString();
     if (acc.isDebt) {
-      totalLiabilities -= settledByAccount[id] || 0;
+      totalLiabilities -= cashByAccount[id] || 0;
     } else {
-      totalAssets += settledByAccount[id] || 0;
-      totalCash   += cashByAccount[id]    || 0;
+      totalCash        += cashByAccount[id] || 0;
+      totalInvestments += values.byAccount[id] || 0;
     }
   });
-
-  // Live basis: cash is already at T, so only the assets are re-priced.
-  let asof = t1Str();
-  if (req.query.fetchLatestBal === 'true') {
-    const settledAssets = totalAssets - totalCash;
-    const live = await getAllAccountsAssetBalance(req.user, true);
-    totalAssets += live.value - settledAssets;
-    asof = live.asof;
-  }
+  totalAssets = totalCash + totalInvestments;
+  const asof = values.asof;
 
   const symbolsSeen = new Set();
   holdingsDocs.forEach(doc => (doc.holdings || []).forEach(h => {
@@ -159,11 +163,15 @@ router.get('/summary', asyncHandler(async (req, res) => {
     // settled T-1 series is exactly what is wanted.
     netWorth:         totalAssets - totalLiabilities,
     asof,
-    netWorthChange: Object.fromEntries([['day', 1], ['week', 7], ['month', 30], ['year', 365]].map(([k, n]) =>
-      [k, netWorthChange(nwDoc, n, req.query.fetchLatestBal === 'true' ? totalAssets - totalLiabilities : null)])),
+    netWorthChange: {
+      day: netWorthDayChange(nwDoc, totalAssets - totalLiabilities, values),
+      ...Object.fromEntries([['week', 7], ['month', 30], ['year', 365]].map(([k, n]) =>
+        [k, netWorthChange(nwDoc, n, totalAssets - totalLiabilities)])),
+    },
     totalAssets,
     totalLiabilities,
     totalCash,
+    totalInvestments,
 
     monthlyIncome,
     monthlyExpense,
@@ -207,12 +215,18 @@ router.get('/contribution', asyncHandler(async (req, res) => {
   const days = Math.max(0, Math.min(parseInt(req.query.days) || 0, 3650));
   const { account } = req.query;
   if (account && !mongoose.Types.ObjectId.isValid(account)) throw badRequest('Invalid account id');
-  const to   = t1Ms();
   res.json(await getContribution(req.user._id, {
-    fromMs: days ? to - days * DAY_MS : null,
-    toMs:   to,
+    fromMs: days ? todayMs() - days * DAY_MS : null,
     account: account || null,
+    live: req.query.fetchLatestBal === 'true',
   }));
+}));
+
+// @route   GET /api/dashboard/calendar
+// One row per calendar day — the asset book's gain and return, and income/expense — for
+// the calendar view, which rolls days into months and years. See calendarService.
+router.get('/calendar', asyncHandler(async (req, res) => {
+  res.json(await getCalendar(req.user._id, { live: req.query.fetchLatestBal === 'true' }));
 }));
 
 // @route   GET /api/dashboard/holdings

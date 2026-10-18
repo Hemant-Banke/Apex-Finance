@@ -12,6 +12,7 @@ const currentPriceSchema = new mongoose.Schema({
   symbol:        { type: String, required: true, unique: true },
   price:         { type: Number, required: true },
   previousClose: { type: Number },   // the session before the quote's own, for a day's move
+  sessionDay:    { type: Number },   // day key of the quote's own session, as PriceHistory keys closes
   day:           { type: String, required: true },
   fetchedAt:     { type: Date, required: true },
 }, { timestamps: true });

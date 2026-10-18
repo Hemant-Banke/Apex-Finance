@@ -50,6 +50,7 @@
 
 ### forms
 - `forms/TransactionForm.jsx` — Add/edit cash transactions (income, expense, transfer, adjustment).
+- `forms/TxnTypeTiles.jsx` — The coloured cash-type tiles (icon + label); shared by the transaction form and import review (`inline`).
 - `forms/TypePicker.jsx` — Generic dropdown-select (searchable, clearable); replaces native `<select>`.
 - `forms/CategoryPicker.jsx` — Hierarchical category picker wired to the categories API.
 - `forms/CategoryMultiPicker.jsx` — Multi-select category filter: tick whole groups or single categories (tri-state groups, search); used by the Transactions ledger.
@@ -86,6 +87,7 @@
 - `portfolio/AllocationBar.jsx` — Allocation as a stacked bar (`showValue={false}` when slices are not money; `legend`, `active`/`onActive` for linked hover, per-item `color`; exports `OTHER_TONE`/`CASH_TONE`).
 - `portfolio/PortfolioProfile.jsx` — Portfolio style verdict on a risk scale, portfolio figures (growth share, yield, in profit, liquid, holding age), asset-class / market-cap / sector bars; clicking a slice opens the holdings counted in it and why. Exports `Figure`.
 - `portfolio/AllocationPanel.jsx` — Renders `PortfolioProfile` (prop `profile`) above the breakdown. Full allocation card: lenses (asset type / holding / account), value bar over cost bar (drift), concentration stats, per-slice table. Analytics + investment account pages (`cash` adds an idle-cash slice).
+- `portfolio/CalendarPerformance.jsx` — Calendar view on Analytics: Investments (time-weighted return / ₹ gain) or Cashflow (net / saved %) by day (12 mini-month calendars + weekday averages), month (year × month heatmap table with a seasonality row) or year; best/worst, up share, average/median, swing, streaks, deepest fall.
 - `portfolio/ContributionBreakdown.jsx` — Per-holding contribution to return over a window (`account` scopes it, `bare` drops the card).
 - `portfolio/PerformancePanel.jsx` — An account's performance: total gain, unrealised, realised, XIRR, last session, invested, then its contribution table.
 - `portfolio/SellButton.jsx` — The shared sell affordance on holding rows.
@@ -100,8 +102,8 @@
 - `asset/MetalProfile.jsx` — Gold/silver price by purity, world price, domestic premium, gold-silver ratio.
 - `asset/ReturnSplit.jsx` — A rupee return split into asset-in-own-currency and the currency's move.
 - `asset/HoldingExperience.jsx` — Monthly SIP outcomes (XIRR) and rolling 1Y/3Y returns vs benchmark.
-- `stock/CompanyFinancials.jsx` — Annual/quarterly results, debt and cash-flow chart + table (`money` from `companyMoney`).
-- `stock/BusinessProfile.jsx` — "The business" card: a summary band (largest line, largest market, exports, net trade), then Revenue (a mix bar per year + table) · Trade · Value chain tabs, then what changed; loads `/markets/stocks/:symbol/business` on its own.
+- `stock/CompanyFinancials.jsx` — Average revenue/profit growth (3Y/5Y/10Y/12M, `financials.growth`), then annual/quarterly results, debt and cash-flow chart + table (`money` from `companyMoney`).
+- `stock/Peers.jsx` — The company among its sector peers (abroad: "often compared with"): its rank chips (cap, 1Y, growth), then one table grouped Valuation · Share price · Growth, with this company raised on top and a median row.
 - `stock/Ownership.jsx` — Shareholding pattern over 12 quarters; abroad, insiders/institutions + largest holders.
 
 ### transactions
@@ -162,6 +164,7 @@
 - `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`.
 - `goals.js` — Goals for the UI: `GOAL_TYPES` (icons, default inflation and payout), `ASSET_COLORS`, `monthsUntil`, `goalModel` (one goal's own cost, corpus, mix — no simulation), `oddsTone`, `goalColours`, `GOAL_DEFAULTS`; re-exports `goalMath`.
 - `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
+- `calendar.js` — Calendar performance, pure: `rollUp(days, 'day'|'month'|'year')` (gain summed, return compounded), `metricOf`, `periodStats` (best/worst, up/down, mean/median, sd, streaks), `maxDrawdown`, `cashTotals`, `byWeekday`, `byCalendarMonth`, `scaleCap`, `periodLabel`.
 - `goalPlan.js` — The plan across all goals (pure): `fundingSources` (liquid money per account by class, less the reserve), `buildPlan` (seeded Monte Carlo + greedy marginal allocation, strict priority tiers to target odds, scarcity-priced pools, earmarks, monthly phases, routing to accounts, moves, payouts), `planLevers`, `goalLevers`, `PLAN_DEFAULTS`, `withDefaults`, `PLAN_METHOD` (the fixed constants — scenarios, λ, κ, step size, price cap, seed — so the method modal never states a number the code does not use).
 - `goalPlan.worker.js` — Runs `buildPlan` then the levers off the main thread.
 - `useGoalPlan.js` — `useGoalPlan(input, settings, focusId)` (worker, debounced, stale answers dropped), `goalPlanInput` (slims goals/accounts/portfolio/spending for the worker), `load`/`saveGoalPlanSettings` (localStorage `apex_goal_plan`).
@@ -178,7 +181,7 @@
   - Transactions: `getTransactionColor`, `getTransactionSign`, `getTransactionName`.
   - Colour: `CHART_COLORS`, `pnlColor`; plus `cn` (class names).
 - `constants.js` — `ACCOUNT_TYPES`, `TRANSACTION_TYPES`, `ASSET_TYPES`, `BENCHMARKS`, purity/rate/market asset predicates (`isManualSymbol`, `isSelfPricedHolding`, …), label lookups.
-- `markets.js` — `WINDOWS`, `windowOf`, `MARKET_RANGES`, `toChartSeries`, `formatLevel` (price at market precision), `rupeeLevel` (₹ share price), routing (`backTarget` — an instrument page's back link from router state, `stockPath`, `assetPath`, `viewPathFor`, `nseSymbolOf`).
+- `markets.js` — `WINDOWS`, `windowOf`, `toChartSeries`, `formatLevel` (price at market precision), `rupeeLevel` (₹ share price), routing (`backTarget` — an instrument page's back link from router state, `stockPath`, `assetPath`, `viewPathFor`, `nseSymbolOf`).
 - `categoryNames.js` — Cached category taxonomy; `useCategoryNames`, `describeCategory`.
 - `confidence.js` — Import confidence bands/labels (mirrors server).
 - `numericInput.js` — `numericOnly({signed})`: props for a number `<input>` that let through only digits, one `.` and (if signed) `−` — typed, pasted or dropped (Safari otherwise accepts any text) — and blur on wheel — every amount/units/price field in the transaction, asset and import forms; `wholeNumber(raw, max)`: digits only, capped, null when empty.
@@ -199,11 +202,11 @@
 - `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`, `listedAssetType` (a traded gold/silver instrument → `etf`).
 - `currency.js` — FX symbol + currency normalisation.
 - `recurrence.js` — `FREQUENCIES`, `occurrencesBetween`.
-- `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `holdingExperience` (SIP + rolling, shared by stock and asset pages).
+- `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `filingsGrowth` (a company's compounded revenue/profit growth from its filings — the stock page and peer growth), `holdingExperience` (SIP + rolling, shared by stock and asset pages).
 
 ### Server lib (`server/lib/`)
 - `llmService.js` — All Claude calls: extraction (text/image) and categorisation. Long text is split into ~12k-char chunks, 4 at a time, and merged.
-- `statementParsers.js` — `parseStatement`: regex parsers (HDFC lines, `parseLedgerBlocks` for date-block layouts like Union Bank) and HTML, with LLM fallback.
+- `statementParsers.js` — `parseStatement`: regex parsers (`parseDematText` for CDSL/NSDL demat statements, HDFC lines, `parseLedgerBlocks` for date-block layouts like Union Bank) and HTML, with LLM fallback.
 - `txnFeatures.js` — `buildFeatures(rows)`: per-row payee, payee kind (business / vendor QR / person), file-wide payee count, days and median, weekday, day of month, hour — the behavioural signals the LLM categoriser reasons from.
 - `categoryRules.js` — Keyword category rules, merchant tokens, Misc fallback.
 - `confidence.js` — Per-stage scoring and file-level confidence summary.
@@ -251,7 +254,6 @@
 - `UserCategoryProfile.js` — Learned merchant→category profile.
 - `MfScheme.js` / `MfNav.js` — AMFI fund index / NAV history caches.
 - `PriceHistory.js` — Daily closes per Yahoo symbol (native), with covered range and quote currency.
-- `CompanyReport.js` — One annual report / 10-K's LLM extract, keyed by URL; a shared cache kept for good.
 - `CurrentPrice.js` — The latest live quote per Yahoo symbol (native price, previous session's close, IST day, fetchedAt). A shared cache; closes never go here.
 - `MarketFlow.js` — Daily FII/DII/MF flows + participant OI.
 
@@ -275,14 +277,15 @@
 - `dailyValueService.js` — Store orchestration: rebuild, extend, delta merge, NW, `assetTotalSeries`.
 - `tsService.js` — Pure cash/asset/net-worth series builders, `buildAssetTotalTS` (Σ assetTS).
 - `holdingsService.js` — AVCO holdings maintenance.
-- `accountBalance.js` — O(1) settled/live balances, sparklines.
-- `portfolioService.js` — Mark-to-market portfolio, P&L, contribution.
+- `accountBalance.js` — Account balances: store cash + the account's share of `markBook`; sparklines.
+- `calendarService.js` — One row per calendar day: asset book value, flows, gain, daily return, income, expense (`GET /dashboard/calendar`).
+- `portfolioService.js` — THE valuation (`markBook`), trade replay (cost basis, realised), portfolio, per-account asset values, contribution.
 - `portfolioProfileService.js` — `getProfile(holdings)`: the book as a whole (classes, caps, regions, sectors, liquidity, yield, in-profit, holding age); local reads only. Served as `profile` on `/dashboard/portfolio`.
 - `marketDataService.js` — All Yahoo fetching, FX, live/historic prices; historic closes via the price cache; `fetchDailyCloses`, `quoteCurrency`, `refreshPriceCache`.
 - `priceCacheService.js` — `getCloses` (cache-first daily closes, fetch only gaps, failures never advance coverage), `getCurrency`, `refreshAll` (3-hourly top-up).
 - `livePriceService.js` — `getQuotes(symbols)`: live native quotes cached in `currentprices` for 60s per symbol; one batched spark fetch for the rest, concurrent callers share it; a failed fetch serves today's last quote marked stale.
 - `mfService.js` — AMFI mutual-fund cache, search, NAVs.
-- `symbolResolver.js` — Statement instrument → priceable symbol.
+- `symbolResolver.js` — Statement instrument → priceable symbol (ISIN first); prices a row with no printed price at its day's close.
 - `subscriptionService.js` — Materialise due recurring transactions.
 - `categoryService.js` — User category taxonomy reads.
 - `categoryProfileService.js` — Learn/predict categories from user history.
@@ -291,6 +294,6 @@
 - `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights), `peekClassification` (cache-only sector + cap rank; warms in background), `matchUniverseName` (exact normalised name → NSE symbol).
 - `stockService.js` — One company (NSE, or abroad with `global`): price, risk, financials, valuation, holders, peers, SIP/rolling.
 - `screenerService.js` — Screener.in filings, shareholding and annual-report links; falls back to standalone when consolidated is empty or stale; the half-year balance sheet is `interim`, not an annual row.
-- `businessService.js` — `getBusiness(symbol, {global})`: last 3 annual reports (BSE via Screener; SEC 10-K for US) → keyword excerpts → `llmService.extractBusinessProfile` → merged by year.
+- `peerGrowthService.js` — `getPeerGrowth`: each company's 3Y/5Y revenue and profit CAGR and TTM growth from its filings, for the company and its 20 largest peers (Yahoo's "often compared" abroad), plus the peer median. Memo 6h.
 - `assetService.js` — Price page data for non-NSE instruments, plus per-kind `profile`, `portfolio`, `currencyLens` and `experience`.
 - `fundPortfolioService.js` — `getPortfolio(symbol, type)`: holdings/sectors/mix/terms — Groww for AMFI funds and Indian ETFs, Yahoo `topHoldings` abroad, a tracking ETF for a foreign index.

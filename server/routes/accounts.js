@@ -13,6 +13,7 @@ const { DAY_MS, ACCOUNT_TYPES }         = require('../utils/constants');
 const { midnight, toDateStr, todayStr, todayMs } = require('../utils/helpers');
 const { sliceStartIndex }               = require('../utils/tsHelpers');
 const { getAccountBalance, getAccountAssetBalance, accountSparkline } = require('../services/accountBalance');
+const { assetValuesByAccount } = require('../services/portfolioService');
 const txService           = require('../services/transactionService');
 const dvService           = require('../services/dailyValueService');
 const { holdingsToArray } = require('../services/holdingsService');
@@ -44,12 +45,14 @@ router.get('/', asyncHandler(async (req, res) => {
     account: { $in: accounts.map(a => a._id) },
   }).lean();
   const storeByAccount = new Map(storeDocs.map(d => [d.account.toString(), d]));
+  // The book is valued once and split by account, so the rows add up to the portfolio.
+  const values = await assetValuesByAccount(req.user._id, { live: fetchLatestBal });
 
   res.json(await Promise.all(accounts.map(async account => {
     const doc = storeByAccount.get(account._id.toString()) ?? null;
     return {
       ...account,
-      ...(await getAccountBalance(account, req.user, fetchLatestBal, doc)),
+      ...(await getAccountBalance(account, req.user, fetchLatestBal, doc, values)),
       spark: accountSparkline(doc),
     };
   })));
@@ -65,9 +68,7 @@ router.get('/:id', asyncHandler(async (req, res) => {
   ]);
 
   const rawHoldings   = holdingsDoc?.holdings || [];
-  const balanceDetail = await getAccountBalance(
-    account, req.user, req.query.fetchLatestBal === 'true', acctBalanceDoc, rawHoldings,
-  );
+  const balanceDetail = await getAccountBalance(account, req.user, req.query.fetchLatestBal === 'true', acctBalanceDoc);
 
   res.json({
     ...account,
@@ -108,10 +109,7 @@ router.get('/:id/cashflow', asyncHandler(async (req, res) => {
 router.get('/:id/daily', asyncHandler(async (req, res) => {
   const account = await findAccount(req);
 
-  const [doc, holdingsDoc] = await Promise.all([
-    DailyAccountBalance.findOne({ account: account._id, user: req.user._id }).lean(),
-    account.isDebt ? null : AccountHoldings.findOne({ account: account._id, user: req.user._id }).lean(),
-  ]);
+  const doc = await DailyAccountBalance.findOne({ account: account._id, user: req.user._id }).lean();
   if (!doc || !(doc.cashTS?.length || doc.assetTS?.length)) return res.json([]);
 
   const cashTS     = doc.cashTS  || [];
@@ -135,9 +133,7 @@ router.get('/:id/daily', asyncHandler(async (req, res) => {
   // live asset prices with fetchLatestBal. A debt account has cash only.
   {
     const cashValue = cashTS[cashTS.length - 1] ?? 0;
-    const assetValue = account.isDebt ? 0 : (await getAccountAssetBalance(
-      account, req.user, req.query.fetchLatestBal === 'true', doc, holdingsDoc?.holdings || [],
-    )).value;
+    const assetValue = (await getAccountAssetBalance(account, req.user, req.query.fetchLatestBal === 'true')).value;
     rows.push({ date: todayStr(), cashValue, assetValue, totalValue: cashValue + assetValue });
   }
 

@@ -87,17 +87,6 @@ const RESULT_FIELDS = {
   eps:             ['EPS in Rs'],
 };
 
-/** The annual reports Screener links (BSE PDFs), newest first: [{ year, url }]. */
-function _annualReports(html) {
-  const docs = _section(html, 'documents');
-  const out = [];
-  for (const m of docs.matchAll(/href="([^"]+\.pdf)"[^>]*>([\s\S]*?)<\/a>/g)) {
-    const year = /Annual Report (\d{4})/.exec(_text(m[2]))?.[1];
-    if (year && !out.some(r => r.year === +year)) out.push({ year: +year, url: m[1] });
-  }
-  return out.sort((a, b) => b.year - a.year);
-}
-
 function _parse(html) {
   const quarterly = _series(_table(_section(html, 'quarters')), RESULT_FIELDS);
   const annualPl  = _series(_table(_section(html, 'profit-loss')), RESULT_FIELDS);
@@ -141,7 +130,6 @@ function _parse(html) {
     // it means for a manufacturer, so the page needs to know which it is reading.
     kind: quarterTable && _pick(quarterTable.rows, 'Financing Profit') ? 'bank' : 'company',
     quarterly, annual, interim,
-    annualReports: _annualReports(html),
     shareholding: { quarterly: shp('quarterly-shp'), yearly: shp('yearly-shp') },
   };
 }

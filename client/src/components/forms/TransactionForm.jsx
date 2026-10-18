@@ -10,17 +10,11 @@ import DatePicker from './DatePicker';
 import SegmentedControl from '../ui/SegmentedControl';
 import RecurrenceFields from './RecurrenceFields';
 import { emptyRecurrence } from '../../lib/recurrence';
-import { ArrowRight, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, SlidersHorizontal } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import TxnTypeTiles from './TxnTypeTiles';
 
 const TODAY = todayStr();
 
-// Type vocabulary for the segmented control — colour + icon per cash type.
-const TYPE_META = {
-  income:     { label: 'Income',     Icon: ArrowDownLeft,     color: 'var(--color-success)' },
-  expense:    { label: 'Expense',    Icon: ArrowUpRight,      color: 'var(--color-danger)' },
-  transfer:   { label: 'Transfer',   Icon: ArrowLeftRight,    color: 'var(--color-chart-warm)' },
-  adjustment: { label: 'Adjustment', Icon: SlidersHorizontal, color: 'var(--color-accent)' },
-};
 const FORM_TYPE_KEYS = TRANSACTION_TYPES.filter(t => !['buy', 'sell'].includes(t.value)).map(t => t.value);
 
 function initFromTransaction(tx) {
@@ -134,39 +128,14 @@ export default function TransactionForm({ accountId, account, allAccounts = [], 
     <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* Type — colour-coded segmented control */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-        {FORM_TYPE_KEYS.map(k => {
-          const m = TYPE_META[k];
-          const on = form.type === k;
-          return (
-            <button key={k} type="button"
-              onClick={() => { setAdjMode('delta'); set({
-                type: k,
-                // The figure SURVIVES the switch. Someone who typed 1,240 and then
-                // realised it was an expense, not a transfer, meant to change the type
-                // — not to retype the number. Only the sign is normalised: an
-                // adjustment may be negative, and nothing else may.
-                amount: k === 'adjustment' ? form.amount : form.amount.replace(/^-/, ''),
-                // The category, on the other hand, genuinely cannot survive: a code
-                // belongs to one type's taxonomy, so an expense code on an income row
-                // is not a classification the server would accept.
-                category: '',
-              }); }}
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
-                padding: '10px 4px', borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-                fontFamily: 'inherit', fontSize: '0.6875rem', fontWeight: 600,
-                border: `1px solid ${on ? m.color : 'var(--color-border)'}`,
-                background: on ? `color-mix(in srgb, ${m.color} 12%, transparent)` : 'var(--color-bg-elevated)',
-                color: on ? m.color : 'var(--color-text-muted)',
-                boxShadow: on ? `inset 0 0 0 1px ${m.color}` : 'var(--elev-ring)',
-                transition: 'all 0.15s ease',
-              }}>
-              <m.Icon size={16} strokeWidth={2.2} /> {m.label}
-            </button>
-          );
-        })}
-      </div>
+      <TxnTypeTiles types={FORM_TYPE_KEYS} value={form.type}
+        onChange={k => { setAdjMode('delta'); set({
+          type: k,
+          // The figure survives the switch; only the sign is normalised (an adjustment may be negative).
+          amount: k === 'adjustment' ? form.amount : form.amount.replace(/^-/, ''),
+          // A category code belongs to one type's taxonomy, so it cannot survive.
+          category: '',
+        }); }} />
 
       {isAdjustment && baseCash !== null && (
         <SegmentedControl

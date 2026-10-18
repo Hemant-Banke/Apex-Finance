@@ -185,18 +185,19 @@ async function _disambiguateByNav(candidates, { pricePerUnit, dateMs, assetType 
  * @returns {Promise<{assetSymbol, assetName, assetType, currency, navMatched, resolved}|null>}
  *          null when nothing credible was found — the caller keeps the raw name.
  */
-async function resolveAsset({ symbol, name, assetType, pricePerUnit, date }) {
-  const key = `${symbol || ''}|${name || ''}|${assetType || ''}|${pricePerUnit || ''}|${date || ''}`;
+async function resolveAsset({ symbol, name, assetType, pricePerUnit, date, isin }) {
+  const key = `${symbol || ''}|${name || ''}|${assetType || ''}|${pricePerUnit || ''}|${date || ''}|${isin || ''}`;
   if (_cache.has(key)) return _cache.get(key);
 
-  const result = await _resolve({ symbol, name, assetType, pricePerUnit, date });
+  const result = await _resolve({ symbol, name, assetType, pricePerUnit, date, isin });
   _cache.set(key, result);
   return result;
 }
 
-async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
+async function _resolve({ symbol, name, assetType, pricePerUnit, date, isin }) {
   assetType = listedAssetType(assetType);
   const dateMs = date ? midnight(date) : null;
+  isin = isin || _isinIn(symbol) || _isinIn(name);
 
   // ── Mutual funds resolve against AMFI and NOWHERE ELSE.
   //
@@ -207,7 +208,7 @@ async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
   // An unresolved row the user fixes in review is far safer than a confident wrong one.
   if (assetType === 'mutual_fund') {
     const hit = await mfService.resolveScheme({
-      name, isin: _isinIn(symbol) || _isinIn(name), nav: pricePerUnit, dateMs,
+      name, isin, nav: pricePerUnit, dateMs,
     });
     if (!hit) return null;
 
@@ -226,6 +227,23 @@ async function _resolve({ symbol, name, assetType, pricePerUnit, date }) {
                  : 'name',
       resolved:    true,
     };
+  }
+
+  // ── 0. A listed security's ISIN names it outright. Prefer its NSE listing.
+  if (isin) {
+    const hit = (await _search(isin)).find(q => _isIndian(q) && !/^0P/i.test(q.symbol));
+    if (hit) {
+      const base  = hit.symbol.replace(/\.(NS|BO)$/i, '');
+      const tries = [`${base}.NS`, `${base}.BO`];
+      const meta  = await fetchQuoteMeta(tries);
+      const pick  = tries.find(t => meta[t]);
+      if (pick) {
+        return {
+          assetSymbol: pick, assetName: meta[pick].name || hit.name || name, assetType: listedAssetType(hit.type || assetType || 'stock'),
+          currency: meta[pick].currency || 'INR', certainty: 'isin', resolved: true,
+        };
+      }
+    }
   }
 
   // ── 1/2. A ticker was given. Try it, and if it carries no exchange, try the
@@ -321,6 +339,7 @@ async function resolveStatementAssets(transactions = []) {
         assetType:    tx.assetType,
         pricePerUnit: tx.pricePerUnit,
         date:         tx.date,
+        isin:         tx.isin,
       });
 
       // An asset row is only as good as the instrument behind it: a perfectly-read
@@ -347,7 +366,25 @@ async function resolveStatementAssets(transactions = []) {
     }));
   }
 
+  await _priceAtClose(assetRows);
   return transactions;
+}
+
+/** A resolved row the statement gave no price for is priced at its trade date's close, and says so. */
+async function _priceAtClose(rows) {
+  const need = rows.filter(t => !t.symbolUnresolved && t.assetSymbol && !(Number(t.pricePerUnit) > 0) && t.date);
+  if (!need.length) return;
+  const days  = need.map(t => midnight(t.date));
+  const items = [...new Map(need.map(t => [t.assetSymbol, { assetSymbol: t.assetSymbol, assetType: t.assetType }])).values()];
+  const series = await fetchHistoricPrices(items, Math.min(...days) - 10 * DAY_MS, Math.max(...days));
+  need.forEach((t, i) => {
+    const closes = series[t.assetSymbol] || {};
+    const on = Object.keys(closes).map(Number).filter(d => d <= days[i]).sort((a, b) => a - b).pop();
+    if (on == null) return;
+    t.pricePerUnit = Math.round(closes[on] * 100) / 100;
+    t.amount = Math.round(t.units * t.pricePerUnit * 100) / 100;
+    t.priceFromClose = true;
+  });
 }
 
 module.exports = {

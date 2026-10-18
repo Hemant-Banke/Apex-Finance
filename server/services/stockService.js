@@ -30,7 +30,7 @@
 const { DAY_MS } = require('../utils/constants');
 const { toDateStr } = require('../utils/helpers');
 const { notFound } = require('../utils/httpError');
-const { round, pctChange, toSorted, windowReturns, holdingExperience } = require('../utils/series');
+const { round, pctChange, toSorted, windowReturns, holdingExperience, filingsGrowth } = require('../utils/series');
 const { fetchChart, closesByDay, fetchYahooAuthed } = require('./marketDataService');
 const sectorService = require('./sectorService');
 const screenerService = require('./screenerService');
@@ -429,7 +429,7 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
       }),
     },
 
-    financials: fin && { kind: co.kind, consolidated: co.consolidated, ...fin },
+    financials: fin && { kind: co.kind, consolidated: co.consolidated, growth: filingsGrowth(co), ...fin },
     ownership: global ? _holders(q) : _ownership(co),
 
     performance: {
@@ -455,4 +455,4 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
   return data;
 }
 
-module.exports = { getStock, _risk, _maxDrawdown, _shapeFinancials, _ownership };
+module.exports = { getStock, _risk, _maxDrawdown, _shapeFinancials, _ownership, _yahooFinancials };

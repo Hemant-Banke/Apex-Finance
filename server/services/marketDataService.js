@@ -260,20 +260,19 @@ async function fetchHistoricPrices(holdings, startMs, endMs) {
 // Here they are only converted: INR via the day's FX quote, metals to ₹/gram.
 // Called ONLY when live prices are asked for — the settled basis never touches the network.
 
-// INR previous-session closes behind the last live prices, for `latestPreviousCloses`.
-const _prevInr = new Map();   // symbol → { prev, day }
+// The session each last live price belongs to, for `latestSessionDays`.
+const _session = new Map();   // symbol → { session, day }
 
 /**
- * The previous SESSION's close behind each live quote, on the same basis as the price
- * (INR where it was converted). Read after `fetchLatestPrices`; a day change measured
- * against it is the latest session's move, weekends and holidays included.
+ * The day key of the session behind each live price (the spot's, for a metal) — how a
+ * caller tells "today's session, not yet a close" from "a session already stored".
  */
-function latestPreviousCloses(symbols) {
+function latestSessionDays(symbols) {
   const today = toDateStr(todayMs());
   const out = {};
   for (const sym of symbols) {
-    const hit = _prevInr.get(sym);
-    if (hit?.day === today && hit.prev != null) out[sym] = hit.prev;
+    const hit = _session.get(sym);
+    if (hit?.day === today && hit.session != null) out[sym] = hit.session;
   }
   return out;
 }
@@ -313,8 +312,10 @@ async function fetchLatestPrices(holdings) {
     quotes = await livePrices.getQuotes([...listedItems.map(h => h.assetSymbol), ...metalSpots, ...fxSymbols]);
   } catch (e) { console.error('live quotes failed:', e.message); }
   const price = (sym) => (quotes[sym]?.price != null ? _round2(quotes[sym].price) : null);
-  const prevOf = (sym) => quotes[sym]?.previousClose ?? null;
-  const keepPrev = (sym, v) => { if (v != null) _prevInr.set(sym, { prev: _round2(v), day: today }); };
+  const keepSession = (sym, quoteSym) => {
+    const session = quotes[quoteSym]?.sessionDay;
+    if (session != null) _session.set(sym, { session, day: today });
+  };
 
   // Listed assets, converted when quoted abroad. A foreign holding with no FX quote is
   // omitted rather than passed through at its native value — USD must never read as INR.
@@ -322,13 +323,11 @@ async function fetchLatestPrices(holdings) {
     const p = price(h.assetSymbol);
     if (p == null) continue;
     const currency = normalizeCurrency(h.currency);
-    if (!currency) { out[h.assetSymbol] = p; keepPrev(h.assetSymbol, prevOf(h.assetSymbol)); continue; }
-    // One rate for both ends, so the day's move is the asset's, not the rupee's.
+    if (!currency) { out[h.assetSymbol] = p; keepSession(h.assetSymbol, h.assetSymbol); continue; }
     const fx = price(fxSymbol(currency));
     if (fx == null) continue;
     out[h.assetSymbol] = _round2(p * fx);
-    const prev = prevOf(h.assetSymbol);
-    if (prev != null) keepPrev(h.assetSymbol, prev * fx);
+    keepSession(h.assetSymbol, h.assetSymbol);
   }
 
   // Metals: INR per gram of PURE metal, keyed by each holding's own symbol; the caller scales by purity.
@@ -339,7 +338,7 @@ async function fetchLatestPrices(holdings) {
       const spot = METAL_SPOT_SYMBOLS[h.assetType];
       const perGram = metalInrPerGram(price(spot), usdInr, h.assetType);
       if (perGram != null) out[h.assetSymbol] = _round2(perGram);
-      keepPrev(h.assetSymbol, metalInrPerGram(prevOf(spot), usdInr, h.assetType));
+      keepSession(h.assetSymbol, spot);
     }
   }
   return out;
@@ -435,7 +434,7 @@ async function fetchQuoteMeta(symbols = []) {
   const results = await Promise.all(symbols.map(async (sym) => {
     const meta = (await fetchChart(sym, { range: '1d' }, 5000))?.meta;
     if (meta?.regularMarketPrice == null) return null;
-    return { price: _round2(meta.regularMarketPrice), currency: meta.currency || '' };
+    return { price: _round2(meta.regularMarketPrice), currency: meta.currency || '', name: meta.longName || meta.shortName || undefined };
   }));
 
   symbols.forEach((sym, i) => { if (results[i]) out[sym] = results[i]; });
@@ -596,7 +595,7 @@ module.exports = {
   lastOnOrBefore,
   fetchHistoricPrices,
   fetchLatestPrices,
-  latestPreviousCloses,
+  latestSessionDays,
   fetchMetalPricePerGram,
   fetchFxRate,
   fetchQuoteMeta,

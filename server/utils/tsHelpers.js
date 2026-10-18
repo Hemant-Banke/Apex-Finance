@@ -76,7 +76,8 @@ function sliceStartIndex(startMs, endMs, days) {
   const n = parseInt(days, 10);
   if (!n || n < 1) return 0;
 
-  const cutoffMs = endMs - (n - 1) * DAY_MS;
+  // N days means from exactly N days before the end, as every `1M`/`1Y` change measures.
+  const cutoffMs = endMs - n * DAY_MS;
   if (cutoffMs <= startMs) return 0;
   return Math.round((cutoffMs - startMs) / DAY_MS);
 }

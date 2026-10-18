@@ -388,22 +388,6 @@ body {
 .pill-label > svg { align-self: center; }
 .pill-count { font-size: 10px; opacity: 0.65; }
 
-/* The calendar beside a chart's range pills — the same height and track as a small pill
-   group; a custom window in force raises it the way a picked pill is raised. */
-.chart-range-cal {
-  display: inline-flex; align-items: center; gap: 6px; align-self: center;
-  padding: 6px 10px; border-radius: var(--radius-pill); line-height: 1.25;
-  font-family: inherit; font-size: 11px; font-weight: 500; white-space: nowrap; cursor: pointer;
-  background: var(--color-bg-card); border: 1px solid var(--color-border); color: var(--color-text-muted);
-  transition: all 0.2s ease;
-}
-.chart-range-cal svg { flex-shrink: 0; }
-.chart-range-cal:hover { color: var(--color-text-secondary); }
-.chart-range-cal.active {
-  background: var(--color-bg-elevated); color: var(--color-text-primary);
-  box-shadow: var(--shadow-sm), inset 0 0 0 1px var(--color-border);
-}
-.chart-range-cal:focus-visible { outline: 1px solid var(--color-accent); outline-offset: 1px; }
 /* Group headings in the compare dialog's list; the pinned copy sits over the scroller's top edge. */
 .group-head { margin: 0 -6px; padding: 8px 18px; background: var(--color-bg-modal); }
 .group-head-pinned { position: absolute; top: 0; left: 0; margin: 0; z-index: 1; pointer-events: none; }

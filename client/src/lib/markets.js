@@ -15,13 +15,6 @@ export const WINDOWS = [
 ];
 export const windowOf = (key) => WINDOWS.find(w => w.key === key) || WINDOWS[0];
 
-/** The ranges every market price chart (a `PriceGrapher`) offers — Markets and a company alike. */
-export const MARKET_RANGES = [
-  { label: '1M', days: 30 },  { label: '3M', days: 91 },  { label: '6M', days: 182 },
-  { label: '1Y', days: 365 }, { label: '3Y', days: 1095 }, { label: '5Y', days: 1825 },
-  { label: 'All', days: null },
-];
-
 /**
  * Closes → the `[{date, value}]` a `PriceGrapher` draws. In its growth view the series is
  * indexed to 100 at its first point — the base its benchmark overlays are rebased onto.

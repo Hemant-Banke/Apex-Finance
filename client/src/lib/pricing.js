@@ -12,7 +12,7 @@ export function setLive(on) {
 }
 
 // Endpoints that value the user's assets, and so take the basis as `fetchLatestBal`.
-const PRICED = [/^\/accounts\/?$/, /^\/accounts\/[^/]+\/?$/, /^\/accounts\/[^/]+\/daily$/, /^\/dashboard\/(summary|portfolio)$/, /^\/networth\/daily$/];
+const PRICED = [/^\/accounts\/?$/, /^\/accounts\/[^/]+\/?$/, /^\/accounts\/[^/]+\/daily$/, /^\/dashboard\/(summary|portfolio|contribution|calendar)$/, /^\/networth\/daily$/];
 export const takesBasis = (url = '') => PRICED.some(re => re.test(url.split('?')[0]));
 
 // What the last priced response was actually valued at: `{ date, at }`, read from its `asof`.

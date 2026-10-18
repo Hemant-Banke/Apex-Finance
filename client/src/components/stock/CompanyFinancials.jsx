@@ -95,6 +95,37 @@ const MEASURES = [
   { key: 'debt', label: 'Debt' },
   { key: 'cash', label: 'Cash flow' },
 ];
+const GROWTH_WINDOWS = [['3y', '3Y'], ['5y', '5Y'], ['10y', '10Y'], ['ttm', 'Last 12M']];
+
+/** Average yearly revenue and profit growth (compounded), from the server's `financials.growth`. */
+function AverageGrowth({ growth, fyLabel }) {
+  const cols = GROWTH_WINDOWS.filter(([k]) => growth?.[k]?.revenue != null || growth?.[k]?.profit != null);
+  if (!cols.length) return null;
+  const grid = `180px repeat(${cols.length}, minmax(64px, 1fr))`;
+  const row = (label, f) => (
+    <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 8, padding: '9px 0', borderBottom: '1px solid var(--color-border-subtle)', alignItems: 'baseline' }}>
+      <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>{label}</span>
+      {cols.map(([k]) => {
+        const v = growth[k]?.[f];
+        return <span key={k} className="figure text-sm" style={{ textAlign: 'right', color: v == null ? 'var(--color-text-muted)' : pnlColor(v) }}>{signed(v)}</span>;
+      })}
+    </div>
+  );
+  return (
+    <div style={{ marginBottom: 22 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: grid, gap: 8, paddingBottom: 8, borderBottom: '1px solid var(--color-border-subtle)' }}>
+        <span className="col-head" style={{ whiteSpace: 'nowrap' }}>Average annual growth</span>
+        {cols.map(([k, l]) => <span key={k} className="col-head" style={{ textAlign: 'right' }}>{l}</span>)}
+      </div>
+      {row('Revenue', 'revenue')}
+      {row('Net profit', 'profit')}
+      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 8, lineHeight: 1.5 }}>
+        Compounded{fyLabel ? `, ${fyLabel} against the year N years before` : ''}; the last 12 months are the latest four quarters on the four before. Withheld where either end is a loss.
+      </p>
+    </div>
+  );
+}
+
 const PERIODS = [{ key: 'annual', label: 'Annual' }, { key: 'quarterly', label: 'Quarterly' }];
 
 /** Period labels: India's April–March fiscal year at home; abroad, the year a period ends in. */
@@ -130,10 +161,11 @@ export default function CompanyFinancials({ financials, money = companyMoney() }
         size="sm"
         sub={`${financials.consolidated ? 'Consolidated' : 'Standalone'} filings · ${money.unitLabel} · growth is year on year`}
         style={{ marginBottom: 16 }}
-        action={<SegmentedControl ariaLabel="Period" value={period} onChange={setPeriod} options={PERIODS} />}
       />
-      <div style={{ marginBottom: 14 }}>
+      <AverageGrowth growth={financials.growth} fyLabel={financials.growth?.fy ? L.year(financials.growth.fy) : null} />
+      <div className="flex items-center justify-between" style={{ gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
         <SegmentedControl ariaLabel="Measure" value={measure} onChange={setMeasure} options={MEASURES} />
+        <SegmentedControl ariaLabel="Period" value={period} onChange={setPeriod} options={PERIODS} />
       </div>
 
       <ResponsiveContainer width="100%" height={220}>

@@ -21,6 +21,7 @@ import MonthlyLedger from '../components/charts/MonthlyLedger';
 import HoldingsBook from '../components/portfolio/HoldingsBook';
 import AllocationPanel from '../components/portfolio/AllocationPanel';
 import PerformancePanel from '../components/portfolio/PerformancePanel';
+import CalendarPerformance from '../components/portfolio/CalendarPerformance';
 import { paddedDays } from '../lib/indicators';
 
 /**
@@ -213,6 +214,9 @@ export default function Analytics() {
       ) : (
         <GardenEmpty compact icon={LineChart} title="No holdings yet" text="Add an asset to an account and its performance, allocation and contribution appear here." />
       )}
+
+      {/* Calendar days, months and years — the book and the cashflow side by side in time. */}
+      <CalendarPerformance />
 
       {/* ── Cashflow ──────────────────────────────────────────────────────────
           Two things, in the order you want them: the SHAPE of the window, then the

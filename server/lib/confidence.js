@@ -38,6 +38,8 @@ const PARSE = {
   bank_line:  0.95,
   // Same parser, but the row was reassembled from wrapped lines.
   bank_block: 0.90,
+  // Depository statement: units read off a strict layout and checked against the running balance.
+  demat:      0.95,
   // A language model reading arbitrary text. Refined by the model's own per-row score.
   llm_text:   0.72,
   // Vision on top of that: OCR misreads names and digits (see symbolResolver).

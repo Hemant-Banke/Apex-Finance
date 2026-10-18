@@ -116,6 +116,7 @@ export const dashboardAPI = {
   // The raw book at cost. Only for callers that just need the instrument list.
   getHoldings:         ()       => api.get('/dashboard/holdings'),
   // days omitted / 0 = the whole history
+  getCalendar:         () => api.get('/dashboard/calendar'),
   getContribution:     (days, account) => api.get('/dashboard/contribution', { params: { days, ...(account && { account }) } }),
   getIncomeExpense:    (months) => api.get('/dashboard/income-expense',    { params: { months } }),
   // Category totals for one direction — where it goes, and where it comes from.
@@ -160,7 +161,7 @@ export const marketsAPI = {
   // `fresh` — the Markets refresh button: bypass the server's caches (it throttles).
   overview: (fresh)              => api.get('/markets/overview', { params: fresh ? { fresh: true } : {} }),
   sectors:  (fresh)              => api.get('/markets/sectors',  { params: fresh ? { fresh: true } : {} }),
-  business: (symbol, global) => api.get(`/markets/stocks/${encodeURIComponent(symbol)}/business`, { params: global ? { global: true } : {}, timeout: 180000 }),
+  growth:   (symbol, global) => api.get(`/markets/stocks/${encodeURIComponent(symbol)}/growth`, { params: global ? { global: true } : {}, timeout: 90000 }),
   stock:    (symbol, fresh, global) => api.get(`/markets/stocks/${encodeURIComponent(symbol)}`, { params: { ...(fresh ? { fresh: true } : {}), ...(global ? { global: true } : {}) } }),
   asset:    (symbol, fresh)      => api.get(`/markets/assets/${encodeURIComponent(symbol)}`, { params: fresh ? { fresh: true } : {} }),
   flows:    (sessions = 60, fresh) => api.get('/markets/flows',  { params: { sessions, ...(fresh ? { fresh: true } : {}) } }),

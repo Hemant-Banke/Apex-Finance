@@ -10,7 +10,7 @@ import SegmentedControl from '../ui/SegmentedControl';
 import DivergingBar from '../ui/DivergingBar';
 import { TooltipPanel } from '../charts/ChartTooltip';
 import { marketsAPI } from '../../lib/api';
-import { formatPct, pnlColor, formatCrore, formatPoints as pp } from '../../lib/utils';
+import { formatPct, pnlColor, formatCrore, formatPoints as pp, signedTone } from '../../lib/utils';
 import { WINDOWS, windowOf, formatLevel, stockPath } from '../../lib/markets';
 
 /**
@@ -44,12 +44,7 @@ const CAP = {
   stock:  { '1d': 4, '1w': 8, '1m': 15, '1y': 50 },
 };
 
-function tone(r, cap) {
-  if (r == null) return 'var(--color-bg-elevated)';
-  const t = Math.min(Math.abs(r) / cap, 1);
-  const pct = Math.round(10 + t * 58);
-  return `color-mix(in srgb, var(--color-${r >= 0 ? 'success' : 'danger'}) ${pct}%, var(--color-bg-elevated))`;
-}
+const tone = signedTone;
 
 /** Market cap in rupees → "₹12.4L Cr" / "₹8,240 Cr". */
 const capLabel = (rupees) => (rupees ? formatCrore(rupees / 1e7) : '—');

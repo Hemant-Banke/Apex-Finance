@@ -54,7 +54,8 @@ const RANGE_LABEL = { day: '1D', week: '1W', month: '1M', year: '1Y' };
 function NetWorthMasthead({ summary, totals, hasPortfolio }) {
   const changes = summary?.netWorthChange || {};
   const liabilities = summary?.totalLiabilities || 0;
-  const invested = totals.value || 0;
+  // From the summary, so Portfolio + Cash − Liabilities adds up to the headline exactly.
+  const invested = summary?.totalInvestments ?? totals.value ?? 0;
   const cash     = summary?.totalCash || 0;
 
   // Portfolio and cash are shares of the ASSET side, which is what they add up to — and
@@ -177,7 +178,7 @@ function Movers({ holdings }) {
  * The whole picture in one strip: how the investments have done, what kind of book it is,
  * how much is kept, how long the cash lasts, and this month so far. Each opens its page.
  */
-function VitalSigns({ totals, profile, summary, incExp }) {
+function VitalSigns({ totals, year, profile, summary, incExp }) {
   const style = portfolioStyle(profile);
   const active = incExp.filter(m => m.income || m.expense);
   const inc = active.reduce((s, m) => s + m.income, 0);
@@ -188,10 +189,11 @@ function VitalSigns({ totals, profile, summary, incExp }) {
   const runway = avgExp > 0 && summary?.totalCash > 0 ? summary.totalCash / avgExp : null;
 
   const tiles = [
-    totals?.holdingsCount > 0 && {
-      to: '/analytics', label: 'Investment gain',
-      value: formatSigned(Math.round(totals.totalGain || 0), compactIfLarge), tone: pnlColor(totals.totalGain),
-      sub: totals.xirr != null ? `${formatPct(totals.xirr, 1)} a year (XIRR)` : 'unrealised + realised',
+    // The Analytics contribution table's 1Y figure — the same request, so the same number.
+    totals?.holdingsCount > 0 && year && {
+      to: '/analytics', label: 'Capital gain (1Y)',
+      value: formatSigned(Math.round(year.gain || 0), compactIfLarge), tone: pnlColor(year.gain),
+      sub: year.returnPct != null ? `${formatPct(year.returnPct, 1)} on capital at work` : 'buys and sells netted out',
     },
     style && {
       to: '/analytics', label: 'Portfolio style', value: style.label, text: true,
@@ -218,7 +220,7 @@ function VitalSigns({ totals, profile, summary, incExp }) {
         {tiles.map((t, i) => (
           <Link key={t.label} to={t.to} className="vital-tile" style={{ borderLeft: i ? '1px solid var(--color-border-subtle)' : 'none' }}>
             <span className="flex items-center justify-between" style={{ gap: 8 }}>
-              <span className="col-head">{t.label}</span>
+              <span className="col-head" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.label}</span>
               <ArrowUpRight size={12} className="vital-arrow" />
             </span>
             <span className={t.text ? undefined : 'figure'} style={{ display: 'block', fontSize: '1.2rem', fontWeight: 500, marginTop: 10, color: t.tone || 'var(--color-text-primary)', whiteSpace: 'nowrap' }}>
@@ -237,6 +239,7 @@ export default function Dashboard() {
   const toast = useToast();
   const [summary,   setSummary]   = useState(null);
   const [portfolio, setPortfolio] = useState(null);
+  const [year,      setYear]      = useState(null);
   const [incExp,    setIncExp]    = useState([]);
   const [spend,     setSpend]     = useState([]);
   const [spending,  setSpending]  = useState(null);
@@ -248,7 +251,7 @@ export default function Dashboard() {
 
   const load = async () => {
     try {
-      const [s, p, ie, cats, catMap, sp, gl, ac] = await Promise.all([
+      const [s, p, ie, cats, catMap, sp, gl, ac, yr] = await Promise.all([
         dashboardAPI.getSummary(),
         dashboardAPI.getPortfolio(),
         dashboardAPI.getIncomeExpense(6),
@@ -257,10 +260,12 @@ export default function Dashboard() {
         dashboardAPI.getSpendingProfile(12).catch(() => null),
         goalsAPI.getAll().catch(() => ({ data: [] })),
         accountsAPI.getAll().catch(() => ({ data: [] })),
+        dashboardAPI.getContribution(365).catch(() => null),
       ]);
 
       setSummary(s.data);
       setPortfolio(p.data);
+      setYear(yr?.data?.totals || null);
       setIncExp(ie.data);
       setSpending(sp?.data || null);
       setGoals(gl.data || []);
@@ -309,7 +314,7 @@ export default function Dashboard() {
       {/* Net worth over time */}
       <PriceGrapher height={220} growthCapable />
 
-      <VitalSigns totals={totals} profile={portfolio?.profile} summary={summary} incExp={incExp} />
+      <VitalSigns totals={totals} year={year} profile={portfolio?.profile} summary={summary} incExp={incExp} />
 
       {/* What the money is in, and where it goes. */}
       {(hasPortfolio || spend.length > 0) && (
@@ -335,6 +340,7 @@ export default function Dashboard() {
                   <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
                     <span className="figure" style={{ color: pnlColor(totals.unrealisedPnl) }}>{formatPct(totals.unrealisedPnlPct, 1)}</span>
                     {' '}unrealised on <span className="figure">{compactIfLarge(totals.invested || 0)}</span>
+                    {totals.since && <> (since {formatDate(totals.since)})</>}
                   </p>
                 </div>
                 <div style={{ textAlign: 'right' }}>

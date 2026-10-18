@@ -14,15 +14,9 @@ import Checkbox from '../ui/Checkbox';
 import ConfidenceBadge from './ConfidenceBadge';
 import BackLink from '../ui/BackLink';
 import { useToast } from '../../context/ToastContext';
-import SegmentedControl from '../ui/SegmentedControl';
+import TxnTypeTiles from '../forms/TxnTypeTiles';
 
 const TODAY = todayStr();
-
-const TYPE_PILL_COLOR = {
-  income: 'var(--color-success)',
-  expense: 'var(--color-danger)',
-  transfer: 'var(--color-chart-warm)',
-};
 
 export default function TransactionReview({ data, accounts, accountId, onBack, onDone }) {
   const toast = useToast();
@@ -50,8 +44,9 @@ export default function TransactionReview({ data, accounts, accountId, onBack, o
         // credited to it. Defaulting a buy to "off" (the manual default, where the
         // money often moved in an account we are not recording) meant every imported
         // broker statement had to be corrected row by row before it was true.
-        // Overridable per row, and in bulk from the header.
-        usesCashBalance: true,
+        // Overridable per row, and in bulk from the header. The parser turns it off for
+        // units that arrived without a trade (a depository transfer in).
+        usesCashBalance: tx.usesCashBalance ?? true,
       }))
   );
   const [submitting, setSubmitting] = useState(false);
@@ -544,7 +539,7 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                 not the identity, and for a fund it is an opaque Morningstar code. */}
             {isAsset && row.assetSymbol && <> · <span className="figure">{row.assetSymbol}</span></>}
             {isAsset
-              ? ` · ${row.units || 0} units${row.pricePerUnit ? ` @ ${formatCurrency(row.pricePerUnit)}` : ''}`
+              ? ` · ${row.units || 0} units${row.pricePerUnit ? ` @ ${formatCurrency(row.pricePerUnit)}${row.priceFromClose ? ' (close)' : ''}` : ''}`
               : (row.category ? ` · ${categoryLabel(row.category)}` : '')}
           </p>
         </div>
@@ -573,11 +568,8 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                 <label className="label">Type</label>
                 {/* The pill row fills the field's remaining height, so it lines up
                     with the inputs beside it whatever they measure. */}
-                <SegmentedControl block ariaLabel="Type" value={row.type} style={{ flex: 1 }}
-                  onChange={t => onChange({ type: t, category: '' })}
-                  options={['income', 'expense', 'transfer'].map(t => ({
-                    key: t, label: t.charAt(0).toUpperCase() + t.slice(1), tone: TYPE_PILL_COLOR[t],
-                  }))} />
+<TxnTypeTiles inline types={['income', 'expense', 'transfer']} value={row.type} style={{ flex: 1 }}
+                  onChange={t => onChange({ type: t, category: '' })} />
               </div>
               <div className="field">
                 <label className="label">Date</label>
@@ -614,9 +606,10 @@ function ReviewRow({ row, accounts, accountId, isLast, onChange }) {
                     <span style={{ marginLeft: 4, color: 'var(--color-accent)', fontWeight: 600 }}>
                       {row.currency && row.currency !== 'INR' ? `(${row.currency})` : ''}
                     </span>
+                    {row.priceFromClose && <span style={{ marginLeft: 4, color: 'var(--color-text-muted)', fontWeight: 400 }}>· day's close</span>}
                   </label>
                   <input type="number" step="any" min="0" value={row.pricePerUnit ?? ''} {...numericOnly()}
-                    onChange={e => onChange({ pricePerUnit: e.target.value })}
+                    onChange={e => onChange({ pricePerUnit: e.target.value, priceFromClose: false })}
                     className="input-field" style={{ fontFamily: 'var(--font-mono)' }} placeholder="0.00" />
                 </div>
               </div>

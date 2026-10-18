@@ -19,8 +19,8 @@
 const Transaction     = require('../models/Transaction');
 const AccountHoldings = require('../models/AccountHoldings');
 
-const { fetchLatestPrices, fetchHistoricPrices, lastOnOrBefore, latestPreviousCloses } = require('./marketDataService');
-const { resolveUnitPrice }        = require('../utils/assetPricing');
+const { fetchLatestPrices, fetchHistoricPrices, lastOnOrBefore, latestSessionDays } = require('./marketDataService');
+const { resolveUnitPrice, isRateAsset } = require('../utils/assetPricing');
 const { directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { midnight, todayMs, t1Ms, todayStr, t1Str, toDateStr } = require('../utils/helpers');
 const { DAY_MS }                  = require('../utils/constants');
@@ -42,15 +42,24 @@ const PREV_CLOSE_LOOKBACK_DAYS = 10;
  * right for READING the book — it is one position to the user — but a SALE has to name
  * the account it draws from, and "you hold 30" is a lie if 12 of them sit in a different
  * broker. So the sell UI gets the breakdown while everything else keeps the total.
+ *
+ * Quantity and cost basis come from the trade REPLAY (`pools`), not the stored AVCO: the
+ * store is maintained incrementally, so a back-dated or edited trade lands out of order
+ * and its average drifts from the chronological one realised P&L is taken against. Two
+ * bases made unrealised + realised disagree with value − money put in.
  */
-async function loadBook(userId, account) {
+async function loadBook(userId, account, pools = {}) {
   const docs = await AccountHoldings.find({ user: userId, ...(account && { account }) }).select('account holdings').lean();
 
   const book = {};
   for (const doc of docs) {
     for (const h of (doc.holdings || [])) {
-      const sym = h.assetSymbol;
-      if (!sym || isFlatUnits(h.units, h.assetType)) continue;
+      const sym = h.assetSymbol?.toUpperCase();
+      if (!sym) continue;
+      const pool  = pools[`${doc.account}|${sym}`];
+      const units = pool ? pool.units : (h.units || 0);
+      if (isFlatUnits(units, h.assetType)) continue;
+      const invested = pool ? pool.invested : (h.totalInvested || 0);
 
       const pos = (book[sym] ??= {
         assetSymbol: sym,
@@ -66,13 +75,13 @@ async function loadBook(userId, account) {
 
       pos.positions.push({
         account:        doc.account?.toString() || null,
-        qty:            h.units || 0,
-        avgCostPerUnit: h.avgPricePerUnit || 0,
-        totalInvested:  h.totalInvested || 0,
+        qty:            units,
+        avgCostPerUnit: units ? invested / units : 0,
+        totalInvested:  invested,
       });
 
-      pos.units               += h.units || 0;
-      pos.totalInvested       += h.totalInvested || 0;
+      pos.units               += units;
+      pos.totalInvested       += invested;
       pos.totalInvestedNative += h.totalInvestedNative ?? h.totalInvested ?? 0;
 
       // Valuation metadata rides along — without purity/rate a metal or an FD cannot price.
@@ -94,56 +103,73 @@ async function loadBook(userId, account) {
 }
 
 /**
- * Realised P&L, by replaying the trade history with a running AVCO book.
+ * One trade against a running AVCO pool `{ units, invested }` (invested carries the sign
+ * of units, so a short holds its proceeds as negative cost). Returns the P&L it realised.
  *
- * The average cost must be the one that was in force ON THE DAY OF THE SELL — using
- * today's average would price the sale against buys that happened after it. So the book
- * is rebuilt trade by trade and each sell takes its profit against the running average.
- *
- * Sells are matched per ACCOUNT (a sale draws from the account it happened in), then
- * totalled per symbol for the merged view.
+ * The part of a trade that reduces the position realises against the average; any
+ * remainder opens the other side. Every trade keeps `invested = bought − sold + realised`,
+ * which is what makes unrealised + realised equal value − net money in.
  */
-async function computeRealised(userId, account) {
+function applyTrade(pos, dir, units, amount, assetType) {
+  let realised = 0;
+  const closing = pos.units * dir < 0 ? Math.min(units, Math.abs(pos.units)) : 0;
+  if (closing > 0) {
+    const avg = pos.invested / pos.units;
+    const amt = amount * (closing / units);
+    realised = dir < 0 ? amt - avg * closing : avg * closing - amt;
+    pos.units += dir * closing;
+    if (isFlatUnits(pos.units, assetType)) { pos.units = 0; pos.invested = 0; }
+    else pos.invested = avg * pos.units;
+  }
+  const opening = units - closing;
+  if (opening > 0) {
+    pos.units    += dir * opening;
+    pos.invested += dir * amount * (opening / units);
+  }
+  return realised;
+}
+
+/**
+ * The trade history replayed once, chronologically, per ACCOUNT and symbol (a sale
+ * draws from the account it happened in). The single source for cost basis, realised
+ * P&L, XIRR flows and the trades a day change has to net out.
+ *
+ * The average a sell is costed at is the one in force ON THE DAY OF THE SELL — today's
+ * would price the sale against buys that happened after it.
+ */
+async function replayTrades(userId, account) {
   const txns = await Transaction
     .find({ user: userId, type: { $in: ['buy', 'sell'] }, ...(account && { account }) })
-    .select('account type assetSymbol units amount date')
+    .select('account type assetSymbol assetType units amount date')
     .sort({ date: 1 })
     .lean()
     .then(chronological);
 
+  const pools    = {};     // `${account}|${symbol}` → { units, invested }
   const bySymbol = {};     // symbol → realised INR
+  const trades   = {};     // symbol → [{ ms, dir, units, amount }]
   const flows    = [];     // [dayMs, ±INR] — money into (−) and out of (+) the book
-  const running  = {};     // `${account}|${symbol}` → { units, invested }
   let total = 0;
 
   for (const tx of txns) {
     const sym = tx.assetSymbol?.toUpperCase();
     if (!sym || !tx.units) continue;
 
-    const key = `${tx.account}|${sym}`;
-    flows.push([midnight(tx.date), directionalAssetImpact(tx.type) > 0 ? -(tx.amount || 0) : (tx.amount || 0)]);
-    const pos = (running[key] ??= { units: 0, invested: 0 });
+    const ms  = midnight(tx.date);
     const dir = directionalAssetImpact(tx.type);
+    const amt = tx.amount || 0;
+    flows.push([ms, dir > 0 ? -amt : amt]);
+    (trades[sym] ??= []).push({ ms, dir, units: tx.units, amount: amt });
 
-    if (dir > 0) {
-      pos.units    += tx.units;
-      pos.invested += tx.amount || 0;
-      continue;
+    const pos = (pools[`${tx.account}|${sym}`] ??= { units: 0, invested: 0 });
+    const r = applyTrade(pos, dir, tx.units, amt, tx.assetType);
+    if (r) {
+      bySymbol[sym] = (bySymbol[sym] || 0) + r;
+      total += r;
     }
-
-    // A sell: profit is the proceeds less what those units cost, at the average then.
-    const avg      = pos.units ? pos.invested / pos.units : 0;
-    const costOut  = avg * tx.units;
-    const proceeds = tx.amount || 0;
-
-    bySymbol[sym] = (bySymbol[sym] || 0) + (proceeds - costOut);
-    total        += proceeds - costOut;
-
-    pos.units    -= tx.units;
-    pos.invested  = pos.units > 0 ? avg * pos.units : 0;   // drain the pool at the average
   }
 
-  return { total, bySymbol, flows };
+  return { pools, realised: { total, bySymbol }, trades, flows };
 }
 
 // Same-day trades carry no time, so buys go first: an intraday round trip is a buy then a
@@ -161,9 +187,13 @@ const chronological = (txns) => txns.sort((a, b) =>
  * A price of `null` means the position genuinely cannot be priced (an unquoted asset with
  * no rate). Its market value falls back to its cost basis, so the portfolio total stays
  * honest rather than counting it as zero.
+ *
+ * `baseDay` is the day the day change is measured FROM: trades dated after it are part of
+ * the move and are netted out of it. `liveMissing` counts quoted positions that got no
+ * live price (so fell back to the close).
  */
 async function priceBook(book, wantLive = true) {
-  if (!book.length) return { live: {}, prev: {}, dayBase: {} };
+  if (!book.length) return { live: {}, prev: {}, dayBase: {}, baseDay: {}, liveMissing: 0 };
 
   const t1 = t1Ms();
   const [latest, history] = await Promise.all([
@@ -174,30 +204,49 @@ async function priceBook(book, wantLive = true) {
   const live = {};
   const prev = {};
   const dayBase = {};   // what today's move is measured FROM — `prev`, except for a fund
-  // The live feed's own previous-session close: the day's move then compares like with
-  // like, and on a weekend or holiday it is the last session's move rather than zero.
-  const sessionPrev = latestPreviousCloses(book.map(p => p.assetSymbol));
+  const baseDay = {};
+  let liveMissing = 0;
+  // Which session each live price is from: on a weekend or holiday it is one already
+  // stored as a close, and the day's move is that session's, not zero.
+  const sessions = latestSessionDays(book.map(p => p.assetSymbol));
 
   for (const pos of book) {
     const sym     = pos.assetSymbol;
     const basisMs = midnight(pos.lastTransactionDate || pos.firstPurchaseDate || todayMs());
 
     const last = lastOnOrBefore(history[sym] || {}, t1);
+    const before = last ? lastOnOrBefore(history[sym] || {}, last.day - DAY_MS) : null;
     const prevQuote = last?.value ?? null;
-    let dayBaseQuote = latest[sym] != null && sessionPrev[sym] != null ? sessionPrev[sym] : prevQuote;
+    // The day change is measured from a STORED close — in INR at that day's own FX, the
+    // same close the settled basis uses. The live feed's previous close converted at
+    // today's FX dropped the rupee's own move from a rupee figure. When the live price is
+    // from a session already stored as a close (a weekend, before the open), the move is
+    // that session's: its close against the one before.
+    let dayBaseQuote = prevQuote;
+    baseDay[sym] = last?.day ?? t1;
+    const lastSessionDone = wantLive
+      ? (latest[sym] == null || (sessions[sym] != null && last != null && sessions[sym] <= last.day))
+      : true;
+    if (lastSessionDone && before) {
+      dayBaseQuote = before.value;
+      baseDay[sym] = before.day;
+    }
 
     // Settled basis: no live quote is asked for, so the day's move is the LAST SETTLED
     // session — the close before T-1's against T-1's own.
     if (!wantLive) {
-      const before = last ? lastOnOrBefore(history[sym] || {}, last.day - DAY_MS) : null;
-      const settledPrev = before?.value ?? null;
       live[sym] = resolveUnitPrice(pos, { marketPrice: prevQuote, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: t1 });
       prev[sym] = live[sym];
-      dayBase[sym] = settledPrev == null ? live[sym] : resolveUnitPrice(pos, {
-        marketPrice: settledPrev, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: (before?.day ?? t1),
+      // With no close at all (an FD, an EPF) the "session" is the last day's accrual.
+      const fromMs = before?.day ?? t1 - DAY_MS;
+      if (!before) baseDay[sym] = fromMs;
+      dayBase[sym] = resolveUnitPrice(pos, {
+        marketPrice: before?.value ?? null, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: fromMs,
       });
       continue;
     }
+
+    if (latest[sym] == null && !isRateAsset(pos.assetType)) liveMissing++;
 
     // A fund reprices once a day, and its NAV for today is published only at night. All
     // day, then, its "latest" NAV IS yesterday's, and comparing it with yesterday's close
@@ -209,6 +258,7 @@ async function priceBook(book, wantLive = true) {
       const lastNav = navDays.length ? history[sym][navDays[navDays.length - 1]] : null;
       if (lastNav != null && Math.abs(lastNav - latest[sym]) < 1e-9 && navDays.length > 1) {
         dayBaseQuote = history[sym][navDays[navDays.length - 2]];
+        baseDay[sym] = navDays[navDays.length - 2];
       }
     }
 
@@ -220,9 +270,12 @@ async function priceBook(book, wantLive = true) {
     // the settled store — the Accounts page and the Analytics page disagreed about the
     // same holding. Yesterday's close is a real market price; what you paid for it is not.
     //
-    // When this fallback fires, live === prev, so the day change comes out as zero on its
-    // own — which is the honest answer: we don't know how it moved today.
-    const marketNow = latest[sym] ?? prevQuote;
+    // When this fallback fires the position is at the last close, so its day change is
+    // that session's move — exactly what the settled basis reports for it.
+    // A live price from a session that is already a stored close IS that close; its last
+    // trade differs from the official close by noise, and live would disagree with settled.
+    const closedSession = sessions[sym] != null && last != null && sessions[sym] <= last.day;
+    const marketNow = closedSession ? prevQuote : (latest[sym] ?? prevQuote);
 
     live[sym] = resolveUnitPrice(pos, {
       marketPrice: marketNow,
@@ -242,53 +295,31 @@ async function priceBook(book, wantLive = true) {
       marketPrice: dayBaseQuote,
       basePrice:   pos.avgPricePerUnit ?? null,
       basisMs,
-      atMs: t1,
+      atMs: baseDay[sym],
     });
   }
 
-  return { live, prev, dayBase };
+  return { live, prev, dayBase, baseDay, liveMissing };
 }
 
 /**
- * The whole portfolio, marked to market.
+ * Every position valued on one basis — THE valuation. The portfolio, every account
+ * balance, the net-worth headline and today's chart point all read it, so no two of them
+ * can price the same holding differently.
  *
- * @param {boolean} [opts.live=true]
- *   true  — value at the LATEST price (what it is worth right now).
- *   false — value at the last SETTLED close, T-1. The same basis the stores use, so a
- *           settled portfolio total agrees with the settled account balances.
- *   The day change follows the basis: live against the previous session's close, or —
- *   settled — the last settled session (T-1's close against the close before it).
- *
- * @returns {Promise<{ holdings: Object[], totals: Object }>}
+ * @returns {Promise<{ holdings: Object[], replay: Object, allPriced: boolean, dayBase: number, asof: string }>}
  */
-// `account` scopes the whole book (holdings, weights, realised) to one account.
-async function getPortfolio(userId, { live: wantLive = true, account = null } = {}) {
-  const [book, realised] = await Promise.all([loadBook(userId, account), computeRealised(userId, account)]);
+async function markBook(userId, { live: wantLive = true, account = null } = {}) {
+  const replay = await replayTrades(userId, account);
+  const book   = await loadBook(userId, account, replay.pools);
+  if (!book.length) return { holdings: [], replay, allPriced: true, dayBase: 0, asof: wantLive ? todayStr() : t1Str() };
 
-  if (!book.length) {
-    return {
-      holdings: [],
-      totals: {
-        invested: 0, value: 0,
-        unrealisedPnl: 0, unrealisedPnlPct: 0,
-        realisedPnl: realised.total,
-        totalGain: realised.total,
-        ...bookXirr(realised.flows, 0, wantLive ? todayMs() : t1Ms()),
-        dayChange: 0, dayChangePct: 0,
-        holdingsCount: 0, priced: true,
-        asof: wantLive ? todayStr() : t1Str(),
-        live: wantLive,
-      },
-    };
-  }
-
-  const { live, prev, dayBase: dayFrom } = await priceBook(book, wantLive);
+  const { live, prev, dayBase: dayFrom, baseDay, liveMissing } = await priceBook(book, wantLive);
 
   // `priced` tells the client whether these are real market numbers or a book-value
   // stand-in, so the UI can say so instead of quietly showing a P&L of exactly zero.
   let allPriced = true;
-
-  let dayBase = 0;   // Σ yesterday's value, over only the positions we can compare
+  let dayBase = 0;   // capital the day's move is measured against, over comparable positions
 
   const holdings = book.map(pos => {
     const sym      = pos.assetSymbol;
@@ -297,8 +328,6 @@ async function getPortfolio(userId, { live: wantLive = true, account = null } = 
     const livePrice = live[sym];
     const prevPrice = prev[sym];
 
-    // What the position is VALUED at depends on the basis asked for; the day change below
-    // always compares live against T-1 regardless, because that is what a day change is.
     const basisPrice = wantLive ? livePrice : (prevPrice ?? livePrice);
     if (basisPrice == null) allPriced = false;
 
@@ -306,21 +335,30 @@ async function getPortfolio(userId, { live: wantLive = true, account = null } = 
     const price = basisPrice ?? pos.avgPricePerUnit;
     const value = pos.units * price;
 
-    // A day's move is only meaningful when BOTH ends are real quotes. If either is
-    // missing the position simply did not move today, as far as we can honestly say.
+    // The day's move is the change in what the position is worth less the money put into
+    // it since the base close: value − units then × base price − bought + sold. Pricing
+    // today's buys at yesterday's close (units now × the price move) booked a move on
+    // shares that were not held, and the day change stopped matching the change in gain.
     //
-    // Comparing a book-value fallback against a real quote is how this went wrong before:
-    // physical gold failed to price live (so it fell back to the ₹8,000/g it was bought
-    // at) while its historic spot came through fine (~₹17,000/g), and the portfolio
-    // reported a spectacular overnight crash that never happened.
-    // Derived from the two PRICES, not from `value` — in settled mode `value` is itself
-    // the T-1 figure, so `value - prevValue` would collapse to zero and the day's move
-    // would vanish the moment you switched basis.
+    // It needs BOTH ends to be real quotes. Comparing a book-value fallback against a
+    // real quote once made the portfolio report a −25% overnight crash that never happened.
+    const moveSince = (dayMs, fromPx) => {
+      let unitsThen = pos.units, bought = 0, sold = 0;
+      for (const t of replay.trades[sym] || []) {
+        if (t.ms <= dayMs) continue;
+        unitsThen -= t.dir * t.units;
+        if (t.dir > 0) bought += t.amount; else sold += t.amount;
+      }
+      return { change: value - unitsThen * fromPx - bought + sold, base: Math.abs(unitsThen * fromPx) + bought };
+    };
     const fromPrice  = dayFrom[sym];
     const comparable = livePrice != null && fromPrice != null;
-    const prevValue  = comparable ? pos.units * fromPrice : 0;
-    const dayChange  = comparable ? pos.units * (livePrice - fromPrice) : 0;
+    const day = comparable ? moveSince(baseDay[sym], fromPrice) : { change: 0, base: 0 };
+    const dayChange = day.change, prevValue = day.base;
     dayBase += prevValue;
+    // The same move measured from T-1's close instead of the session's base: what the
+    // calendar series did, so net worth's 1D can swap one for the other (`assetValuesByAccount`).
+    const calendarChange = comparable && prevPrice != null ? moveSince(t1Ms(), prevPrice).change : dayChange;
 
     const unrealisedPnl = value - invested;
 
@@ -348,14 +386,76 @@ async function getPortfolio(userId, { live: wantLive = true, account = null } = 
 
       unrealisedPnl,
       unrealisedPnlPct: invested ? (unrealisedPnl / Math.abs(invested)) * 100 : 0,
-      realisedPnl:      realised.bySymbol[sym] || 0,
+      realisedPnl:      replay.realised.bySymbol[sym] || 0,
 
       dayChange,
-      dayChangePct: prevValue ? (dayChange / Math.abs(prevValue)) * 100 : 0,
+      dayChangePct: prevValue ? (dayChange / prevValue) * 100 : 0,
+      calendarChange,
 
       firstPurchaseDate: pos.firstPurchaseDate ? new Date(pos.firstPurchaseDate) : null,
     };
   });
+
+  // A live request that fell back to a close for any quoted holding is labelled as the close.
+  const asof = wantLive && !liveMissing ? todayStr() : t1Str();
+  return { holdings, replay, allPriced, dayBase, asof };
+}
+
+/**
+ * Each account's asset value from `markBook` — a position's account share times the one
+ * price its symbol was valued at, so the accounts add up to the portfolio exactly.
+ *
+ * `dayChange` is the portfolio's 1D; `calendarChange` the same book's move since T-1's close.
+ *
+ * @returns {Promise<{ byAccount: Object.<string, number>, total: number, dayChange: number, calendarChange: number, asof: string }>}
+ */
+async function assetValuesByAccount(userId, { live = false } = {}) {
+  const { holdings, asof } = await markBook(userId, { live });
+  const byAccount = {};
+  let total = 0, dayChange = 0, calendarChange = 0;
+  for (const h of holdings) {
+    total += h.value;
+    dayChange += h.dayChange;
+    calendarChange += h.calendarChange;
+    for (const p of h.positions) byAccount[p.account] = (byAccount[p.account] || 0) + p.qty * h.price;
+  }
+  return { byAccount, total, dayChange, calendarChange, asof };
+}
+
+/**
+ * The whole portfolio, marked to market.
+ *
+ * @param {boolean} [opts.live=true]
+ *   true  — value at the LATEST price (what it is worth right now).
+ *   false — value at the last SETTLED close, T-1. The same basis the account balances use.
+ *   The day change follows the basis: live against the previous session's close, or —
+ *   settled — the last settled session (T-1's close against the close before it).
+ *
+ * @returns {Promise<{ holdings: Object[], totals: Object }>}
+ */
+// `account` scopes the whole book (holdings, weights, realised) to one account.
+async function getPortfolio(userId, { live: wantLive = true, account = null } = {}) {
+  const { holdings, replay, allPriced, dayBase, asof } = await markBook(userId, { live: wantLive, account });
+  const realised = replay.realised;
+  // Today even when settled: today's trades are in the flows, and must not fall after the end.
+  const endMs = todayMs();
+
+  if (!holdings.length) {
+    return {
+      holdings: [],
+      totals: {
+        invested: 0, value: 0,
+        unrealisedPnl: 0, unrealisedPnlPct: 0,
+        realisedPnl: realised.total,
+        totalGain: realised.total,
+        ...bookXirr(replay.flows, 0, endMs),
+        dayChange: 0, dayChangePct: 0,
+        holdingsCount: 0, priced: true,
+        asof,
+        live: wantLive,
+      },
+    };
+  }
 
   const sum = (key) => holdings.reduce((s, h) => s + h[key], 0);
   const invested  = sum('invested');
@@ -378,17 +478,17 @@ async function getPortfolio(userId, { live: wantLive = true, account = null } = 
       unrealisedPnlPct: invested ? (unrealisedPnl / Math.abs(invested)) * 100 : 0,
       realisedPnl:      realised.total,
       totalGain:        unrealisedPnl + realised.total,
-      ...bookXirr(realised.flows, value, wantLive ? todayMs() : t1Ms()),
+      ...bookXirr(replay.flows, value, endMs),
       dayChange,
       // Measured against only what was comparable, so an unpriceable holding neither
       // dilutes the move nor fabricates one.
-      dayChangePct:     dayBase ? (dayChange / Math.abs(dayBase)) * 100 : 0,
+      dayChangePct:     dayBase ? (dayChange / dayBase) * 100 : 0,
       holdingsCount:    holdings.length,
       priced:           allPriced,
       // Which basis these figures are on, so the UI can say so rather than leave the user
       // guessing whether a number is live or a day old.
       live:             wantLive,
-      asof:             wantLive ? todayStr() : t1Str(),
+      asof,
     },
   };
 }
@@ -451,11 +551,15 @@ function bookXirr(flows, value, endMs) {
  * POINTS, and they sum, exactly, to the portfolio's return over the window — the list
  * is the headline taken apart, not a ranking of opinions.
  *
- * @param {number} opts.fromMs  window start (UTC midnight); null = since the first trade
- * @param {number} opts.toMs    window end (UTC midnight), default T-1
+ * The window ends NOW, on the same basis and from the same valuation as `getPortfolio`
+ * (`markBook`), with today's trades included — so the all-time gain here IS the
+ * portfolio's total gain, and each row's is that holding's unrealised + realised.
+ *
+ * @param {number}  opts.fromMs  window start (UTC midnight); null = since the first trade
+ * @param {boolean} opts.live    value the close of the window at live prices
  */
-async function getContribution(userId, { fromMs = null, toMs = null, account = null } = {}) {
-  const end = toMs ?? t1Ms();
+async function getContribution(userId, { fromMs = null, account = null, live: liveBasis = false } = {}) {
+  const end = todayMs();
 
   const txns = await Transaction
     .find({ user: userId, type: { $in: ['buy', 'sell'] }, ...(account && { account }) })
@@ -531,16 +635,20 @@ async function getContribution(userId, { fromMs = null, toMs = null, account = n
   }
 
   // Nothing held at either edge and nothing traded between them has no story here.
-  const live = positions.filter(h =>
+  const active = positions.filter(h =>
     !isFlatUnits(h.atStart.units, h.assetType) ||
     !isFlatUnits(h.atEnd.units,   h.assetType) ||
     h.bought || h.sold);
 
-  if (!live.length) return { rows: [], totals: emptyContributionTotals(start, end) };
+  if (!active.length) return { rows: [], totals: emptyContributionTotals(start, end) };
 
-  // One batched fetch covering both edges. The lookback is what lets a window that
-  // opens on a weekend still find the last real close before it.
-  const history = await fetchHistoricPrices(live, start - PREV_CLOSE_LOOKBACK_DAYS * DAY_MS, end);
+  // The start edge is priced from history (the lookback finds the last close before a
+  // weekend); the end edge is the portfolio's own valuation.
+  const [history, marked] = await Promise.all([
+    fetchHistoricPrices(active, start - PREV_CLOSE_LOOKBACK_DAYS * DAY_MS, start),
+    markBook(userId, { live: liveBasis, account }),
+  ]);
+  const markedBySymbol = new Map(marked.holdings.map(m => [m.symbol, m]));
 
   const priceAt = (h, snap, atMs) => {
     const quote = lastOnOrBefore(history[h.assetSymbol] || {}, atMs)?.value ?? null;
@@ -555,12 +663,16 @@ async function getContribution(userId, { fromMs = null, toMs = null, account = n
     return { price: price ?? base ?? 0, quoted: price != null && quote != null };
   };
 
-  const rows = live.map(h => {
+  const rows = active.map(h => {
     const a = priceAt(h, h.atStart, start);
-    const b = priceAt(h, h.atEnd,   end);
+    const m = markedBySymbol.get(h.assetSymbol);
+    // Not in the book → closed (worth nothing), or a store out of step with the trades (at cost).
+    const b = m
+      ? { value: m.value, quoted: m.priced }
+      : { value: isFlatUnits(h.atEnd.units, h.assetType) ? 0 : h.atEnd.invested, quoted: isFlatUnits(h.atEnd.units, h.assetType) };
 
     const valueStart = h.atStart.units * a.price;
-    const valueEnd   = h.atEnd.units   * b.price;
+    const valueEnd   = b.value;
     const gain       = valueEnd - valueStart - h.bought + h.sold;
 
     const { endCapital, peakCapital } = capitalProfile({ events: h.events, valueStart });
@@ -585,7 +697,7 @@ async function getContribution(userId, { fromMs = null, toMs = null, account = n
       returnPct: rowBase > 0 ? (gain / rowBase) * 100 : null,
       // A price that fell back to book cost is not a market opinion, and the row says
       // so rather than presenting an accrual as a quote.
-      quoted: a.quoted && b.quoted,
+      quoted: (isFlatUnits(h.atStart.units, h.assetType) || a.quoted) && b.quoted,
     };
   });
 
@@ -677,4 +789,4 @@ function allocationByType(holdings) {
     .sort((a, b) => b.value - a.value);
 }
 
-module.exports = { getPortfolio, getContribution, allocationByType };
+module.exports = { getPortfolio, getContribution, allocationByType, assetValuesByAccount };

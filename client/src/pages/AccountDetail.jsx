@@ -234,14 +234,13 @@ export default function AccountDetail() {
     [id]
   );
 
-  // Balance breakdown (non-debt accounts). `assetBalance` and `balance` come from the
-  // server, already settled at the T-1 close; `totalInvested` is the cost
-  // basis, which is what the gain is measured against — not what the account is worth.
+  // Balance breakdown (non-debt accounts). `assetBalance` is the portfolio's own valuation
+  // of this account, so the gain is the Performance card's unrealised figure, not a second sum.
   const cashBalance   = account?.cashBalance ?? account?.balance ?? 0;
   const assetValue    = account?.assetBalance ?? 0;
   const totalValue    = account?.balance ?? (cashBalance + assetValue);
-  const totalInvested = account?.holdings?.filter(h => h.qty > 0).reduce((s, h) => s + h.totalInvested, 0) || 0;
-  const assetPnl      = assetValue - totalInvested;
+  const totalInvested = perf?.invested ?? (account?.holdings?.filter(h => h.qty > 0).reduce((s, h) => s + h.totalInvested, 0) || 0);
+  const assetPnl      = perf?.unrealisedPnl ?? (assetValue - totalInvested);
 
   const filteredTxns = txns.filter(TX_FILTERS.find(f => f.key === txFilter)?.match ?? (() => true));
 
@@ -376,13 +375,6 @@ export default function AccountDetail() {
         refreshKey={chartKey}
         height={240}
         defaultRange="6M"
-        ranges={[
-          { label: '1M',  days: 30  },
-          { label: '3M',  days: 90  },
-          { label: '6M',  days: 182 },
-          { label: '1Y',  days: 365 },
-          { label: 'All', days: null },
-        ]}
         emptyText="No transaction history yet"
         // Growth (money-only, deposits/withdrawals removed) only means something for an
         // account that can hold assets — every non-debt account, not just brokerage/

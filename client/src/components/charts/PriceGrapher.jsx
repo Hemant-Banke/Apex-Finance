@@ -18,12 +18,14 @@ import Spinner from '../ui/Spinner';
 
 // ── Default config ────────────────────────────────────────────────────────────
 
+// The one set of ranges every price chart offers. YTD's length is resolved per day (`ytd`).
 const DEFAULT_RANGES = [
-  { label: '1D',  days: 2   },
-  { label: '5D',  days: 5   },
-  { label: '1M',  days: 30  },
-  { label: '6M',  days: 182 },
-  { label: '1Y',  days: 365 },
+  { label: '1M',  days: 30   },
+  { label: '3M',  days: 91   },
+  { label: '6M',  days: 182  },
+  { label: 'YTD', ytd: true  },
+  { label: '1Y',  days: 365  },
+  { label: '5Y',  days: 1825 },
   { label: 'All', days: null },
 ];
 
@@ -299,7 +301,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
   useLayoutEffect(() => {
     const el = boxRef.current;
     const w = el.offsetWidth, W = host.clientWidth;
-    el.style.left = `${Math.max(4, Math.min(centre - w / 2, W - w - 4))}px`;
+    el.style.transform = `translate3d(${Math.round(Math.max(4, Math.min(centre - w / 2, W - w - 4)))}px, 0, 0)`;
     el.style.visibility = 'visible';
   });
   const color   = pos ? '#22c55e' : '#ef4444';
@@ -310,7 +312,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
 
   return createPortal(
     <div ref={boxRef} style={{
-      position: 'absolute', top: (viewBox.y ?? 0) + 6, left: 0, zIndex: 5, pointerEvents: 'none',
+      position: 'absolute', top: (viewBox.y ?? 0) + 6, left: 0, zIndex: 5, pointerEvents: 'none', willChange: 'transform',
       visibility: 'hidden',
     }}>
       <div style={{
@@ -324,9 +326,11 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
           <span style={{ fontSize: 15, fontWeight: 700, color, lineHeight: 1, ...mono }}>
             {sign}{Math.abs(pct).toFixed(2)}%
           </span>
-          <span style={{ fontSize: 12, fontWeight: 500, color, lineHeight: 1, ...mono }}>
-            {sign}{formatValue(Math.abs(abs))}
-          </span>
+          {abs != null && (
+            <span style={{ fontSize: 12, fontWeight: 500, color, lineHeight: 1, ...mono }}>
+              {sign}{formatValue(Math.abs(abs))}
+            </span>
+          )}
         </div>
 
         {benchmarks?.length > 0 && (
@@ -439,6 +443,8 @@ export default function PriceGrapher({
   // The window on screen: a preset, or the calendar's dates (fetched as "since `from`").
   const win = useMemo(() => (custom
     ? { label: 'Custom', days: daysSince(custom.from), from: custom.from, to: custom.to }
+    // YTD opens on the last day of the previous year, so it reads as the change since year end.
+    : range.ytd ? { ...range, days: daysSince(`${todayStr().slice(0, 4)}-01-01`) }
     : range), [custom, range]);
 
   // ── Benchmark comparison (growth view only) ───────────────────────────────
@@ -559,8 +565,10 @@ export default function PriceGrapher({
     window.removeEventListener('mouseup', l.up);
     listenersRef.current = null;
   };
-  const handleSelectDown = useCallback((e) => {
-    const p = pointOf(e);
+  const handleSelectDown = useCallback((e, ev) => {
+    // Recharts' active point is throttled to a frame, so on a fast press it is still where
+    // the cursor WAS; anchor on the press itself.
+    const p = (ev?.clientX != null && pointAtX(ev.clientX)) || pointOf(e);
     if (!p) return;
     dragRef.current = { a: p, b: p };
     setSelecting(true);
@@ -1048,9 +1056,12 @@ export default function PriceGrapher({
                 {isFlat ? '0.00%' : `${aPct >= 0 ? '+' : '−'}${Math.abs(aPct).toFixed(2)}%`}
               </span>
               {!isFlat && <Icon size={14} strokeWidth={2.5} style={{ color: clr, flexShrink: 0 }} />}
-              <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
-                {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${growth ? effFormatValue(Math.abs(aAbs)) : compactIfLarge(Math.abs(aAbs), formatValue)}`}
-              </span>
+              {/* A growth index starts at 100, so its points change only restates the percentage. */}
+              {!growth && (
+                <span className="figure" style={{ fontSize: 13, fontWeight: 500, color: clr }}>
+                  {isFlat ? '—' : `${aAbs >= 0 ? '+' : '−'}${compactIfLarge(Math.abs(aAbs), formatValue)}`}
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -1132,27 +1143,31 @@ export default function PriceGrapher({
             {/* Range selector — a preset, or any dates from the calendar beside it. */}
             <SegmentedControl size="sm" ariaLabel="Range" value={custom ? null : range.label}
               onChange={l => { setRange(ranges.find(r => r.label === l)); setCustom(null); clearSelection(); }}
-              options={ranges.map(r => ({ key: r.label, label: r.label }))} />
-            <DateRangePicker
-              value={draft}
-              max={todayStr()}
-              onChange={(v) => {
-                setDraft(v);
-                clearSelection();
-                // Clear goes back to the preset; a From alone runs to today; reversed dates swap.
-                if (!v.from && !v.to) { setCustom(null); return; }
-                if (!v.from) return;
-                const to = v.to || todayStr();
-                setCustom(v.from <= to ? { from: v.from, to } : { from: to, to: v.from });
-              }}
-              trigger={({ toggle, open }) => (
-                <button type="button" onClick={toggle} className={`chart-range-cal${custom || open ? ' active' : ''}`}
-                  title={custom ? 'Change the dates' : 'Pick custom dates'} aria-label="Custom date range">
-                  <Calendar size={12} strokeWidth={2} />
-                  {custom && <span className="figure">{shortDate(custom.from)} – {shortDate(custom.to)}</span>}
-                </button>
-              )}
-            />
+              options={ranges.map(r => ({ key: r.label, label: r.label }))}>
+              <DateRangePicker
+                value={draft}
+                max={todayStr()}
+                onChange={(v) => {
+                  setDraft(v);
+                  clearSelection();
+                  // Clear goes back to the preset; a From alone runs to today; reversed dates swap.
+                  if (!v.from && !v.to) { setCustom(null); return; }
+                  if (!v.from) return;
+                  const to = v.to || todayStr();
+                  setCustom(v.from <= to ? { from: v.from, to } : { from: to, to: v.from });
+                }}
+                trigger={({ toggle }) => (
+                  <button type="button" onClick={toggle} role="radio" aria-checked={!!custom}
+                    className={`pill-item${custom ? ' active' : ''}`}
+                    title={custom ? 'Change the dates' : 'Pick custom dates'} aria-label="Custom date range">
+                    <span className="pill-label">
+                      <Calendar size={12} strokeWidth={2} />
+                      {custom && <span className="figure">{shortDate(custom.from)} – {shortDate(custom.to)}</span>}
+                    </span>
+                  </button>
+                )}
+              />
+            </SegmentedControl>
           </div>
         </div>
       </div>
@@ -1174,9 +1189,12 @@ export default function PriceGrapher({
             margin, above the x-axis). */}
         {selection && (
           <>
+            {/* Own layer, moved by transform on whole pixels: a band repositioned by `left` at
+                fractional x left trails of its edges in Chrome on a fast drag. */}
             <div style={{
-              position: 'absolute', pointerEvents: 'none', top: 4, height: height - 34,
-              left: selection.left, width: Math.max(1, selection.right - selection.left),
+              position: 'absolute', pointerEvents: 'none', top: 4, left: 0, height: height - 34,
+              transform: `translate3d(${Math.round(selection.left)}px, 0, 0)`, willChange: 'transform',
+              width: Math.max(1, Math.round(selection.right) - Math.round(selection.left)),
               background: selection.pos ? 'rgba(34,197,94,0.10)' : 'rgba(239,68,68,0.10)',
               borderLeft: `1px solid ${selection.pos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}`,
               borderRight: `1px solid ${selection.pos ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)'}`,
@@ -1184,7 +1202,7 @@ export default function PriceGrapher({
             <SelectionLabel
               viewBox={{ x: selection.left, width: selection.right - selection.left, y: 4 }}
               pct={selection.pct}
-              abs={selection.abs}
+              abs={growth ? null : selection.abs}
               pos={selection.pos}
               benchmarks={selection.benchmarks}
               formatValue={effFormatValue}

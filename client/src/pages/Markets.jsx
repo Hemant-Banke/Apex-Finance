@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowUpRight, RefreshCw } from 'lucide-react';
 import { marketsAPI, marketAPI } from '../lib/api';
 import { formatPct, pnlColor, formatCount } from '../lib/utils';
-import { assetPath, formatLevel, MARKET_RANGES, toChartSeries } from '../lib/markets';
+import { assetPath, formatLevel, toChartSeries } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import { useToast } from '../context/ToastContext';
 import Spinner from '../components/ui/Spinner';
@@ -175,7 +175,7 @@ export default function Markets() {
           opened on its growth view with gold, midcaps and silver already overlaid. "+"
           adds any of the other benchmarks. */}
       <PriceGrapher title="Nifty 50" valueLabel="Nifty 50" formatValue={formatLevel}
-        fetchData={fetchNifty} ranges={MARKET_RANGES} defaultRange="1Y" refreshKey={refreshKey}
+        fetchData={fetchNifty} defaultRange="1Y" refreshKey={refreshKey}
         growthCapable defaultView="growth" viewLabels={{ complete: 'Level', growth: 'Growth', hint: 'Every line indexed to 100 at the start of the range' }}
         benchmarks={NIFTY_BENCHMARKS} defaultCompare={['_METAL:gold', '^NSEMDCP50', 'INR:^IXIC']}
         emptyText="Index history is unavailable right now" />

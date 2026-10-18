@@ -114,8 +114,7 @@ export function Performance({ perf, name, fmt = rupeeLevel, sub = "The share's r
         </p>
       )}
 
-      {/* The four that say the most open; the trend and texture measures fold. */}
-      <StatGrid initial={4} noun="risk measures" style={{ marginTop: 14 }} stats={[
+      <StatGrid initial={Infinity} noun="risk measures" style={{ marginTop: 14 }} stats={[
         { label: 'Volatility (1Y)', value: perf.volatility != null ? `${perf.volatility.toFixed(1)}%` : null, note: 'Annualised swing of daily returns' },
         { label: `Beta to the ${benchLabel}`, value: beta?.toFixed(2),
           note: beta == null ? null : `Moves about ${beta.toFixed(1)}× the ${benchLabel}${perf.correlation != null ? ` · correlation ${perf.correlation.toFixed(2)}` : ''}` },

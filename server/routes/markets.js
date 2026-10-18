@@ -4,7 +4,7 @@ const { asyncHandler } = require('../middleware/asyncHandler');
 const { badRequest } = require('../utils/httpError');
 const indiaMarket = require('../services/indiaMarketService');
 const sectorService = require('../services/sectorService');
-const businessService = require('../services/businessService');
+const peerGrowthService = require('../services/peerGrowthService');
 const stockService = require('../services/stockService');
 const assetService = require('../services/assetService');
 
@@ -47,15 +47,14 @@ router.get('/stocks/:symbol', asyncHandler(async (req, res) => {
   res.json(await stockService.getStock(symbol, { ...fresh(req), global }));
 }));
 
-// @route GET /api/markets/stocks/:symbol/business[?global=true]
-// Where the money comes from — segments, geography, exports/imports, inputs, customers and
-// suppliers — read from the company's last few annual reports (10-Ks abroad). Separate from
-// the page payload: a report never read before takes ~30s. See businessService.
-router.get('/stocks/:symbol/business', asyncHandler(async (req, res) => {
+// @route GET /api/markets/stocks/:symbol/growth[?global=true]
+// Average revenue and profit growth (3Y/5Y compounded, last 12 months) against the largest
+// peers. Separate from the page payload: a first read fetches a dozen companies' filings.
+router.get('/stocks/:symbol/growth', asyncHandler(async (req, res) => {
   const symbol = String(req.params.symbol || '').toUpperCase();
   const global = req.query.global === 'true';
   if (!(global ? /^[A-Z0-9&.-]{1,24}$/ : /^[A-Z0-9&-]{1,20}$/).test(symbol)) throw badRequest('Not a stock symbol');
-  res.json(await businessService.getBusiness(symbol, { global }));
+  res.json(await peerGrowthService.getPeerGrowth(symbol, { global }));
 }));
 
 // @route GET /api/markets/assets/:symbol

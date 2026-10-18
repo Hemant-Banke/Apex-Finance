@@ -269,6 +269,17 @@ export function pnlColor(v, { flat = 'var(--color-text-secondary)' } = {}) {
   return v > 0 ? 'var(--color-success)' : 'var(--color-danger)';
 }
 
+/**
+ * Fill for a signed value on a diverging gain/loss scale: green or red, deeper toward `cap`,
+ * over the elevated surface. Null is the neutral surface. Heatmap cells and treemap boxes.
+ */
+export function signedTone(v, cap) {
+  if (v == null) return 'var(--color-bg-elevated)';
+  const t = cap ? Math.min(Math.abs(v) / cap, 1) : 0;
+  const pct = Math.round(10 + t * 58);
+  return `color-mix(in srgb, var(--color-${v >= 0 ? 'success' : 'danger'}) ${pct}%, var(--color-bg-elevated))`;
+}
+
 /** A signed money figure: "+₹12,400" / "−₹3,100". */
 export function formatSigned(amount, format = formatCurrency) {
   if (amount == null || isNaN(amount)) return '—';

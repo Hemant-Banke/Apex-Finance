@@ -168,4 +168,37 @@ function holdingExperience(s, b = []) {
   return { sip, rolling };
 }
 
-module.exports = { round, pctChange, toSorted, valueAt, windowReturns, WINDOWS, xirr, sipReturns, rollingReturns, holdingExperience };
+const _cagr = (end, start, years) => (end > 0 && start > 0 ? (Math.pow(end / start, 1 / years) - 1) * 100 : null);
+const _yearsBack = (rows, date, n) => rows.find(r => r.date.startsWith(`${+date.slice(0, 4) - n}${date.slice(4, 7)}`)) || null;
+
+/**
+ * Average yearly revenue/profit growth from a company's filings: `{ '3y', '5y', '10y', ttm, fy }`.
+ * Compounded, latest fiscal year vs N years before; withheld when either end is a loss.
+ */
+function filingsGrowth(co) {
+  const out = {};
+  const annual = (co?.annual || []).filter(r => r.revenue != null);
+  const last = annual[annual.length - 1];
+  for (const n of [3, 5, 10]) {
+    const base = last && _yearsBack(annual, last.date, n);
+    out[`${n}y`] = {
+      revenue: base ? round(_cagr(last.revenue, base.revenue, n), 1) : null,
+      profit:  base ? round(_cagr(last.netIncome, base.netIncome, n), 1) : null,
+    };
+  }
+  const q = (co?.quarterly || []).filter(r => r.revenue != null);
+  const sum = (rows, f) => (rows.every(r => r[f] != null) ? rows.reduce((s, r) => s + r[f], 0) : null);
+  // Eight consecutive quarters: the newest four and, a year earlier, the four before them.
+  const now = q.slice(-4), then = q.slice(-8, -4);
+  const consecutive = then.length === 4 && _yearsBack(q, now[3].date, 1) === then[3];
+  const g = (f) => {
+    if (!consecutive) return null;
+    const a = sum(now, f), b = sum(then, f);
+    return a != null && b > 0 ? round(((a - b) / b) * 100, 1) : null;
+  };
+  out.ttm = { revenue: g('revenue'), profit: g('netIncome') };
+  out.fy = last?.date || null;
+  return out;
+}
+
+module.exports = { round, filingsGrowth, pctChange, toSorted, valueAt, windowReturns, WINDOWS, xirr, sipReturns, rollingReturns, holdingExperience };

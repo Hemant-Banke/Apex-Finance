@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useLocation } from 'react-router-dom';
 import { marketsAPI, marketAPI, dashboardAPI } from '../lib/api';
 import { formatPct, pnlColor, dayLabel, formatCurrency } from '../lib/utils';
-import { formatLevel, axisFormatFor, MARKET_RANGES, toChartSeries, backTarget } from '../lib/markets';
+import { formatLevel, axisFormatFor, toChartSeries, backTarget } from '../lib/markets';
 import { BENCHMARKS } from '../lib/constants';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
@@ -156,7 +156,7 @@ export default function Asset() {
 
       <PriceGrapher key={data.symbol} title={typeLabel === 'Index' ? 'Level' : 'Price'} valueLabel={data.type === 'mutual_fund' ? 'NAV' : 'Close'}
         formatValue={fmt} axisFormat={axisFormatFor(data.currency)} fetchData={fetchPrice}
-        ranges={MARKET_RANGES} defaultRange="1Y"
+        defaultRange="1Y"
         growthCapable benchmarks={benchmarks} defaultCompare={benchmark ? [benchmark.symbol] : []}
         viewLabels={{ complete: data.type === 'index' ? 'Level' : 'Price', growth: 'vs market', hint: 'Indexed to 100 at the start of the range, against the benchmarks you add' }}
         emptyText="No price history for this instrument" />

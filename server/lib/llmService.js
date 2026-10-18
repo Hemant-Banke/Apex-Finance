@@ -269,58 +269,8 @@ Return ONLY a JSON object mapping each transaction id to your choice and how sur
   return out;
 }
 
-// ─── Company business profile (annual report / 10-K excerpts) ─────────────────
-
-const BUSINESS_INSTRUCTIONS = `You read excerpts from ONE company's annual report (an Indian annual report, or a US 10-K) and report where its revenue comes from and how it trades with the world. The excerpts were cut out by keyword, so they are fragments; some may belong to the standalone and some to the consolidated statements.
-
-Return ONLY a JSON object (no markdown, no commentary):
-{
-  "fiscalYearEnd": "YYYY-MM-DD — the end of the year this report covers",
-  "basis": "consolidated|standalone — which statements the figures below come from",
-  "unit": "the unit the SEGMENT and GEOGRAPHY figures are printed in, exactly one of: rupees|thousands|lakhs|crore|millions|billions",
-  "currency": "INR|USD|… as printed",
-  "segments": [ { "name": "Business segment", "revenue": 0, "prevRevenue": 0, "result": 0, "prevResult": 0 } ],
-  "geography": [ { "region": "India / United States / Europe / Rest of world …", "revenue": 0, "prevRevenue": 0 } ],
-  "products": [ { "name": "product or service line", "revenue": 0, "prevRevenue": 0, "share": 0 } ],
-  "trade": {
-    "unit": "the unit the trade figures are printed in (same choices) — often different from the segment note's",
-    "exportShare": 0,
-    "forexEarnings": 0, "prevForexEarnings": 0,
-    "forexOutgo": 0, "prevForexOutgo": 0,
-    "importsCif": 0, "prevImportsCif": 0,
-    "imports": [ { "item": "Raw materials / Components / Capital goods / …", "value": 0 } ]
-  },
-  "materials": [ { "name": "key input", "source": "where it comes from (imported from X / domestic / both), only if stated", "importedShare": 0 } ],
-  "customers": { "summary": "one sentence on concentration, as stated", "topShare": "the largest single customer's % of revenue, only if a figure is printed (not a threshold like 'more than 10%')", "named": ["customer names, only if printed"], "types": "who buys (OEMs, retail, government …)" },
-  "suppliers": { "summary": "one sentence, as stated", "named": ["supplier names, only if printed"] },
-  "highlights": ["at most 4 short factual sentences on notable changes this year: a new segment, a market entered or exited, a shift in mix"]
-}
-
-RULES:
-- Copy figures EXACTLY as printed; never convert. Segments and geography use "unit"; every trade figure uses "trade.unit". Read each unit off the table it comes from (a "₹ lakhs" or "In crore" heading above it).
-- Prefer CONSOLIDATED figures when both are present, and use the same basis for segments and geography.
-- "products" is revenue by product/service line (e.g. "net sales by category", BRSR "products/services sold"), in "unit". Fill revenue where printed, else only "share".
-- "prev*" fields are the previous-year column printed beside the current year. null when not printed.
-- Shares ("exportShare", "share", "importedShare", "topShare") are percentages 0–100. null when not stated.
-- "forexEarnings" / "forexOutgo" come from the "Foreign exchange earnings and outgo" disclosure (outgo = total foreign-exchange outflow / expenditure in foreign currency incl. imports).
-- Customers and suppliers: only names the report actually prints. NEVER infer a name from your own knowledge. An empty list is the honest answer.
-- "highlights" must come from the excerpts, with figures copied exactly. Nothing from your own knowledge.
-- Any field the excerpts do not support is null (or [] for lists). A guess is worse than a gap.`;
-
-/** Structure what an annual report says about the business. Null when the model returns nothing usable. */
-async function extractBusinessProfile(excerpts, { company, year } = {}) {
-  const resp = await getClient().messages.create({
-    model: MODEL,
-    max_tokens: 8000,
-    messages: [{ role: 'user', content: `${BUSINESS_INSTRUCTIONS}\n\nCOMPANY: ${company || 'unknown'} · REPORT YEAR: ${year || 'unknown'}\n\nEXCERPTS:\n${excerpts}` }],
-  });
-  if (resp.stop_reason === 'max_tokens') return null;
-  return _extractJSON(resp.content?.find(b => b.type === 'text')?.text || '');
-}
-
 module.exports = {
   isLLMAvailable,
-  extractBusinessProfile,
   extractTransactionsFromText,
   extractTransactionsFromImage,
   categorizeTransactions,
