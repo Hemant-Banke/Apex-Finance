@@ -16,6 +16,7 @@ import PriceGrapher from '../components/charts/PriceGrapher';
 import Ownership from '../components/stock/Ownership';
 import CompanyFinancials from '../components/stock/CompanyFinancials';
 import Peers from '../components/stock/Peers';
+import PeHistory from '../components/stock/PeHistory';
 import { StatGrid, RangeBar, Performance } from '../components/stock/PricePerformance';
 import PositionCard from '../components/portfolio/PositionCard';
 import AssetIcon from '../components/market/AssetIcon';
@@ -376,6 +377,7 @@ export default function Stock({ global = false }) {
           expects and owns what, and finally what the company is. */}
       <CompanyFinancials financials={financials} money={money} />
       <Valuation v={valuation} h={health} money={money} />
+      <PeHistory history={valuation.history} name={data.symbol} />
       <Peers key={`peers:${data.symbol}`} peers={peers} symbol={data.symbol} global={global} money={money} sectorMedianPe={global ? null : valuation.sectorMedianPe} />
       {(analysts || earnings?.surprises?.length > 0) && <Analysts a={analysts} price={quote.price} earnings={earnings} money={money} />}
       <Ownership ownership={ownership} money={money} />

@@ -103,6 +103,7 @@
 - `asset/ReturnSplit.jsx` — A rupee return split into asset-in-own-currency and the currency's move.
 - `asset/HoldingExperience.jsx` — Monthly SIP outcomes (XIRR) and rolling 1Y/3Y returns vs benchmark.
 - `stock/CompanyFinancials.jsx` — Average revenue/profit growth (3Y/5Y/10Y/12M, `financials.growth`), then annual/quarterly results, debt and cash-flow chart + table (`money` from `companyMoney`).
+- `stock/PeHistory.jsx` — Historical P/E card: weekly P/E vs its 1/3/5/10Y average (±1 SD band), range bar and a cheap/dear sentence (`valuation.history`).
 - `stock/Peers.jsx` — The company among its sector peers (abroad: "often compared with"): its rank chips (cap, 1Y, growth), then one table grouped Valuation · Share price · Growth, with this company raised on top and a median row.
 - `stock/Ownership.jsx` — Shareholding pattern over 12 quarters; abroad, insiders/institutions + largest holders.
 

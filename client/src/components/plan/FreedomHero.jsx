@@ -44,7 +44,7 @@ export default function FreedomHero({ m, s }) {
   const mask = `linear-gradient(90deg, transparent ${Math.round(18 - p * 18)}%, #000 ${Math.round(70 - p * 40)}%)`;
 
   return (
-    <Card gilt tilt flush style={{ position: 'relative' }}>
+    <Card gilt flush style={{ position: 'relative' }}>
       <DitherField fall growth={growth} rest={0.34 + p * 0.12} vivid={0.95}
         style={{ maskImage: mask, WebkitMaskImage: mask }} />
 
