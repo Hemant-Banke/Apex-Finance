@@ -30,7 +30,7 @@
 const { DAY_MS } = require('../utils/constants');
 const { toDateStr } = require('../utils/helpers');
 const { notFound } = require('../utils/httpError');
-const { round, pctChange, toSorted, windowReturns, holdingExperience, filingsGrowth } = require('../utils/series');
+const { round, pctChange, toSorted, windowReturns, holdingExperience, filingsGrowth, peWindows } = require('../utils/series');
 const { fetchChart, closesByDay, fetchYahooAuthed } = require('./marketDataService');
 const sectorService = require('./sectorService');
 const screenerService = require('./screenerService');
@@ -209,7 +209,6 @@ function _health(fin, isBank) {
  */
 // ── Historical P/E ─────────────────────────────────────────────────────────────
 
-const PE_WINDOWS = [['1y', 1], ['3y', 3], ['5y', 5], ['10y', 10]];
 const _addDays = (iso, n) => Date.parse(iso) + n * DAY_MS;
 
 /**
@@ -228,22 +227,28 @@ function _epsTimeline(co) {
     const span = (Date.parse(four[3].date) - Date.parse(four[0].date)) / DAY_MS;
     if (span < 250 || span > 300) continue;
     const at = _addDays(q[i].date, q[i].date.slice(5, 7) === '03' ? 60 : 45);
-    out.push([at, four.reduce((a, r) => a + r.eps, 0), four.reduce((a, r) => a + (r.netIncome ?? NaN), 0)]);
+    out.push([at, four.reduce((a, r) => a + r.eps, 0), four.reduce((a, r) => a + (r.netIncome ?? NaN), 0), false]);
     firstQ = Math.min(firstQ, at);
   }
   for (const r of (co?.annual || []).filter(ok)) {
     const at = _addDays(r.date, 60);
-    if (at < firstQ) out.push([at, r.eps, r.netIncome]);
+    if (at < firstQ) out.push([at, r.eps, r.netIncome, true]);
   }
   out.sort((a, b) => a[0] - b[0]);
   // Restate across a split or bonus the filing did not adjust for: the implied share count
   // (profit ÷ EPS) jumping 40%+ is a share-count change, not earnings.
   const shares = (e) => (e[1] > 0 && e[2] > 0 ? e[2] / e[1] : null);
   const latest = [...out].reverse().map(shares).find(Boolean);
-  return out.map(e => {
+  const adj = out.map(e => {
     const sh = shares(e);
     const ratio = sh && latest ? latest / sh : 1;
-    return [e[0], ratio > 1.4 || ratio < 1 / 1.4 ? e[1] / ratio : e[1]];
+    return [e[0], ratio > 1.4 || ratio < 1 / 1.4 ? e[1] / ratio : e[1], e[3]];
+  });
+  // A full-year figure lags the real trailing EPS all year; if the next filing is 2×+ off, flag it.
+  return adj.map(([at, eps, annual], i) => {
+    const next = adj[i + 1]?.[1];
+    const lag = annual && eps > 0 && next != null && (next <= 0 || next / eps > 2 || next / eps < 0.5);
+    return [at, eps, lag];
   });
 }
 
@@ -254,38 +259,23 @@ function _epsTimeline(co) {
 function _peHistory(co, weekly, price) {
   const eps = _epsTimeline(co);
   if (!eps.length || !weekly.length) return null;
-  const epsAt = (ms) => {
+  const entryAt = (ms) => {
     let v = null;
-    for (const [at, e] of eps) { if (at <= ms) v = e; else break; }
+    for (const e of eps) { if (e[0] <= ms) v = e; else break; }
     return v;
   };
+  const epsAt = (ms) => entryAt(ms)?.[1] ?? null;
   const series = weekly.map(([d, c]) => {
-    const e = epsAt(d);
-    return { date: toDateStr(d), pe: e > 0 && c > 0 ? round(c / e, 1) : null };
+    const [, e, lag] = entryAt(d) || [];
+    const pe = e > 0 && c > 0 ? round(c / e, 1) : null;
+    return lag && pe != null ? { date: toDateStr(d), pe, lag: true } : { date: toDateStr(d), pe };
   });
   const nowEps = eps[eps.length - 1][1];
   const current = nowEps > 0 && price > 0 ? round(price / nowEps, 1) : null;
   if (!series.some(p => p.pe != null)) return null;
 
-  const end = weekly[weekly.length - 1][0];
-  const first = weekly.find(([d]) => epsAt(d) != null)?.[0] ?? end;
-  const windows = {};
-  for (const [k, yrs] of PE_WINDOWS) {
-    const from = end - yrs * 365 * DAY_MS;
-    if (first > from + 30 * DAY_MS) continue;            // not enough history for this window
-    const vals = series.filter(p => Date.parse(p.date) >= from && p.pe != null).map(p => p.pe).sort((a, b) => a - b);
-    if (vals.length < 10) continue;
-    const avg = vals.reduce((a, v) => a + v, 0) / vals.length;
-    const sd = Math.sqrt(vals.reduce((a, v) => a + (v - avg) ** 2, 0) / vals.length);
-    windows[k] = {
-      avg: round(avg, 1), median: round(vals[vals.length >> 1], 1), min: vals[0], max: vals[vals.length - 1],
-      sd: round(sd, 1),
-      // Share of the window's weeks that were CHEAPER than today: high = dear by its own history.
-      percentile: current == null ? null : round((vals.filter(v => v < current).length / vals.length) * 100, 0),
-      vsAvg: current == null ? null : round(pctChange(current, avg), 1),
-    };
-  }
-  return { current, series, windows };
+  const first = weekly.find(([d]) => epsAt(d) != null)?.[0];
+  return { current, series, windows: peWindows(series, current, first) };
 }
 
 const OWNER_GROUPS = ['promoters', 'fiis', 'diis', 'government', 'public'];

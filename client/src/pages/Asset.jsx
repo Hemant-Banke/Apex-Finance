@@ -21,6 +21,7 @@ import MetalProfile from '../components/asset/MetalProfile';
 import FundPortfolio from '../components/asset/FundPortfolio';
 import ReturnSplit from '../components/asset/ReturnSplit';
 import HoldingExperience from '../components/asset/HoldingExperience';
+import PeHistory from '../components/stock/PeHistory';
 
 /**
  * Any instrument that is not an NSE company — an index, gold or silver, a coin, a US
@@ -166,6 +167,13 @@ export default function Asset() {
           sub={`Its return over each window${benchmark ? `, against the ${benchmark.label}` : ''}${data.currency && data.currency !== 'INR' ? ` · in ${data.currency}` : ''}`} />
       )}
 
+      {data.valuationHistory && (
+        <PeHistory history={data.valuationHistory} name={data.valuationHistory.index} own={data.valuationHistory.own}
+          sub={data.type === 'index'
+            ? 'The index’s P/E as NSE publishes it, week by week — cheap or dear against its own past'
+            : `P/E of the ${data.valuationHistory.index}, the index this ${data.type === 'etf' ? 'ETF tracks' : 'fund is measured against'} — is the market it buys cheap or dear against its own past?`}
+          note="NSE publishes index P/E; it moved to consolidated earnings in April 2021, so earlier readings run somewhat higher." />
+      )}
       {profile?.kind === 'index' && <IndexProfile p={profile} name={data.name} changePct={quote.changePct} />}
       {profile?.kind === 'metal' && <MetalProfile p={profile} name={data.name} />}
       {data.portfolio && <FundPortfolio p={data.portfolio} name={data.name} />}

@@ -103,7 +103,7 @@
 - `asset/ReturnSplit.jsx` — A rupee return split into asset-in-own-currency and the currency's move.
 - `asset/HoldingExperience.jsx` — Monthly SIP outcomes (XIRR) and rolling 1Y/3Y returns vs benchmark.
 - `stock/CompanyFinancials.jsx` — Average revenue/profit growth (3Y/5Y/10Y/12M, `financials.growth`), then annual/quarterly results, debt and cash-flow chart + table (`money` from `companyMoney`).
-- `stock/PeHistory.jsx` — Historical P/E card: weekly P/E vs its 1/3/5/10Y average (±1 SD band), range bar and a cheap/dear sentence (`valuation.history`).
+- `stock/PeHistory.jsx` — Historical P/E card (stock, index, and a fund/ETF via its benchmark index): weekly P/E vs its 1/3/5/10Y average (±1 SD band), range bar and a cheap/dear sentence (`valuation.history` / `valuationHistory`).
 - `stock/Peers.jsx` — The company among its sector peers (abroad: "often compared with"): its rank chips (cap, 1Y, growth), then one table grouped Valuation · Share price · Growth, with this company raised on top and a median row.
 - `stock/Ownership.jsx` — Shareholding pattern over 12 quarters; abroad, insiders/institutions + largest holders.
 
@@ -203,7 +203,7 @@
 - `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`, `listedAssetType` (a traded gold/silver instrument → `etf`).
 - `currency.js` — FX symbol + currency normalisation.
 - `recurrence.js` — `FREQUENCIES`, `occurrencesBetween`.
-- `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `filingsGrowth` (a company's compounded revenue/profit growth from its filings — the stock page and peer growth), `holdingExperience` (SIP + rolling, shared by stock and asset pages).
+- `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `peWindows` / `weeklyPoints` (historical P/E bands — stock and index pages), `filingsGrowth` (a company's compounded revenue/profit growth from its filings — the stock page and peer growth), `holdingExperience` (SIP + rolling, shared by stock and asset pages).
 
 ### Server lib (`server/lib/`)
 - `llmService.js` — All Claude calls: extraction (text/image) and categorisation. Long text is split into ~12k-char chunks, 4 at a time, and merged.
@@ -291,7 +291,7 @@
 - `categoryService.js` — User category taxonomy reads.
 - `categoryProfileService.js` — Learn/predict categories from user history.
 - `oauthService.js` — Verify Google/Apple identity tokens.
-- `indiaMarketService.js` — NSE indices, asset classes, breadth, flows.
+- `indiaMarketService.js` — NSE indices, asset classes, breadth, flows; historical index P/E from niftyindices (`resolvePeIndex`, `getIndexPeHistory`).
 - `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights), `peekClassification` (cache-only sector + cap rank; warms in background), `matchUniverseName` (exact normalised name → NSE symbol).
 - `stockService.js` — One company (NSE, or abroad with `global`): price, risk, financials, valuation, holders, peers, SIP/rolling.
 - `screenerService.js` — Screener.in filings, shareholding and annual-report links; falls back to standalone when consolidated is empty or stale; the half-year balance sheet is `interim`, not an annual row.

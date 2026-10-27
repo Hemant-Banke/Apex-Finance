@@ -10,8 +10,9 @@ import { monthYearShort } from '../../lib/utils';
 
 /**
  * Is the share cheap or dear against its OWN past? Weekly P/E (close ÷ trailing EPS known
- * that week, `valuation.history` from stockService), its average over the window with a
- * ±1 standard-deviation band, and where today sits. Cheap/dear is not coloured as good or bad.
+ * that week, `valuation.history` from stockService; an index's own P/E, `valuationHistory`
+ * from assetService), its average with a ±1 SD band, and where today sits. `own` is a fund's
+ * current P/E shown beside its benchmark's. Weeks on badly stale EPS (`lag`) are dashed and uncounted.
  */
 
 const WINDOWS = [['1y', '1Y', 1], ['3y', '3Y', 3], ['5y', '5Y', 5], ['10y', '10Y', 10]];
@@ -30,7 +31,7 @@ function verdict(name, cur, w, years) {
   return `At ${times(cur)}, ${name} trades ${where} — ${rank}.`;
 }
 
-export default function PeHistory({ history, name }) {
+export default function PeHistory({ history, name, sub, note, own }) {
   const available = WINDOWS.filter(([k]) => history?.windows?.[k]);
   const [k, setK] = useState(() => (available.find(([x]) => x === '5y') || available[available.length - 1])?.[0]);
   const win = available.find(([x]) => x === k) || available[available.length - 1];
@@ -40,23 +41,30 @@ export default function PeHistory({ history, name }) {
     const from = new Date();
     from.setFullYear(from.getFullYear() - win[2]);
     const cut = from.toISOString().slice(0, 10);
-    return history.series.filter(p => p.date >= cut);
+    const pts = history.series.filter(p => p.date >= cut);
+    // Stale-EPS weeks go on their own dashed line; its ends repeat the neighbours so the two join.
+    return pts.map((p, i) => {
+      const lagNear = p.lag || pts[i - 1]?.lag || pts[i + 1]?.lag;
+      return { date: p.date, pe: p.lag ? null : p.pe, peLag: lagNear ? p.pe : null };
+    });
   }, [history, win]);
 
   if (!history || !win) return null;
   const w = history.windows[win[0]];
   const cur = history.current;
   const line = verdict(name, cur, w, win[2]);
+  const anyLag = data.some(p => p.pe == null && p.peLag != null);
 
   return (
     <Card>
       <SectionHeader eyebrow="Historical P/E" size="sm"
-        sub="Price ÷ the last 12 months' earnings, week by week — cheap or dear against its own past"
+        sub={sub || "Price ÷ the last 12 months' earnings, week by week — cheap or dear against its own past"}
         action={available.length > 1 && <SegmentedControl size="sm" ariaLabel="P/E window" value={win[0]} onChange={setK} options={available.map(([key, label]) => ({ key, label }))} />}
         style={{ marginBottom: 18 }} />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 20, alignItems: 'start', marginBottom: 18 }}>
-        <MastheadFigure label="P/E today" value={times(cur)} />
+        <MastheadFigure label="P/E today" value={times(cur)}
+          sub={own != null ? <p className="text-xs" style={{ color: muted }}>This fund&apos;s holdings {times(own)}</p> : null} />
         <MastheadFigure label={`${win[1]} average`} value={times(w.avg)}
           sub={<p className="text-xs" style={{ color: muted }}>Median {times(w.median)}</p>} />
         <MastheadFigure label="Versus average" value={w.vsAvg == null ? '—' : `${w.vsAvg > 0 ? '+' : '−'}${Math.abs(w.vsAvg).toFixed(0)}%`}
@@ -78,15 +86,22 @@ export default function PeHistory({ history, name }) {
           <ReferenceLine y={w.avg} stroke="var(--color-text-muted)" strokeDasharray="4 4"
             label={{ value: `Avg ${times(w.avg)}`, position: 'insideTopLeft', fill: '#878D97', fontSize: 11 }} />
           <Tooltip cursor={{ stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeDasharray: '3 3' }} isAnimationActive={false}
-            content={<ChartTooltip formatValue={times} valueLabel="P/E" />} />
+            content={(props) => {
+              const hit = props.payload?.find(x => x.value != null);
+              return <ChartTooltip {...props} payload={hit ? [hit] : []} formatValue={times}
+                valueLabel={hit?.dataKey === 'peLag' && hit.payload.pe == null ? 'P/E · yearly EPS' : 'P/E'} />;
+            }} />
           <Line dataKey="pe" name="P/E" type="monotone" stroke="var(--color-accent)" strokeWidth={2} dot={false}
             activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--color-bg-card)' }} connectNulls={false} isAnimationActive={false} />
+          {anyLag && <Line dataKey="peLag" name="P/E" type="monotone" stroke="var(--color-accent)" strokeOpacity={0.45} strokeWidth={1.5}
+            strokeDasharray="4 4" dot={false} activeDot={false} connectNulls={false} isAnimationActive={false} />}
         </LineChart>
       </ResponsiveContainer>
 
       {line && <p className="text-sm" style={{ color: 'var(--color-text-secondary)', marginTop: 14, lineHeight: 1.55 }}>{line}</p>}
       <p className="text-xs" style={{ color: muted, marginTop: 6, lineHeight: 1.5 }}>
-        The shaded band is the usual range — one standard deviation either side of the average. Each week uses the earnings filed by then; weeks after a loss have no P/E.
+        The shaded band is the usual range — one standard deviation either side of the average. {note || 'Each week uses the earnings filed by then; weeks after a loss have no P/E.'}
+        {anyLag && ' The dashed stretch uses a full year’s earnings that the next filing moved 2× or more, so it overstates or understates the real P/E and is left out of the average, range and percentile.'}
       </p>
     </Card>
   );

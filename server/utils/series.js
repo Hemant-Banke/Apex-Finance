@@ -201,4 +201,42 @@ function filingsGrowth(co) {
   return out;
 }
 
-module.exports = { round, filingsGrowth, pctChange, toSorted, valueAt, windowReturns, WINDOWS, xirr, sipReturns, rollingReturns, holdingExperience };
+const PE_WINDOWS = [['1y', 1], ['3y', 3], ['5y', 5], ['10y', 10]];
+
+/**
+ * Where today's P/E sits in each trailing window of a `[{ date, pe }]` series (oldest first):
+ * average, median, range, SD, the share of weeks cheaper than today, and the gap to the average.
+ * A window the series does not cover (from `firstMs`, default its first point) is left out.
+ * Weeks flagged `lag` (EPS known to be badly stale) are drawn but not counted.
+ */
+function peWindows(series, current, firstMs) {
+  if (!series?.length) return {};
+  const end = Date.parse(series[series.length - 1].date);
+  const first = firstMs ?? Date.parse(series[0].date);
+  const windows = {};
+  let prevN = 0;
+  for (const [k, yrs] of PE_WINDOWS) {
+    const from = end - yrs * 365 * DAY_MS;
+    if (first > from + 30 * DAY_MS) continue;
+    const vals = series.filter(p => Date.parse(p.date) >= from && p.pe != null && !p.lag).map(p => p.pe).sort((a, b) => a - b);
+    // A longer window that counts no more weeks than a shorter one says nothing new.
+    if (vals.length < 10 || vals.length === prevN) continue;
+    prevN = vals.length;
+    const avg = vals.reduce((a, v) => a + v, 0) / vals.length;
+    const sd = Math.sqrt(vals.reduce((a, v) => a + (v - avg) ** 2, 0) / vals.length);
+    windows[k] = {
+      avg: round(avg, 1), median: round(vals[vals.length >> 1], 1), min: vals[0], max: vals[vals.length - 1],
+      sd: round(sd, 1),
+      // Share of the window's weeks CHEAPER than today: high = dear by its own history.
+      percentile: current == null ? null : round((vals.filter(v => v < current).length / vals.length) * 100, 0),
+      vsAvg: current == null ? null : round(pctChange(current, avg), 1),
+    };
+  }
+  return windows;
+}
+
+/** Thin a daily `[{ date, … }]` series (oldest first) to the last point of each week. */
+const weeklyPoints = (rows) => rows.filter((r, i) => i === rows.length - 1
+  || Math.floor(Date.parse(rows[i + 1].date) / (7 * DAY_MS)) !== Math.floor(Date.parse(r.date) / (7 * DAY_MS)));
+
+module.exports = { round, filingsGrowth, peWindows, weeklyPoints, pctChange, toSorted, valueAt, windowReturns, WINDOWS, xirr, sipReturns, rollingReturns, holdingExperience };

@@ -26,7 +26,7 @@
 const { DAY_MS } = require('../utils/constants');
 const { nowMs, toDateStr } = require('../utils/helpers');
 const { notFound } = require('../utils/httpError');
-const { round, toSorted, valueAt, windowReturns, holdingExperience } = require('../utils/series');
+const { round, toSorted, valueAt, windowReturns, holdingExperience, peWindows } = require('../utils/series');
 const { PURITY_OPTIONS } = require('../utils/assetPricing');
 const { fetchChart, closesByDay, fetchHistoricPrices } = require('./marketDataService');
 const fundPortfolioService = require('./fundPortfolioService');
@@ -219,6 +219,31 @@ async function _profile(symbol, asset) {
   return _indexProfile(symbol);
 }
 
+/**
+ * Historical P/E for an NSE index, or — for a fund or ETF — for the index it tracks or is
+ * benchmarked to (its own holdings have no P/E history), with the fund's current P/E beside it.
+ */
+async function _valuationHistory(symbol, asset, portfolio) {
+  let name = null;
+  if (asset.type === 'index') name = indiaMarketService.NSE_INDICES[symbol]?.nse || asset.name;
+  else if (asset.type === 'mutual_fund' || asset.type === 'etf') {
+    name = portfolio?.facts?.benchmark
+      || indiaMarketService.NSE_INDICES[fundBenchmark(asset.scheme?.category, asset.name)?.symbol]?.nse
+      || null;
+    if (!name && asset.type === 'mutual_fund') return null;
+  }
+  const idx = await indiaMarketService.resolvePeIndex(name);
+  if (!idx) return null;
+  const h = await indiaMarketService.getIndexPeHistory(idx.trading);
+  if (!h?.series?.length) return null;
+  return {
+    index: idx.label,
+    own: asset.type === 'index' ? null : portfolio?.facts?.pe ?? null,
+    current: h.current, asof: h.asof, series: h.series,
+    windows: peWindows(h.series, h.current),
+  };
+}
+
 async function getAsset(symbol, { fresh = false } = {}) {
   const hit = _memo.get(symbol);
   if (hit && Date.now() - hit.at < (fresh ? 30 * 1000 : TTL_MS)) return hit.data;
@@ -235,6 +260,7 @@ async function getAsset(symbol, { fresh = false } = {}) {
     foreign ? _currencyLens(foreign, s).catch(() => null) : null,
     fundPortfolioService.getPortfolio(symbol, asset.type),
   ]);
+  const valuationHistory = await _valuationHistory(symbol, asset, portfolio).catch(() => null);
   const aRet = windowReturns(s), bRet = windowReturns(b);
   const last = s[s.length - 1][1];
 
@@ -270,6 +296,7 @@ async function getAsset(symbol, { fresh = false } = {}) {
     profile,
     // What a fund, ETF or foreign index holds (an NSE index carries its own in `profile`).
     portfolio,
+    valuationHistory,
     currencyLens: lens,
     experience: holdingExperience(s, b),
   };

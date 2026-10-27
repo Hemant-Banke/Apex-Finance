@@ -30,7 +30,7 @@
 const MarketFlow = require('../models/MarketFlow');
 const { DAY_MS, BROWSER_HEADERS } = require('../utils/constants');
 const { toDateStr, todayMs, parseNumber } = require('../utils/helpers');
-const { round, pctChange, toSorted, windowReturns } = require('../utils/series');
+const { round, pctChange, toSorted, windowReturns, weeklyPoints } = require('../utils/series');
 const { metalInrPerGram } = require('../utils/assetPricing');
 const { fetchChart, closesByDay } = require('./marketDataService');
 
@@ -546,8 +546,67 @@ async function getFlows(sessions = 60, { fresh = false } = {}) {
   };
 }
 
+// ── Historical index P/E (niftyindices.com) ──────────────────────────────────
+
+const NI = 'https://www.niftyindices.com';
+const PE_TTL_MS = 12 * 3600 * 1000;
+const PE_YEARS = 10;
+const _peMemo = new Map();      // trading name → { at, data }
+const _peFlight = new Map();
+let _niMap = null;              // { at, rows }
+
+const _niKey = (s) => String(s || '').toLowerCase().replace(/\b(tri|total return( index)?|index)\b/g, '').replace(/[^a-z0-9]/g, '');
+
+/** niftyindices' own name for an index ("Nifty Smallcap 250 TRI" → "NIFTY SMLCAP 250"), or null. */
+async function resolvePeIndex(name) {
+  if (!name) return null;
+  if (!_niMap || Date.now() - _niMap.at > 24 * 3600 * 1000) {
+    const r = await fetch('https://liveindexsa.niftyindices.com/assets/json/IndexMapping.json', { headers: BROWSER_HEADERS, signal: AbortSignal.timeout(15000) });
+    _niMap = { at: Date.now(), rows: await r.json() };
+  }
+  const k = _niKey(name);
+  const row = _niMap.rows.find(x => _niKey(x.Index_long_name) === k || _niKey(x.Trading_Index_Name) === k);
+  return row ? { trading: row.Trading_Index_Name, label: row.Index_long_name } : null;
+}
+
+async function _fetchPe(trading) {
+  const fmt = (ms) => { const d = new Date(ms); return `${String(d.getUTCDate()).padStart(2, '0')}-${Object.keys(MONTHS)[d.getUTCMonth()].replace(/^./, c => c.toUpperCase())}-${d.getUTCFullYear()}`; };
+  const cinfo = `{'name':'${trading}','startDate':'${fmt(todayMs() - PE_YEARS * 365 * DAY_MS)}','endDate':'${fmt(todayMs())}','indexName':'${trading}'}`;
+  const r = await fetch(`${NI}/BackPage/getpepbHistoricaldataDBtoString`, {
+    method: 'POST',
+    headers: { ...BROWSER_HEADERS, 'Content-Type': 'application/json; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest', Origin: NI, Referer: `${NI}/reports/historical-data` },
+    body: JSON.stringify({ cinfo }),
+    signal: AbortSignal.timeout(30000),
+  });
+  const rows = await r.json();
+  if (!Array.isArray(rows) || !rows.length) return null;
+  const daily = rows.map(x => ({ date: toDateStr(Date.parse(`${x.DATE} UTC`)), pe: parseNumber(x.pe) }))
+    .filter(x => x.date && x.pe > 0).sort((a, b) => (a.date < b.date ? -1 : 1));
+  if (!daily.length) return null;
+  // The feed carries rare garbage prints (Midcap 150 at 769×); anything past 4× the median goes.
+  const med = [...daily].sort((x, y) => x.pe - y.pe)[daily.length >> 1].pe;
+  const clean = daily.filter(x => x.pe <= med * 4);
+  return { series: weeklyPoints(clean), current: daily[daily.length - 1].pe, asof: daily[daily.length - 1].date };
+}
+
+/** Weekly P/E of an NSE index over 10 years, `{ series, current, asof }`. Memo 12h; a failed refresh serves the last copy. */
+async function getIndexPeHistory(trading) {
+  const hit = _peMemo.get(trading);
+  if (hit && Date.now() - hit.at < PE_TTL_MS) return hit.data;
+  if (!_peFlight.has(trading)) {
+    _peFlight.set(trading, _fetchPe(trading)
+      .then((data) => { if (data) _peMemo.set(trading, { at: Date.now(), data }); return data || hit?.data || null; })
+      .catch(() => hit?.data || null)
+      .finally(() => _peFlight.delete(trading)));
+  }
+  return _peFlight.get(trading);
+}
+
 module.exports = {
   getOverview,
+  resolvePeIndex,
+  getIndexPeHistory,
+  NSE_INDICES,
   getIndexStats,
   getFlows,
   refreshFlows,
