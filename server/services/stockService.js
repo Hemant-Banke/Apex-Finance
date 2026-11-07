@@ -426,6 +426,8 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
   const nifty = toSorted(closesByDay(index));
   const price = q.price || {}, sd = q.summaryDetail || {}, ks = q.defaultKeyStatistics || {};
   const fd = q.financialData || {}, ap = q.assetProfile || {};
+  // When quoteSummary fails, the sector cache's own quote still knows cap, P/E and P/B.
+  const own = peers?.peers?.find(p => p.self) || {};
 
   const last = stock.length ? stock[stock.length - 1][1] : raw(price.regularMarketPrice);
   const sRet = windowReturns(stock), nRet = windowReturns(nifty);
@@ -465,12 +467,12 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
       changePct: round(sRet['1d']),
       dayHigh: raw(sd.dayHigh), dayLow: raw(sd.dayLow),
       volume: raw(sd.volume), avgVolume: raw(sd.averageVolume),
-      marketCap: money(raw(price.marketCap) ?? raw(sd.marketCap)),
+      marketCap: money(raw(price.marketCap) ?? raw(sd.marketCap) ?? own.cap ?? null),
     },
 
     valuation: {
-      pe: round(raw(sd.trailingPE)), forwardPe: round(raw(ks.forwardPE) ?? raw(sd.forwardPE)),
-      pb: round(raw(ks.priceToBook)),
+      pe: round(raw(sd.trailingPE) ?? own.pe ?? null), forwardPe: round(raw(ks.forwardPE) ?? raw(sd.forwardPE)),
+      pb: round(raw(ks.priceToBook) ?? own.pb ?? null),
       evEbitda: isBank ? null : round(raw(ks.enterpriseToEbitda)), ev: isBank ? null : money(raw(ks.enterpriseValue)),
       eps: round(raw(ks.trailingEps)), bookValue: round(raw(ks.bookValue)),
       dividendYield: round(fraction(raw(sd.dividendYield))), payoutRatio: round(fraction(raw(sd.payoutRatio))),
@@ -524,7 +526,8 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
     },
   };
 
-  _memo.set(key, { at: Date.now(), data });
+  // A page built without quoteSummary is kept only briefly, so the next visit retries it.
+  _memo.set(key, { at: q.price ? Date.now() : Date.now() - TTL_MS + 60 * 1000, data });
   return data;
 }
 

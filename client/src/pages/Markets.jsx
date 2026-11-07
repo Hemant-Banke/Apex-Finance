@@ -174,7 +174,7 @@ export default function Markets() {
       {/* How each asset class has grown against the Nifty — the app's one price chart,
           opened on its growth view with gold, midcaps and silver already overlaid. "+"
           adds any of the other benchmarks. */}
-      <PriceGrapher title="Nifty 50" valueLabel="Nifty 50" formatValue={formatLevel}
+      <PriceGrapher symbol="^NSEI" title="Nifty 50" valueLabel="Nifty 50" formatValue={formatLevel}
         fetchData={fetchNifty} defaultRange="1Y" refreshKey={refreshKey}
         growthCapable defaultView="growth" viewLabels={{ complete: 'Level', growth: 'Growth', hint: 'Every line indexed to 100 at the start of the range' }}
         benchmarks={NIFTY_BENCHMARKS} defaultCompare={['_METAL:gold', '^NSEMDCP50', 'INR:^IXIC']}

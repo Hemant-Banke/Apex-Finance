@@ -11,6 +11,7 @@ import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT a
 import { indicatorTypeOf, indicatorLabel, computeIndicator, lookbackDays, paddedDays } from '../../lib/indicators';
 import { DateRangePicker } from '../forms/DatePicker';
 import { BENCHMARKS } from '../../lib/constants';
+import { loadStudies, saveIndicators, saveCompareChange } from '../../lib/chartStudies';
 import ChartTooltip from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
 import SegmentedControl from '../ui/SegmentedControl';
@@ -136,6 +137,43 @@ function nextDayStr(dateStr) {
   const d = new Date(dateStr + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
+}
+
+// Most points drawn at once. A long history is cut to each bucket's low and high, so the shape survives.
+const LOD_POINTS = 600;
+
+/** Indices of the rows to draw, or null when the series is short enough to draw whole. */
+function lodIndices(rows) {
+  const n = rows.length;
+  if (n <= LOD_POINTS) return null;
+  const buckets = Math.floor((LOD_POINTS - 2) / 2);
+  const size = (n - 2) / buckets;
+  const out = [0];
+  for (let b = 0; b < buckets; b++) {
+    const s = 1 + Math.floor(b * size), e = Math.min(n - 1, 1 + Math.floor((b + 1) * size));
+    let lo = -1, hi = -1;
+    for (let i = s; i < e; i++) {
+      const v = rows[i].value;
+      if (v == null) continue;
+      if (lo < 0 || v < rows[lo].value) lo = i;
+      if (hi < 0 || v > rows[hi].value) hi = i;
+    }
+    if (lo < 0) { if (s < e) out.push(s); continue; }
+    if (lo === hi) out.push(lo); else out.push(Math.min(lo, hi), Math.max(lo, hi));
+  }
+  out.push(n - 1);
+  return out;
+}
+
+/** Min and max of several arrays, skipping nulls — no spread, so a long history cannot overflow the stack. */
+function extent(arrays) {
+  let min = Infinity, max = -Infinity;
+  for (const arr of arrays) for (const v of arr) {
+    if (v == null) continue;
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  return min === Infinity ? [0, 0] : [min, max];
 }
 
 // ── Benchmark comparison (growth view) ──────────────────────────────────────
@@ -396,6 +434,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
  *   viewLabels              — { complete, growth, hint? } names for the two views (a
  *                             share's "complete" view is its Price) and the growth
  *                             button's tooltip.
+ *   symbol                  — the charted instrument, so a saved comparison never overlays it on itself.
  *   growthCapable           — show the Complete / Growth toggle. Growth strips every
  *                             external inflow/outflow out of the series and reindexes
  *                             it to 100 at its own first day, so what is plotted is
@@ -423,6 +462,7 @@ export default function PriceGrapher({
   defaultView      = 'complete',
   defaultCompare   = [],
   viewLabels       = { complete: 'Complete', growth: 'Growth' },
+  symbol           = null,
 }) {
   // ── Unique gradient IDs — prevents cross-instance bleed when multiple
   //    PriceGraphers share the same SVG defs namespace ────────────────────────
@@ -438,7 +478,10 @@ export default function PriceGrapher({
   const [view,        setView]        = useState(defaultView); // 'complete' | 'growth'
   const [rawData,     setRawData]     = useState([]);      // as fetched, incl. any warm-up history
   const [loading,     setLoading]     = useState(!staticData);
-  const [indicators,  setIndicators]  = useState([]);      // [{ id, type, period, width? }] — see lib/indicators
+  // Indicators and comparisons are shared by every chart (lib/chartStudies); the page's own default is added on top.
+  const [saved] = useState(() => (growthCapable ? loadStudies() : { indicators: [], compare: [], added: [] }));
+  const [indicators,  setIndicators]  = useState(saved.indicators); // [{ id, type, period, width? }] — see lib/indicators
+  useEffect(() => { if (growthCapable) saveIndicators(indicators); }, [growthCapable, indicators]);
 
   // The window on screen: a preset, or the calendar's dates (fetched as "since `from`").
   const win = useMemo(() => (custom
@@ -449,15 +492,27 @@ export default function PriceGrapher({
 
   // ── Benchmark comparison (growth view only) ───────────────────────────────
   const [compareOpen,    setCompareOpen]    = useState(false);
-  const [compareSymbols, setCompareSymbols] = useState(defaultCompare); // selected symbols
+  const [compareSymbols, setCompareSymbols] = useState(() => [...new Set([...defaultCompare, ...saved.compare.filter(s => s !== symbol)])]);
   const [compareSeries,  setCompareSeries]  = useState({});       // symbol -> [{date,close}]
-  const [addedBenchmarks, setAddedBenchmarks] = useState([]);   // any ticker or fixed rate the user brought
+  // Any ticker or fixed rate the user brought, plus saved lines this chart's catalogue lacks.
+  const [addedBenchmarks, setAddedBenchmarks] = useState(() => saved.added.filter(b =>
+    b.symbol !== symbol && saved.compare.includes(b.symbol) && !benchmarks.some(x => x.symbol === b.symbol)));
   const allBenchmarks = useMemo(() => [...addedBenchmarks, ...benchmarks], [addedBenchmarks, benchmarks]);
+  const catalogueRef = useRef(allBenchmarks);
+  catalogueRef.current = allBenchmarks;
+  // Every add/remove is also applied to the shared saved set.
+  const changeCompare = useCallback((next, extra = []) => {
+    setCompareSymbols(prev => {
+      const n = typeof next === 'function' ? next(prev) : next;
+      if (growthCapable) saveCompareChange(prev, n, [...extra, ...catalogueRef.current]);
+      return n;
+    });
+  }, [growthCapable]);
   const addBenchmark = useCallback((b) => {
     setAddedBenchmarks(list => (list.some(x => x.symbol === b.symbol) || benchmarks.some(x => x.symbol === b.symbol) ? list : [b, ...list]));
-    setCompareSymbols(sel => (sel.includes(b.symbol) ? sel : [...sel, b.symbol]));
+    changeCompare(sel => (sel.includes(b.symbol) ? sel : [...sel, b.symbol]), [b]);
     setView('growth');   // a comparison only means something rebased
-  }, [benchmarks]);
+  }, [benchmarks, changeCompare]);
   const slotsRef = useRef({});
   const { colorOf: benchmarkColor, labelOf: benchmarkLabel } = useMemo(
     () => benchmarkLookups(allBenchmarks, { ...assignSlots(slotsRef.current, [...compareSymbols, ...indicators.map(i => indSlot(i.id))]) }),
@@ -665,16 +720,20 @@ export default function PriceGrapher({
   const overlays  = useMemo(() => indicatorLines.filter(l => !l.pane), [indicatorLines]);
   const paneLines = useMemo(() => indicatorLines.filter(l => l.pane), [indicatorLines]);
 
+  // Level of detail: everything is computed on the full series, only the drawn rows are thinned.
+  const lod = useMemo(() => lodIndices(displayData), [displayData]);
+  const lodData = useMemo(() => (lod ? lod.map(i => displayData[i]) : displayData), [lod, displayData]);
   const chartData = useMemo(() => {
     const symbols = Object.keys(compareRebased);
-    if (!symbols.length && !indicatorLines.length) return displayData;
-    return displayData.map((row, i) => {
+    if (!symbols.length && !indicatorLines.length) return lodData;
+    const merge = (i) => {
       const extra = {};
       for (const sym of symbols) extra[cmpKey(sym)] = compareRebased[sym][i];
       for (const l of indicatorLines) extra[l.dataKey] = l.values[i] ?? null;
-      return { ...row, ...extra };
-    });
-  }, [displayData, compareRebased, indicatorLines]);
+      return { ...displayData[i], ...extra };
+    };
+    return lod ? lod.map(merge) : displayData.map((_, i) => merge(i));
+  }, [displayData, lod, lodData, compareRebased, indicatorLines]);
 
   // ── Derived values ────────────────────────────────────────────────────────
   // An index has no currency and no compacting to lakhs/crores — it is a plain
@@ -691,11 +750,9 @@ export default function PriceGrapher({
   // Nulls (a growth series with no meaningful base) are dropped before min/max —
   // Math.max/min coerce `null` to 0, which would otherwise skew the Y domain.
   // The Y domain must also fit any comparison line, or it renders clipped.
-  const values  = [
-    ...data.map(d => d.value),
-    ...Object.values(compareRebased).flat(),
-    ...overlays.flatMap(l => l.values),
-  ].filter(v => v != null);
+  const [minVal, maxVal] = useMemo(() => extent([
+    data.map(d => d.value), ...Object.values(compareRebased), ...overlays.map(l => l.values),
+  ]), [data, compareRebased, overlays]);
   // A missing point is not a zero: read the ends off the first and last real values.
   const firstReal = data.find(d => d.value != null)?.value;
   const lastReal  = data.findLast(d => d.value != null)?.value;
@@ -704,8 +761,6 @@ export default function PriceGrapher({
   const absChng = lastVal - openVal;
   const pctChng = openVal !== 0 ? (absChng / Math.abs(openVal)) * 100 : 0;
   const isPos   = absChng >= 0;
-  const maxVal  = values.length ? Math.max(...values) : 0;
-  const minVal  = values.length ? Math.min(...values) : 0;
   const isFlat  = data.length > 0 && maxVal === minVal;
 
   // Animated stats
@@ -780,9 +835,7 @@ export default function PriceGrapher({
   //     further than the primary series did.
   //   - the fill's box runs from the line down to the Area's baseline, which Recharts
   //     puts at the domain floor (clamped to 0 when the domain straddles it).
-  const primary  = data.map(d => d.value).filter(v => v != null);
-  const pMin     = primary.length ? Math.min(...primary) : 0;
-  const pMax     = primary.length ? Math.max(...primary) : 0;
+  const [pMin, pMax] = useMemo(() => extent([data.map(d => d.value)]), [data]);
   const fillBase = yMax <= 0 ? yMax : Math.max(yMin, 0);
   // Green wins the exact open-line pixel: begin red a hair BELOW the split so a
   // value sitting on the previous close renders green, not a red/green blend.
@@ -797,7 +850,7 @@ export default function PriceGrapher({
   const fillColor   = isFlat ? `url(#${pgFlatFillId})` : `url(#${pgFillId})`;
 
   // ── X-axis ticks + span (computed from actual data, not just range.days) ──
-  const ticks     = useMemo(() => getTicks(displayData), [displayData]);
+  const ticks     = useMemo(() => getTicks(lodData), [lodData]);
   const lineSpan  = useMemo(() => computeSpan(displayData), [displayData]);
 
   // ── Misc ──────────────────────────────────────────────────────────────────
@@ -1120,7 +1173,7 @@ export default function PriceGrapher({
               {growth && compareSymbols.map(sym => (
                 <button
                   key={sym}
-                  onClick={() => setCompareSymbols(s => s.filter(x => x !== sym))}
+                  onClick={() => changeCompare(s => s.filter(x => x !== sym))}
                   title="Remove from comparison"
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5,
@@ -1236,7 +1289,7 @@ export default function PriceGrapher({
           onChange={(next) => {
             // A comparison only means something rebased: picking one from Price view switches to growth.
             if (next.length > compareSymbols.length) setView('growth');
-            setCompareSymbols(next);
+            changeCompare(next);
           }}
           colorOf={benchmarkColor}
           options={allBenchmarks}

@@ -504,7 +504,7 @@ async function _getYahooSession(force = false) {
 
 /**
  * GET a crumb-gated Yahoo URL (without its `crumb` — this adds it) → parsed JSON, or null
- * on any failure. One fresh session is minted on a 401 before giving up.
+ * on any failure. One fresh session is minted on any failure before giving up.
  */
 async function fetchYahooAuthed(url, timeoutMs = 10000) {
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -515,10 +515,12 @@ async function fetchYahooAuthed(url, timeoutMs = 10000) {
       const resp = await fetch(`${url}${sep}crumb=${encodeURIComponent(session.crumb)}`, {
         headers: { ...YF_HEADERS, cookie: session.cookie }, signal: AbortSignal.timeout(timeoutMs),
       });
-      if (resp.status === 401) continue;          // session expired — mint once more
-      if (!resp.ok) return null;
-      return await resp.json();
-    } catch { return null; }
+      // A stale crumb shows as 401, or 403 / an error body; mint once more on any failure.
+      if (!resp.ok) continue;
+      const json = await resp.json();
+      if (json?.finance?.error) continue;
+      return json;
+    } catch { /* timeout or reset — retry on a fresh session */ }
   }
   return null;
 }

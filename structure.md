@@ -6,7 +6,7 @@
 - `auth/OAuthButtons.jsx` — Google / Apple sign-in buttons for the login page.
 
 ### charts
-- `charts/PriceGrapher.jsx` — The one price/value chart (net worth, accounts, markets, stocks) with benchmark overlays, editable technical indicators (lines + an RSI pane), drag-to-measure, preset ranges ending in All and a calendar for custom dates; a price axis floors at 0; no candlestick view; `axisFormat` for non-rupee prices. Fetchers are `(days, growth, { pad })` — `pad` = warm-up days before the window.
+- `charts/PriceGrapher.jsx` — The one price/value chart (net worth, accounts, markets, stocks) with benchmark overlays, editable technical indicators (lines + an RSI pane), drag-to-measure, preset ranges ending in All and a calendar for custom dates; a price axis floors at 0; no candlestick view; `axisFormat` for non-rupee prices. Long series are drawn at a level of detail (≤600 points, each bucket's low and high) while every figure uses the full data; indicators and comparisons persist across charts via `lib/chartStudies`, and `symbol` keeps a chart from overlaying itself. Fetchers are `(days, growth, { pad })` — `pad` = warm-up days before the window.
 - `charts/ChartTooltip.jsx` — Shared solid chart tooltip (+ `TooltipPanel`), with % change from window start.
 - `charts/CompareIndexDialog.jsx` — Picker for what a chart draws besides its line; tabs Benchmarks · Fixed return (`RATE:<pct>`) · Indicators (an editor: the chart's instances with their period/σ fields, then types to add), + a search icon opening the shared Find-an-asset modal; `onAdd` adds and selects; `initialTab` per opening.
 - `charts/CashflowChart.jsx` — Monthly income/expense bars + net cashflow line (`incomeLabel`/`expenseLabel`); Analytics, the Dashboard, cash account pages.
@@ -173,6 +173,7 @@
 - `planModel.js` — `planModel(data, settings)`: the whole FIRE plan from summary + portfolio + spending profile; `loadPlanSettings`, `journeyMarks`, `PLAN_DEFAULTS`, `PLAN_STORE_KEY`. Shared by Plan and Dashboard.
 - `fire.js` — Pure FIRE maths in today's rupees: `realRate`, `fireNumber`, `yearsToTarget`, `coastNumber`, `requiredMonthly`, `corpusForYears`, `project`.
 - `portfolioStyle.js` — `STYLES` bands and `portfolioStyle(profile, cash)` → growth share + verdict (PortfolioProfile, Dashboard).
+- `chartStudies.js` — The indicators and comparisons shared by every `PriceGrapher` (localStorage `apex_chart_studies`): `loadStudies`, `saveIndicators`, `saveCompareChange(prev, next, catalogue)` — saves only add/remove gestures, so a page's default benchmark is never stored.
 - `indicators.js` — Technical indicators, pure: `INDICATOR_TYPES` (sma, ema, bb, rsi + their editable `params`), instances `{ id, type, period, width? }` via `newIndicator`, `indicatorLabel`, `clampParam`, `computeIndicator(ind, values)`, `lookbackDays(inds)` (warm-up to fetch, 50-day buckets), `paddedDays(days, opts)` for daily-series fetchers.
 - `accountPickerOptions.jsx` — account-type icons (`TYPE_ICON`), per-type colour + group name (`ACCOUNT_TYPE_STYLE`), TypePicker options.
 - `utils.js` — the shared client helpers:
