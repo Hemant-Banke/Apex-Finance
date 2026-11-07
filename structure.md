@@ -92,7 +92,7 @@
 - `portfolio/PerformancePanel.jsx` — An account's performance: total gain, unrealised, realised, XIRR, last session, invested, then its contribution table.
 - `portfolio/SellButton.jsx` — The shared sell affordance on holding rows.
 - `portfolio/SellHoldingModal.jsx` — Dialog to sell an owned position.
-- `portfolio/PositionCard.jsx` — "Your position" card (worth + gain/today on the left; qty, avg cost, invested on the right) for the stock and asset pages.
+- `portfolio/PositionCard.jsx` — "Your position" card for the stock and asset pages: takes portfolio holdings whole; market value · return (realised beneath) · today · quantity (avg vs now) as one ruled row, then the cost-vs-worth `GainBar` (exported from HoldingsBook) and a held-since / accounts line.
 
 ### stock
 - `stock/PricePerformance.jsx` — `StatGrid`, `RangeBar`, `Performance` for stock/asset pages (`benchLabel={null}` drops the benchmark rows).

@@ -153,7 +153,7 @@ export default function Asset() {
       />
 
       <PositionCard unitLabel={data.unit === 'g' ? 'Grams' : 'Units'}
-        positions={positions.map(h => ({ qty: h.qty, invested: h.invested, value: h.value, pnl: h.unrealisedPnl, dayChange: h.dayChange }))} />
+        positions={positions} />
 
       <PriceGrapher key={data.symbol} symbol={data.symbol} title={typeLabel === 'Index' ? 'Level' : 'Price'} valueLabel={data.type === 'mutual_fund' ? 'NAV' : 'Close'}
         formatValue={fmt} axisFormat={axisFormatFor(data.currency)} fetchData={fetchPrice}

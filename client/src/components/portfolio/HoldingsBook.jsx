@@ -26,14 +26,14 @@ const referenceOf = (h) => (h.symbol?.startsWith('AMFI:') || isSelfPricedHolding
 const NEUTRAL = 'color-mix(in srgb, var(--color-text-muted) 45%, var(--color-bg-elevated))';
 
 /** Size and gain in one bar: cost in neutral, gain extending past it in green, a loss as the red gap short of it. */
-function GainBar({ h, scale }) {
+export function GainBar({ h, scale, height = 8 }) {
   const value = Math.abs(h.value), cost = Math.abs(h.invested);
   const pct = (x) => `${scale ? (x / scale) * 100 : 0}%`;
   const base = h.priced ? Math.min(value, cost) : cost;
   const gain = h.priced && value > cost ? value - cost : 0;
   const loss = h.priced && cost > value ? cost - value : 0;
   return (
-    <div style={{ height: 8, borderRadius: 99, background: 'var(--color-bg-elevated)', display: 'flex', overflow: 'hidden' }}>
+    <div style={{ height, borderRadius: 99, background: 'var(--color-bg-elevated)', display: 'flex', overflow: 'hidden' }}>
       <span style={{ width: pct(base), background: NEUTRAL }} />
       {gain > 0 && <span style={{ width: pct(gain), background: 'var(--color-success)', marginLeft: 1 }} />}
       {loss > 0 && <span style={{ width: pct(loss), background: 'color-mix(in srgb, var(--color-danger) 55%, var(--color-bg-elevated))', marginLeft: 1 }} />}

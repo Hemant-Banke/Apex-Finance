@@ -359,7 +359,7 @@ export default function Stock({ global = false }) {
       />
 
       <PositionCard unitLabel="Shares"
-        positions={positions.map(h => ({ qty: h.qty, invested: h.invested, value: h.value, pnl: h.unrealisedPnl, dayChange: h.dayChange }))} />
+        positions={positions} />
 
       {/* The app's one price chart: the price line, and its growth view against the
           home index (already overlaid) or any other benchmark via "+". */}
