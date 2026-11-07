@@ -435,6 +435,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
  *                             share's "complete" view is its Price) and the growth
  *                             button's tooltip.
  *   symbol                  — the charted instrument, so a saved comparison never overlays it on itself.
+ *   saveStudies             — load and save the shared indicators/comparisons (market charts only, not your own money).
  *   growthCapable           — show the Complete / Growth toggle. Growth strips every
  *                             external inflow/outflow out of the series and reindexes
  *                             it to 100 at its own first day, so what is plotted is
@@ -463,6 +464,7 @@ export default function PriceGrapher({
   defaultCompare   = [],
   viewLabels       = { complete: 'Complete', growth: 'Growth' },
   symbol           = null,
+  saveStudies      = false,
 }) {
   // ── Unique gradient IDs — prevents cross-instance bleed when multiple
   //    PriceGraphers share the same SVG defs namespace ────────────────────────
@@ -479,9 +481,9 @@ export default function PriceGrapher({
   const [rawData,     setRawData]     = useState([]);      // as fetched, incl. any warm-up history
   const [loading,     setLoading]     = useState(!staticData);
   // Indicators and comparisons are shared by every chart (lib/chartStudies); the page's own default is added on top.
-  const [saved] = useState(() => (growthCapable ? loadStudies() : { indicators: [], compare: [], added: [] }));
+  const [saved] = useState(() => (saveStudies ? loadStudies() : { indicators: [], compare: [], added: [] }));
   const [indicators,  setIndicators]  = useState(saved.indicators); // [{ id, type, period, width? }] — see lib/indicators
-  useEffect(() => { if (growthCapable) saveIndicators(indicators); }, [growthCapable, indicators]);
+  useEffect(() => { if (saveStudies) saveIndicators(indicators); }, [saveStudies, indicators]);
 
   // The window on screen: a preset, or the calendar's dates (fetched as "since `from`").
   const win = useMemo(() => (custom
@@ -504,10 +506,10 @@ export default function PriceGrapher({
   const changeCompare = useCallback((next, extra = []) => {
     setCompareSymbols(prev => {
       const n = typeof next === 'function' ? next(prev) : next;
-      if (growthCapable) saveCompareChange(prev, n, [...extra, ...catalogueRef.current]);
+      if (saveStudies) saveCompareChange(prev, n, [...extra, ...catalogueRef.current]);
       return n;
     });
-  }, [growthCapable]);
+  }, [saveStudies]);
   const addBenchmark = useCallback((b) => {
     setAddedBenchmarks(list => (list.some(x => x.symbol === b.symbol) || benchmarks.some(x => x.symbol === b.symbol) ? list : [b, ...list]));
     changeCompare(sel => (sel.includes(b.symbol) ? sel : [...sel, b.symbol]), [b]);

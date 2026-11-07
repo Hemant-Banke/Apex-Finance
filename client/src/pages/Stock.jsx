@@ -363,7 +363,7 @@ export default function Stock({ global = false }) {
 
       {/* The app's one price chart: the price line, and its growth view against the
           home index (already overlaid) or any other benchmark via "+". */}
-      <PriceGrapher key={data.symbol} title="Share price" valueLabel="Close" formatValue={money.price}
+      <PriceGrapher key={data.symbol} saveStudies title="Share price" valueLabel="Close" formatValue={money.price}
         axisFormat={money.home ? undefined : axisFormatFor(data.money?.currency)}
         fetchData={fetchPrice} defaultRange="1Y"
         growthCapable benchmarks={benchmarks} viewLabels={{ complete: 'Price', growth: 'vs market', hint: 'Indexed to 100 at the start of the range, against the benchmarks you add' }}
