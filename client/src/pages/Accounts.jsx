@@ -189,13 +189,10 @@ export default function Accounts() {
             {/* Where the money sits, by kind of account — the same colours as the cards below. */}
             {assetsSum > 0 && (
               <div style={{ marginBottom: 20 }}>
-                <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
-                  <p className="heading-sm" style={{ letterSpacing: '0.12em' }}>Assets by account type</p>
-                  <p className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
-                    {formatCurrency(assetsSum)}
-                  </p>
-                </div>
-                <AllocationBar height={8} items={assetGroups.filter(g => g.total > 0).map(g => ({
+                {/* No total here: it is Cash + Investments, printed just below. */}
+                <p className="heading-sm" style={{ letterSpacing: '0.12em', marginBottom: 10 }}>Assets by account type</p>
+                {/* No legend: each group's header below names it, in its colour, with the same share and total. */}
+                <AllocationBar height={8} legend={false} items={assetGroups.filter(g => g.total > 0).map(g => ({
                   key: g.type, name: ACCOUNT_TYPE_STYLE[g.type].group, color: ACCOUNT_TYPE_STYLE[g.type].tone,
                   value: g.total, weight: (g.total / assetsSum) * 100,
                 }))} />

@@ -203,7 +203,8 @@ export default function Analytics() {
           <AllocationPanel holdings={holdings} accountNames={accountNames} profile={portfolio?.profile} />
 
           {/* What the book has made, then which holdings made it. */}
-          <PerformancePanel totals={totals} sub="What your investments have made — on paper, booked, and per year" />
+          <PerformancePanel totals={totals} omit={['unrealised', 'realised', 'invested', 'day', 'priced']}
+            sub="All they have made, at an annual rate, and which holdings made it" />
 
           <Card flush>
             <div style={{ padding: '22px 24px 16px' }}>

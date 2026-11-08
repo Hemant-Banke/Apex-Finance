@@ -100,12 +100,8 @@ function NetWorthMasthead({ summary, totals, hasPortfolio }) {
               tell you, and the same bar the accounts list opens with. */}
           {assets > 0 && (
             <div style={{ marginBottom: 18 }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                <p className="heading-sm" style={{ letterSpacing: '0.12em' }}>Assets</p>
-                <p className="figure text-sm" style={{ color: 'var(--color-text-primary)', fontWeight: 500 }}>
-                  {formatCurrency(assets)}
-                </p>
-              </div>
+              {/* No total here: it is Portfolio + Cash, printed just below. */}
+              <p className="heading-sm" style={{ letterSpacing: '0.12em', marginBottom: 8 }}>Assets</p>
               <div style={{ display: 'flex', gap: 2, height: 6, borderRadius: 99, overflow: 'hidden' }}>
                 <div title={`Cash · ${formatCurrency(cash)}`}
                   style={{ width: `${cashPct}%`, background: 'var(--color-text-muted)', opacity: 0.55 }} />
@@ -178,16 +174,14 @@ function Movers({ holdings }) {
  * The whole picture in one strip: how the investments have done, what kind of book it is,
  * how much is kept, how long the cash lasts, and this month so far. Each opens its page.
  */
-function VitalSigns({ totals, year, profile, summary, incExp }) {
+function VitalSigns({ totals, year, profile, summary, incExp, plan }) {
   const style = portfolioStyle(profile);
   const active = incExp.filter(m => m.income || m.expense);
-  const inc = active.reduce((s, m) => s + m.income, 0);
-  const exp = active.reduce((s, m) => s + m.expense, 0);
-  const rate = inc > 0 ? ((inc - exp) / inc) * 100 : null;
-  const avgExp = active.length ? exp / active.length : 0;
-  const avgKept = active.length ? (inc - exp) / active.length : 0;
-  const runway = avgExp > 0 && summary?.totalCash > 0 ? summary.totalCash / avgExp : null;
+  const avgExp = active.length ? active.reduce((s, m) => s + m.expense, 0) / active.length : 0;
+  const spent = summary?.monthlyExpense || 0;
 
+  // The savings rate and the typical month live on the cashflow card, the runway on the
+  // Independence card (on the plan's own spend), so this strip repeats neither.
   const tiles = [
     // The Analytics contribution table's 1Y figure — the same request, so the same number.
     totals?.holdingsCount > 0 && year && {
@@ -199,17 +193,13 @@ function VitalSigns({ totals, year, profile, summary, incExp }) {
       to: '/analytics', label: 'Portfolio style', value: style.label, text: true,
       sub: `${style.growth.toFixed(0)}% in growth assets`,
     },
-    rate != null && {
-      to: '/analytics', label: 'Savings rate', value: `${rate.toFixed(0)}%`, tone: rate < 0 ? 'var(--color-danger)' : undefined,
-      sub: `${compactIfLarge(Math.round(avgKept))} kept a month`,
-    },
-    runway != null && {
-      to: '/plan', label: 'Cash runway', value: runway >= 24 ? '24+ mo' : `${runway.toFixed(1)} mo`,
-      sub: `at ${compactIfLarge(Math.round(avgExp))} a month`,
+    !plan && avgExp > 0 && summary?.totalCash > 0 && {
+      to: '/plan', label: 'Cash runway', value: summary.totalCash / avgExp >= 24 ? '24+ mo' : `${(summary.totalCash / avgExp).toFixed(1)} mo`,
+      sub: 'of a typical month\'s spending',
     },
     avgExp > 0 && {
-      to: '/transactions', label: 'Spent this month', value: compactIfLarge(Math.round(summary?.monthlyExpense || 0)),
-      sub: `typical month ${compactIfLarge(Math.round(avgExp))}`,
+      to: '/transactions', label: 'Spent this month', value: compactIfLarge(Math.round(spent)),
+      sub: `${((spent / avgExp) * 100).toFixed(0)}% of a typical month`,
     },
   ].filter(Boolean);
   if (!tiles.length) return null;
@@ -306,7 +296,7 @@ export default function Dashboard() {
 
       <SectionHeader
         title={`Hello${user ? `, ${user.name.split(' ')[0]}` : ''}`}
-        sub={`${summary?.accountCount || 0} account${summary?.accountCount === 1 ? '' : 's'} · ${summary?.holdingsCount || 0} holding${summary?.holdingsCount === 1 ? '' : 's'} · everything in one place`}
+        sub={`${summary?.accountCount || 0} account${summary?.accountCount === 1 ? '' : 's'} · ${holdings.length} holding${holdings.length === 1 ? '' : 's'} · everything in one place`}
       />
 
       <NetWorthMasthead summary={summary} totals={totals} hasPortfolio={hasPortfolio} />
@@ -314,7 +304,7 @@ export default function Dashboard() {
       {/* Net worth over time */}
       <PriceGrapher height={220} growthCapable />
 
-      <VitalSigns totals={totals} year={year} profile={portfolio?.profile} summary={summary} incExp={incExp} />
+      <VitalSigns totals={totals} year={year} profile={portfolio?.profile} summary={summary} incExp={incExp} plan={plan} />
 
       {/* What the money is in, and where it goes. */}
       {(hasPortfolio || spend.length > 0) && (

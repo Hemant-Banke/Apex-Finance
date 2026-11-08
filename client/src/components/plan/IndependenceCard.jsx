@@ -7,6 +7,8 @@ import DitherField from '../ui/DitherField';
 // Petals drift down the right side, clear of the figures on the left.
 const PETAL_MASK = 'linear-gradient(90deg, transparent 35%, #000 90%)';
 
+// Says which spend the plan runs on, since the cashflow card beside it averages a shorter window.
+const BASIS = { current: 'your 12-month average', lean: 'essentials only', fat: '1.5× your average' };
 const money = (v) => compactIfLarge(Math.round(v || 0));
 const span = (months) => (months < 24 ? `${months.toFixed(1)} mo` : `${(months / 12).toFixed(1)} yrs`);
 
@@ -52,7 +54,7 @@ export default function IndependenceCard({ m, s }) {
         sub={m.spend > 0 ? `${span(m.sources.cash / m.spend)} on cash alone` : null} />
 
       <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 'auto', paddingTop: 12 }}>
-        At {money(m.spend)} a month, {s.swr}% withdrawal, {s.ret}% return
+        At {money(m.spend)} a month{BASIS[s.basis] ? ` (${BASIS[s.basis]})` : ''}, {s.swr}% withdrawal, {s.ret}% return
       </p>
     </Card>
   );

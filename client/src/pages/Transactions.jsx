@@ -403,9 +403,7 @@ export default function Transactions() {
             {prev && (prev.income || prev.expense) ? <>
               <span>·</span>
               <Delta value={(s?.net || 0) - prev.net} compact />
-              <span>vs the previous {formatCount(days)} days, which netted{' '}
-                <span className="figure" style={{ color: 'var(--color-text-secondary)' }}>{formatSigned(prev.net, compactIfLarge)}</span>
-              </span>
+              <span title={`The previous ${formatCount(days)} days netted ${formatSigned(prev.net, compactIfLarge)}`}>vs the previous {formatCount(days)} days</span>
             </> : null}
           </p>
         </>}

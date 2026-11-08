@@ -207,19 +207,16 @@ export default function MoneyFlow() {
 
       <p className="eyebrow" style={{ marginBottom: 4 }}>What it adds up to</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', columnGap: 40 }}>
-        <Insight label="Savings rate" figure={pct(now.savings)} change={diff(now.savings, before?.savings)}>
-          Of {compactIfLarge(total.income)} earned, {compactIfLarge(total.spent)} was spent and {compactIfLarge(Math.max(0, total.income - total.spent))} kept.
-        </Insight>
         <Insight label="Net invested" figure={formatSigned(netInvested, compactIfLarge)}
           note={netChange != null && Math.abs(netChange) >= 0.5 && (
             <span className="figure text-xs" style={{ color: pnlColor(netChange) }}>{formatPct(netChange, 0)} a month on the period before</span>
           )}>
-          {compactIfLarge(total.invested)} bought, {compactIfLarge(total.sold)} sold · {formatSigned(netAvg, compactIfLarge)} a month on average.
+          {compactIfLarge(total.invested)} bought, {compactIfLarge(total.sold)} sold over {active.length} month{active.length === 1 ? '' : 's'}.
         </Insight>
         <Insight label="Invested from income" figure={pct(now.invest)} change={diff(now.invest, before?.invest)}>
           {netInvested >= 0
-            ? <>{compactIfLarge(netInvested)} went into investments{total.sold > 0 ? <>, after {compactIfLarge(total.sold)} sold</> : null}.</>
-            : <>You took {compactIfLarge(-netInvested)} more out of investments than you put in.</>}
+            ? <>Of the {compactIfLarge(total.income)} earned, net of sales.</>
+            : <>More came out of investments than went in.</>}
         </Insight>
         <Insight label="Months you invested" figure={`${investedMonths} of ${active.length}`}>
           {investedMonths === active.length ? 'Money went into investments every month.'

@@ -352,7 +352,7 @@ export default function AccountDetail() {
               <Figure
                 label="Assets"
                 value={formatCurrency(assetValue)}
-                sub={totalInvested > 0 && (
+                sub={!perf && totalInvested > 0 && (
                   <>
                     <span className="figure">{compactIfLarge(totalInvested)}</span> invested
                     {' · '}

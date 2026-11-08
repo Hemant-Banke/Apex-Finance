@@ -66,17 +66,17 @@ async function monthsAvailable(userId) {
   const first = await Transaction.findOne({ user: userId, type: { $in: ['income', 'expense'] } })
     .sort({ date: 1 }).select('date').lean();
   if (!first) return 1;
-  const f = new Date(first.date), now = new Date();
-  return Math.max(1, (now.getFullYear() - f.getFullYear()) * 12 + (now.getMonth() - f.getMonth()) + 1);
+  const f = new Date(first.date), now = new Date(todayMs());
+  return Math.max(1, (now.getUTCFullYear() - f.getUTCFullYear()) * 12 + (now.getUTCMonth() - f.getUTCMonth()) + 1);
 }
 
+// The first day of the month n months before the app's today (IST), encoded as UTC midnight like
+// every stored date. Built in one step: setMonth on the 31st rolled into the wrong month.
 const startOfMonthsAgo = (n) => {
-  const d = new Date();
-  d.setMonth(d.getMonth() - n);
-  d.setDate(1);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const d = new Date(todayMs());
+  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, 1));
 };
+const monthKey = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
 
 // @route   GET /api/dashboard/summary
 // Reads the pre-computed stores rather than re-aggregating transactions per request.
@@ -115,40 +115,25 @@ router.get('/summary', asyncHandler(async (req, res) => {
 
   const symbolsSeen = new Set();
   holdingsDocs.forEach(doc => (doc.holdings || []).forEach(h => {
-    if ((h.units || 0) > 0) symbolsSeen.add(h.assetSymbol);
+    if (Math.abs(h.units || 0) > 1e-9) symbolsSeen.add(h.assetSymbol);
   }));
 
-  // Flows: this month, and the trailing 6 months for an average to compare it against.
-  const [thisMonth, trailing, recentTransactions] = await Promise.all([
+  // This month's flows; the averages live on /income-expense, so the cashflow card owns them.
+  const [thisMonth, recentTransactions] = await Promise.all([
     Transaction.aggregate([
       { $match: { user: userId, date: { $gte: startOfMonthsAgo(0) }, type: { $in: ['income', 'expense'] } } },
       { $group: { _id: '$type', total: { $sum: '$amount' } } },
-    ]),
-    Transaction.aggregate([
-      { $match: { user: userId, date: { $gte: startOfMonthsAgo(6) }, type: { $in: ['income', 'expense'] } } },
-      { $group: {
-        _id: { type: '$type', m: { $dateToString: { format: '%Y-%m', date: '$date' } } },
-        total: { $sum: '$amount' },
-      } },
     ]),
     Transaction.find({ user: userId })
       .populate('account',   'name type')
       .populate('toAccount', 'name type')
       .sort({ date: -1 })
-      .limit(8),
+      .limit(5)
+      .lean(),
   ]);
 
   const monthlyIncome  = thisMonth.find(f => f._id === 'income')?.total  || 0;
   const monthlyExpense = thisMonth.find(f => f._id === 'expense')?.total || 0;
-
-  // Average per month over however many months actually have data — dividing by a fixed
-  // 6 would halve the average of an account that is only three months old.
-  const avgOf = (type) => {
-    const rows = trailing.filter(r => r._id.type === type);
-    if (!rows.length) return 0;
-    const months = new Set(trailing.map(r => r._id.m)).size || 1;
-    return rows.reduce((s, r) => s + r.total, 0) / months;
-  };
 
   res.json({
     // Net worth is derived from the ACCOUNT stores, not from `DailyNetWorth.settledValue`.
@@ -176,12 +161,6 @@ router.get('/summary', asyncHandler(async (req, res) => {
 
     monthlyIncome,
     monthlyExpense,
-    monthlySavings:   monthlyIncome - monthlyExpense,
-    // Share of income kept. Null with no income — dividing by zero would report either
-    // an infinite savings rate or a misleading 0%.
-    savingsRate:      monthlyIncome > 0 ? ((monthlyIncome - monthlyExpense) / monthlyIncome) * 100 : null,
-    avgMonthlyIncome:  avgOf('income'),
-    avgMonthlyExpense: avgOf('expense'),
 
     accountCount:  accounts.length,
     holdingsCount: symbolsSeen.size,
@@ -293,7 +272,7 @@ router.get('/income-expense', asyncHandler(async (req, res) => {
   const out = [];
   for (let i = months - 1; i >= 0; i--) {
     const d   = startOfMonthsAgo(i);
-    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    const key = monthKey(d);
     const { income = 0, expense = 0 } = byMonth[key] || {};
     out.push({
       month: key,
@@ -346,7 +325,7 @@ router.get('/categories', asyncHandler(async (req, res) => {
   const keys = [];
   for (let i = months - 1; i >= 0; i--) {
     const d = startOfMonthsAgo(i);
-    keys.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+    keys.push(monthKey(d));
   }
   const at = new Map(keys.map((k, i) => [k, i]));
 

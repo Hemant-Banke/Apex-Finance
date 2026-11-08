@@ -61,12 +61,10 @@ export default function FreedomHero({ m, s }) {
                 ? <>In <span className="figure" style={{ color: 'var(--color-text-primary)' }}>{yrs(m.yearsFI)}</span>, your money can pay for your life indefinitely.</>
                 : <>At this pace your money does not yet catch up with a <span className="figure">{money(m.spend)}</span>-a-month life.</>}
           </p>
+          {/* The spend and the FIRE number are the gold tier below, so this line says only what it builds from. */}
           <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: 10 }}>
-            Planned for <span className="figure" style={{ color: 'var(--color-text-primary)' }}>{money(m.spend)}</span> a month of spending
+            <span className="figure" style={{ color: 'var(--color-text-primary)' }}>{money(m.corpus)}</span> today · <span className="figure">{money(m.contribution)}</span> invested a month
             <span style={{ color: 'var(--color-accent)' }}> · {BASIS_LABEL[s.basis]}</span>
-          </p>
-          <p className="text-xs" style={{ color: 'var(--color-text-secondary)', marginTop: 6 }}>
-            <span className="figure">{money(m.corpus)}</span> today · <span className="figure">{money(m.target)}</span> to be free · <span className="figure">{money(m.contribution)}</span> invested a month
           </p>
           <div style={{ marginTop: 20, paddingLeft: 14, borderLeft: '2px solid var(--color-accent)', maxWidth: 440 }}>
             <div className="flex items-baseline justify-between" style={{ gap: 12 }}>
