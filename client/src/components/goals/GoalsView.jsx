@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react';
 import { Plus, Info } from 'lucide-react';
 import { goalsAPI } from '../../lib/api';
 import { compactIfLarge, CHART_COLORS } from '../../lib/utils';
@@ -20,7 +20,8 @@ import GoalTimeline from './GoalTimeline';
 import PlanRoutes from './PlanRoutes';
 import PlanLevers from './PlanLevers';
 import GoalAssumptions from './GoalAssumptions';
-import PlanMethod from './PlanMethod';
+
+const PlanMethod = lazy(() => import('./PlanMethod'));
 
 const money = (v) => compactIfLarge(Math.round(v || 0));
 const tint = (tone, pct = 16) => `color-mix(in srgb, ${tone} ${pct}%, transparent)`;
@@ -68,6 +69,7 @@ export default function GoalsView({ spending, accounts, portfolio }) {
   const [deleting, setDeleting] = useState(null);
   const [settings, setSettings] = useState(loadGoalPlanSettings);
   const [method, setMethod] = useState(false);
+  const [methodLoaded, setMethodLoaded] = useState(false);   // stays mounted once opened, so it can animate closed
 
   useEffect(() => {
     goalsAPI.getAll().then(r => setGoals(r.data))
@@ -124,7 +126,7 @@ export default function GoalsView({ spending, accounts, portfolio }) {
   return (
     <>
       <PageBar actions={<>
-        <Button variant="secondary" icon={Info} disabled={!plan} onClick={() => setMethod(true)}>How it works</Button>
+        <Button variant="secondary" icon={Info} disabled={!plan} onClick={() => { setMethodLoaded(true); setMethod(true); }}>How it works</Button>
         <Button variant="gold" icon={Plus} onClick={() => setForm({})}>Add goal</Button>
       </>} />
       <Masthead
@@ -184,7 +186,8 @@ export default function GoalsView({ spending, accounts, portfolio }) {
       </div>
 
       {plan && <PlanLevers levers={levers} plan={plan} names={names} colours={colours} />}
-      {plan && <PlanMethod plan={plan} open={method} onClose={() => setMethod(false)} />}
+      {/* The method (and its maths typesetter) loads only when asked for. */}
+      {plan && methodLoaded && <Suspense fallback={null}><PlanMethod plan={plan} open={method} onClose={() => setMethod(false)} /></Suspense>}
 
       {formEl}
       <ConfirmModal open={!!deleting} onClose={() => setDeleting(null)} onConfirm={() => remove(deleting)}

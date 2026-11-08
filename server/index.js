@@ -14,6 +14,8 @@ const connectDB = require('./config/db');
 const { errorHandler } = require('./middleware/asyncHandler');
 
 // Route imports
+const compression = require('compression');
+const bookCache = require('./services/bookCache');
 const authRoutes = require('./routes/auth');
 const accountRoutes = require('./routes/accounts');
 const transactionRoutes = require('./routes/transactions');
@@ -78,8 +80,14 @@ mongoose.connection.once('open', async () => {
 
 // Middleware
 app.use(helmet());
+app.use(compression());
 app.use(cors());
 app.use(express.json());
+// Any write by a user drops their memoised reads; `protect` sets req.user before it finishes.
+app.use((req, res, next) => {
+  if (req.method !== 'GET') res.on('finish', () => { if (req.user) bookCache.invalidate(req.user._id); });
+  next();
+});
 
 // Routes
 app.use('/api/auth', authRoutes);

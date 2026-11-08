@@ -74,7 +74,6 @@ router.get('/:id', asyncHandler(async (req, res) => {
     ...account,
     ...balanceDetail,
     holdings:        account.isDebt ? [] : holdingsToArray(rawHoldings),
-    accountBalances: acctBalanceDoc ?? null,   // pre-computed series, for charting
   });
 }));
 

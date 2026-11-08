@@ -36,6 +36,7 @@ const { accruedPrice, isRateAsset } = require('../utils/assetPricing');
 // Subscriptions materialise into transactions at the start of every `ensureUpToToday`.
 // One-way dependency: subscriptionService must NOT require this module back.
 const subscriptionService     = require('./subscriptionService');
+const bookCache               = require('./bookCache');
 
 
 // ─── Shared loaders ─────────────────────────────────────────────────────────
@@ -150,6 +151,7 @@ async function rebuildNW(userId) {
   // it is stamped to T (today) so `ensureUpToToday` treats a same-day store as up
   // to date. (Account cashTS likewise runs to T.)
   await upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, globalStartMs, todayMs());
+  bookCache.invalidate(userId);
 }
 
 /** Every account's asset value summed into one T-1 series (no cash, no debt). */
@@ -179,6 +181,7 @@ async function rebuildAll(userId) {
 
   await rebuildNW(userId);
   await holdingsService.rebuildAllHoldingsFromMap(userId, byAccount);
+  bookCache.invalidate(userId);
 }
 
 
@@ -416,6 +419,7 @@ async function updateForTxns(userId, txns) {
 
   await rebuildNW(userId);
   await holdingsService.updateHoldingsFromMap(userId, byAccount);
+  bookCache.invalidate(userId);
 }
 
 

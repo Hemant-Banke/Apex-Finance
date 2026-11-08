@@ -67,7 +67,7 @@
 - `import/ConfidenceBadge.jsx` — Single confidence pill for the whole parsed file.
 
 ### layout
-- `layout/AppShell.jsx` — App frame: sidebar navigation, the top bar, and the page outlet.
+- `layout/AppShell.jsx` — App frame: sidebar navigation, the top bar, and the page outlet (a layout route — it stays mounted across pages; pages render through `<Outlet>` under `Suspense`).
 - `layout/TopBar.jsx` — The sticky top bar: back link, a one-line breadcrumb (section icon + section › page name), page actions, global market search (⌘K). Pages fill it with `<PageBar back title actions>` — back/title as data through context, actions portalled; `TopBarProvider` holds the state.
 - `layout/PriceBasis.jsx` — Sidebar card: the Live prices switch and what every figure is really as of ("Assets at close of Mon 5 Oct · cash as of today", "Live · 18:02", or "Quotes unavailable · showing close of …" when a live fetch fell back), read from the last priced response's `asof`.
 - `layout/DesktopOnly.jsx` — Gates the app to wide, hover-capable screens.
@@ -163,7 +163,7 @@
 ## 2. Helpers
 
 ### Client (`client/src/lib/`)
-- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`.
+- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s and shared while in flight; any write clears the cache).
 - `goals.js` — Goals for the UI: `GOAL_TYPES` (icons, default inflation and payout), `ASSET_COLORS`, `monthsUntil`, `goalModel` (one goal's own cost, corpus, mix — no simulation), `oddsTone`, `goalColours`, `GOAL_DEFAULTS`; re-exports `goalMath`.
 - `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
 - `calendar.js` — Calendar performance, pure: `rollUp(days, 'day'|'month'|'year')` (gain summed, return compounded), `metricOf`, `periodStats` (best/worst, up/down, mean/median, sd, streaks), `maxDrawdown`, `cashTotals`, `byWeekday`, `byCalendarMonth`, `scaleCap`, `periodLabel`.
@@ -233,7 +233,7 @@
 - `client/public/favicon.svg`, `icons.svg` — Static icons.
 - `client/.claude/agents/*.md` — Claude Code agent definitions.
 - `client/src/main.jsx` — React entry point.
-- `client/src/App.jsx` — Routes and providers.
+- `client/src/App.jsx` — Routes and providers. Every page is `lazy()` and preloaded once the browser is idle.
 - `client/src/index.css` — Design tokens and global styles.
 - Components, pages, context, lib — see sections 1 and 2.
 
@@ -242,7 +242,7 @@
 - `server/package.json`, `.env.example` — Deps and env template.
 - `server/config/db.js` — MongoDB connection (in-memory fallback).
 - `server/data/defaultCategories.js` — Built-in category taxonomy.
-- `server/middleware/auth.js` — JWT `protect` middleware.
+- `server/middleware/auth.js` — JWT `protect` middleware (user row cached 30s; `forgetUser` drops it).
 - `server/middleware/asyncHandler.js` — Forwards async route errors to the error handler.
 
 #### Models (`server/models/`)
@@ -284,7 +284,8 @@
 - `holdingsService.js` — AVCO holdings maintenance.
 - `accountBalance.js` — Account balances: store cash + the account's share of `markBook`; sparklines.
 - `calendarService.js` — One row per calendar day: asset book value, flows, gain, daily return, income, expense (`GET /dashboard/calendar`).
-- `portfolioService.js` — THE valuation (`markBook`), trade replay (cost basis, realised), portfolio, per-account asset values, contribution.
+- `bookCache.js` — per-user short-lived memo with version invalidation; `markBook` goes through it, and any write by the user clears it.
+- `portfolioService.js` — THE valuation (`markBook`, memoised 20s), trade replay (cost basis, realised), portfolio, per-account asset values, contribution.
 - `portfolioProfileService.js` — `getProfile(holdings)`: the book as a whole (classes, caps, regions, sectors, liquidity, yield, in-profit, holding age); local reads only. Served as `profile` on `/dashboard/portfolio`.
 - `marketDataService.js` — All Yahoo fetching, FX, live/historic prices; historic closes via the price cache; `fetchDailyCloses`, `quoteCurrency`, `refreshPriceCache`.
 - `priceCacheService.js` — `getCloses` (cache-first daily closes, fetch only gaps, failures never advance coverage), `getCurrency`, `refreshAll` (3-hourly top-up).

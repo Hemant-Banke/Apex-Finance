@@ -26,6 +26,7 @@ const { midnight, todayMs, t1Ms, todayStr, t1Str, toDateStr } = require('../util
 const { DAY_MS }                  = require('../utils/constants');
 const { xirr }                    = require('../utils/series');
 const mfService                   = require('./mfService');
+const bookCache                   = require('./bookCache');
 
 /** How far back to look for a T-1 close: enough to clear a weekend plus a holiday run. */
 const PREV_CLOSE_LOOKBACK_DAYS = 10;
@@ -309,7 +310,14 @@ async function priceBook(book, wantLive = true) {
  *
  * @returns {Promise<{ holdings: Object[], replay: Object, allPriced: boolean, dayBase: number, asof: string }>}
  */
-async function markBook(userId, { live: wantLive = true, account = null } = {}) {
+// Memoised briefly: a page load values the same book from several endpoints at once.
+const BOOK_TTL_MS = 20_000;
+function markBook(userId, { live = true, account = null } = {}) {
+  return bookCache.memo(userId, `book|${live}|${account || ''}|${todayMs()}`, BOOK_TTL_MS,
+    () => computeBook(userId, { live, account }));
+}
+
+async function computeBook(userId, { live: wantLive = true, account = null } = {}) {
   const replay = await replayTrades(userId, account);
   const book   = await loadBook(userId, account, replay.pools);
   if (!book.length) return { holdings: [], replay, allPriced: true, dayBase: 0, asof: wantLive ? todayStr() : t1Str() };
@@ -435,7 +443,10 @@ async function assetValuesByAccount(userId, { live = false } = {}) {
  */
 // `account` scopes the whole book (holdings, weights, realised) to one account.
 async function getPortfolio(userId, { live: wantLive = true, account = null } = {}) {
-  const { holdings, replay, allPriced, dayBase, asof } = await markBook(userId, { live: wantLive, account });
+  const marked = await markBook(userId, { live: wantLive, account });
+  const { replay, allPriced, dayBase, asof } = marked;
+  // The marked book is shared through the memo, so rows get weights on copies.
+  const holdings = marked.holdings.map(h => ({ ...h }));
   const realised = replay.realised;
   // Today even when settled: today's trades are in the flows, and must not fall after the end.
   const endMs = todayMs();

@@ -95,7 +95,7 @@ const transactionSchema = new mongoose.Schema({
 // Index for efficient queries
 transactionSchema.index({ user: 1, date: -1 });
 transactionSchema.index({ account: 1, date: -1 });
-transactionSchema.index({ user: 1, type: 1 });
+transactionSchema.index({ user: 1, type: 1, date: 1 });  // type-filtered reads sorted by date (trade replay, first-txn lookups)
 transactionSchema.index({ user: 1, assetSymbol: 1 });
 
 module.exports = mongoose.model('Transaction', transactionSchema);

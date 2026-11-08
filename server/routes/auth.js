@@ -2,7 +2,7 @@ const express = require('express');
 const jwt = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const User = require('../models/User');
-const { protect } = require('../middleware/auth');
+const { protect, forgetUser } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { HttpError, badRequest } = require('../utils/httpError');
 const { verifyGoogleToken, verifyAppleToken } = require('../services/oauthService');
@@ -44,6 +44,7 @@ async function findOrCreateOAuthUser(profile) {
       user[idField] = profile.providerId;
       if (!user.avatar && profile.avatar) user.avatar = profile.avatar;
       await user.save();
+      forgetUser(user._id);
       return user;
     }
   }

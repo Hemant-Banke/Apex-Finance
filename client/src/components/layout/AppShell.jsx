@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { Suspense, useState } from 'react';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import Spinner from '../ui/Spinner';
 import { useAuth } from '../../context/AuthContext';
 import {
   LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw, Flame, Target
@@ -23,7 +24,7 @@ const nav = [
   { to: '/settings', icon: SettingsIcon, label: 'Settings' },
 ];
 
-export default function AppShell({ children }) {
+export default function AppShell() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
@@ -56,7 +57,7 @@ export default function AppShell({ children }) {
       overflow: 'clip',
       position: 'relative',
     }}>
-      {/* ── Ambient background — persists across all pages (AppShell never unmounts) ── */}
+      {/* ── Ambient background — persists across all pages (the shell is a layout route) ── */}
       <DitherField />
       <div className="landing-orb" style={{ width: 680, height: 680, background: 'radial-gradient(circle, rgba(201,169,106,0.07), transparent 65%)', top: '-18%', right: '-2%', animation: 'orbFloat1 28s ease-in-out infinite' }} />
       <div className="landing-orb" style={{ width: 480, height: 480, background: 'radial-gradient(circle, rgba(91,110,142,0.07), transparent 65%)', bottom: '-12%', right: '22%', animation: 'orbFloat3 24s ease-in-out infinite' }} />
@@ -231,7 +232,7 @@ export default function AppShell({ children }) {
           margin: '0 auto',
           padding: '32px 48px 60px',
         }}>
-          {children}
+          <Suspense fallback={<Spinner height="60vh" />}><Outlet /></Suspense>
         </div>
       </main>
       </TopBarProvider>

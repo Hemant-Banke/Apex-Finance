@@ -10,6 +10,42 @@ const api = axios.create({
   }
 });
 
+// ── Response cache: a page revisited within a minute renders at once, and parallel asks share one request.
+// Any write clears it, so nothing the user changed is ever served stale.
+const CACHE_TTL_MS = 60_000;
+const UNCACHED = [/^\/auth\//, /^\/import\//];
+const baseAdapter = axios.getAdapter(axios.defaults.adapter);
+const cache = new Map();   // key → { at, gen, promise }
+let gen = 0;
+
+export function clearResponseCache() { cache.clear(); gen += 1; }
+
+// Each caller gets its own copy, so a page sorting its data in place cannot touch another's.
+const hand = (res) => ({ ...res, data: res.data == null ? res.data : structuredClone(res.data) });
+
+api.defaults.adapter = (config) => {
+  const method = (config.method || 'get').toLowerCase();
+  if (method !== 'get') {
+    clearResponseCache();
+    return baseAdapter(config).finally(clearResponseCache);
+  }
+  const url = config.url || '';
+  if (UNCACHED.some(re => re.test(url))) return baseAdapter(config);
+  // A Refresh asks for fresh data; it also retires the cached copies of that endpoint.
+  if (config.params?.fresh) {
+    for (const k of cache.keys()) if (k.startsWith(`${url}?`)) cache.delete(k);
+    return baseAdapter(config);
+  }
+  const key = `${url}?${JSON.stringify(config.params || {})}|${config.headers?.Authorization || ''}`;
+  const hit = cache.get(key);
+  if (hit && hit.gen === gen && Date.now() - hit.at < CACHE_TTL_MS) return hit.promise.then(hand);
+
+  const entry = { at: Date.now(), gen, promise: baseAdapter(config) };
+  cache.set(key, entry);
+  entry.promise.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
+  return entry.promise.then(hand);
+};
+
 // ── Global in-flight request tracking (drives the top progress bar) ──────────
 let _inFlight = 0;
 const _loadingSubs = new Set();

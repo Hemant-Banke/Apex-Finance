@@ -158,6 +158,9 @@ function getLensMask() {
   return lensMask;
 }
 
+// A garden is deterministic for its size, so each page's top card reuses the last drawing of it.
+const gardens = new Map();
+
 // Rendered once per size, no animation loop. `full` shows the whole garden at `vivid` with
 // no lens (sign-in pages); otherwise it rests at `rest` and the cursor lens reveals it.
 // `fall` adds the CSS-driven petal fall — on by default with `full`, opt-in under a lens.
@@ -182,8 +185,14 @@ export default function DitherField({ rest = 0.18, vivid = 0.9, full = false, fa
       const ctx = src.getContext('2d');
       ctx.scale(1 / CELL, 1 / CELL);
       if (!petalsOnly) {
-        drawGarden(ctx, W, H, growth, !falling);
-        const data = ctx.getImageData(0, 0, cols, rows).data;
+        const key = `${cols}x${rows}|${W}x${H}|${growth}|${falling}`;
+        let data = gardens.get(key);
+        if (!data) {
+          drawGarden(ctx, W, H, growth, !falling);
+          data = ctx.getImageData(0, 0, cols, rows).data;
+          gardens.set(key, data);
+          if (gardens.size > 12) gardens.delete(gardens.keys().next().value);
+        }
         paint(restRef.current, data, cols, rows, full ? 1 : 0.5);
         if (vividRef.current) paint(vividRef.current, data, cols, rows, 1);
       }

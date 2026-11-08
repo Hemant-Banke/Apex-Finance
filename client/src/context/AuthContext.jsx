@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { authAPI, networthAPI } from '../lib/api';
+import { authAPI, networthAPI, clearResponseCache } from '../lib/api';
 
 const AuthContext = createContext(null);
 
@@ -15,22 +15,19 @@ export function AuthProvider({ children }) {
       return null;
     }
   });
-  // Only "loading" while there's a stored session to re-validate; otherwise
-  // there's nothing to wait for, so we start settled (no setState in the effect).
-  const [loading, setLoading] = useState(
-    () => !!(localStorage.getItem('apex_token') && localStorage.getItem('apex_user'))
-  );
+  // A saved session renders at once; the token is re-checked in the background, and a
+  // rejected one is caught by the API's 401 handler. Nothing waits on a round trip to boot.
+  const loading = false;
 
   useEffect(() => {
     const token = localStorage.getItem('apex_token');
     const savedUser = localStorage.getItem('apex_user');
     if (!token || !savedUser) return;
-    // Verify token is still valid
+    networthAPI.ensure().catch(() => {}); // extend stores to today, alongside the token check
     authAPI.getMe()
       .then(res => {
         setUser(res.data);
         localStorage.setItem('apex_user', JSON.stringify(res.data));
-        networthAPI.ensure().catch(() => {}); // extend store to today on session restore
       })
       .catch((err) => {
         // Only a rejected token ends the session. A network blip, a server restart or a
@@ -39,8 +36,7 @@ export function AuthProvider({ children }) {
         localStorage.removeItem('apex_token');
         localStorage.removeItem('apex_user');
         setUser(null);
-      })
-      .finally(() => setLoading(false));
+      });
   }, []);
 
   const login = async (email, password) => {
@@ -83,6 +79,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
+    clearResponseCache();
     localStorage.removeItem('apex_token');
     localStorage.removeItem('apex_user');
     setUser(null);
