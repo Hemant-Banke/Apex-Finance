@@ -1,10 +1,11 @@
 const CurrentPrice = require('../models/CurrentPrice');
-const { YF_HEADERS } = require('../utils/constants');
+const { YF_HEADERS, PRICE_SNAPSHOT_MS } = require('../utils/constants');
 const { todayMs, toDateStr, midnight } = require('../utils/helpers');
 
 /**
  * Live quotes, cached in Mongo (`currentprices`) so every request, page and server restart
- * reads the same number, and Yahoo is asked at most once a minute per symbol.
+ * reads the same number, and Yahoo is asked at most once per PRICE_SNAPSHOT_MS per symbol.
+ * Shared by every user: a quote is market data, not anyone's.
  *
  * getQuotes(symbols) → { [symbol]: { price, previousClose, sessionDay, fetchedAt, stale } }, NATIVE currency.
  *   `sessionDay` is the day key (as `pricehistories` keys closes) of the session the quote is from.
@@ -15,7 +16,7 @@ const { todayMs, toDateStr, midnight } = require('../utils/helpers');
  * Concurrent requests for the same symbol share one fetch.
  */
 
-const LIVE_TTL_MS = 60 * 1000;
+const LIVE_TTL_MS = PRICE_SNAPSHOT_MS;
 const SPARK_MAX = 20;   // spark 400s the whole request above this many symbols
 
 const inflight = new Map();   // symbol → Promise of that symbol's fetch

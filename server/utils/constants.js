@@ -1,5 +1,7 @@
 const DAY_MS = 86400000;
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+// How long live quotes and a user's marked book are reused. Not a trading app: a few minutes is fine.
+const PRICE_SNAPSHOT_MS = 5 * 60 * 1000;
 
 const YF_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -62,6 +64,7 @@ const ASSET_TYPES = [
 module.exports = { 
   DAY_MS,
   IST_OFFSET_MS,
+  PRICE_SNAPSHOT_MS,
   YF_HEADERS,
   BROWSER_HEADERS,
 

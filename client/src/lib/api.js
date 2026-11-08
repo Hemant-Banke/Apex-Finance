@@ -10,13 +10,26 @@ const api = axios.create({
   }
 });
 
-// ── Response cache: a page revisited within a minute renders at once, and parallel asks share one request.
+// ── Response cache: a page revisited soon after renders at once, and parallel asks share one request.
 // Any write clears it, so nothing the user changed is ever served stale.
 const CACHE_TTL_MS = 60_000;
+// Valued responses live as long as the server's price snapshot (PRICE_SNAPSHOT_MS).
+const PRICED_TTL_MS = 5 * 60_000;
 const UNCACHED = [/^\/auth\//, /^\/import\//];
 const baseAdapter = axios.getAdapter(axios.defaults.adapter);
-const cache = new Map();   // key → { at, gen, promise }
+const cache = new Map();   // key → { at, gen, promise, priced, snap }
 let gen = 0;
+let snapshot = 0;          // newest X-Price-Snapshot seen
+
+// A reply from a newer price snapshot retires valued copies from older ones, so pages never mix them.
+function noteSnapshot(entry, res) {
+  const at = Number(res?.headers?.['x-price-snapshot']) || 0;
+  if (!at) return;
+  entry.snap = at;
+  if (at <= snapshot) return;
+  snapshot = at;
+  for (const [k, e] of cache) if (e.priced && e.snap && e.snap < at) cache.delete(k);
+}
 
 export function clearResponseCache() { cache.clear(); gen += 1; }
 
@@ -38,9 +51,10 @@ api.defaults.adapter = (config) => {
   }
   const key = `${url}?${JSON.stringify(config.params || {})}|${config.headers?.Authorization || ''}`;
   const hit = cache.get(key);
-  if (hit && hit.gen === gen && Date.now() - hit.at < CACHE_TTL_MS) return hit.promise.then(hand);
+  if (hit && hit.gen === gen && Date.now() - hit.at < (hit.priced ? PRICED_TTL_MS : CACHE_TTL_MS)) return hit.promise.then(hand);
 
-  const entry = { at: Date.now(), gen, promise: baseAdapter(config) };
+  const entry = { at: Date.now(), gen, priced: takesBasis(url), promise: baseAdapter(config) };
+  entry.promise.then(res => noteSnapshot(entry, res), () => {});
   cache.set(key, entry);
   entry.promise.catch(() => { if (cache.get(key) === entry) cache.delete(key); });
   return entry.promise.then(hand);

@@ -31,8 +31,8 @@ const { fetchHistoricPrices } = require('./marketDataService');
 const { DAY_MS }              = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder }             = require('../utils/tsHelpers');
-const { buildAccountTxnsMap, externalFlowImpact, assetFlowImpact, isFlatUnits } = require('../utils/transactionHelpers');
-const { accruedPrice, isRateAsset } = require('../utils/assetPricing');
+const { buildAccountTxnsMap, externalFlowImpact, assetFlowImpact, isFlatUnits, directionalAssetImpact } = require('../utils/transactionHelpers');
+const { accruedPrice, accrueLot, isRateAsset } = require('../utils/assetPricing');
 // Subscriptions materialise into transactions at the start of every `ensureUpToToday`.
 // One-way dependency: subscriptionService must NOT require this module back.
 const subscriptionService     = require('./subscriptionService');
@@ -213,6 +213,12 @@ async function ensureUpToToday(userId) {
   if (due.length) await updateForTxns(userId, due);
 }
 
+// A holding's unit price on the calibration day: its per-lot pool accrued there, else its average cost.
+function calibrationPrice(h, lot, dayMs) {
+  if (lot && h.units) return accruedPrice(lot.value, h.rate, lot.basisMs, dayMs) / h.units;
+  return accruedPrice(h.avgPricePerUnit, h.rate, midnight(h.lastTransactionDate || h.firstPurchaseDate || dayMs), dayMs);
+}
+
 /**
  * Extend every store forward to today without replaying transaction history,
  * using the current cash balance and holdings as calibration.
@@ -252,6 +258,14 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
   const traded = new Set((await Transaction.find({
     user: userId, type: { $in: ['buy', 'sell'] }, date: { $gte: new Date(earliest) },
   }).select('account date').lean()).map(t => `${t.account}:${midnight(t.date)}`));
+
+  // Rate assets calibrate from their per-lot pool, so earlier contributions keep their interest.
+  const lots = {};
+  for (const t of await Transaction.find({ user: userId, type: { $in: ['buy', 'sell'] }, rate: { $gt: 0 } })
+    .select('account assetSymbol type amount date rate').sort({ date: 1 }).lean()) {
+    const k = `${t.account}|${t.assetSymbol?.toUpperCase()}`;
+    lots[k] = accrueLot(lots[k], t.rate, midnight(t.date), directionalAssetImpact(t.type) * (t.amount || 0));
+  }
   const reviseFrom = (d) => {
     const len = d.assetTS?.length || 0;
     const back = Math.min(REVISE_DAYS, len);
@@ -346,12 +360,7 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
             // rate-bearing asset resumes where it left off instead of snapping
             // back to book cost. Accrual is exponential, so basis-at-assetStart
             // then compounding on from there is continuous with a full rebuild.
-            pricePerUnit: accruedPrice(
-              h.avgPricePerUnit,
-              h.rate,
-              midnight(h.lastTransactionDate || h.firstPurchaseDate || assetStart),
-              assetStart,
-            ),
+            pricePerUnit: calibrationPrice(h, lots[`${aid}|${h.assetSymbol?.toUpperCase()}`], assetStart),
             // Carry valuation metadata, or the extended days would lose purity
             // scaling and rate accrual and fall back to flat book value.
             purity:       h.purity,

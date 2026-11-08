@@ -141,7 +141,7 @@ function NetWorthMasthead({ summary, totals, hasPortfolio }) {
   );
 }
 
-/** The last session's best and worst holdings, side by side. Unpriced holdings never qualify. */
+/** Today's best and worst holdings (1D), side by side. Unpriced holdings never qualify. */
 function Movers({ holdings }) {
   const moved = holdings.filter(h => h.priced && h.dayChange !== 0 && h.dayChangePct != null);
   const gainers = moved.filter(h => h.dayChange > 0).sort((a, b) => b.dayChangePct - a.dayChangePct).slice(0, 4);
@@ -324,17 +324,31 @@ export default function Dashboard() {
               />
               <div className="flex items-start justify-between" style={{ gap: 16, marginBottom: 18 }}>
                 <div>
-                  <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: pnlColor(totals.unrealisedPnl) }}>
-                    {formatSigned(Math.round(totals.unrealisedPnl || 0), compactIfLarge)}
+                  <p className="figure" style={{ fontSize: '1.35rem', fontWeight: 500, color: pnlColor(totals.totalGain) }}>
+                    {formatSigned(Math.round(totals.totalGain || 0), compactIfLarge)}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 4 }}>
-                    <span className="figure" style={{ color: pnlColor(totals.unrealisedPnl) }}>{formatPct(totals.unrealisedPnlPct, 1)}</span>
-                    {' '}unrealised on <span className="figure">{compactIfLarge(totals.invested || 0)}</span>
-                    {totals.since && <> (since {formatDate(totals.since)})</>}
+                    Total gain{totals.since && <> since {formatDate(totals.since)}</>}
                   </p>
+                  {/* The total taken apart: what is still held, and what was booked on sales. */}
+                  <div className="flex" style={{ gap: 22, marginTop: 12 }}>
+                    <div>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 3 }}>Unrealised</p>
+                      <p className="figure text-sm" style={{ color: pnlColor(totals.unrealisedPnl) }}>
+                        {formatSigned(Math.round(totals.unrealisedPnl || 0), compactIfLarge)}
+                        {totals.invested > 0 && <span className="text-xs" style={{ marginLeft: 6 }}>{formatPct(totals.unrealisedPnlPct, 1)}</span>}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 3 }}>Realised</p>
+                      <p className="figure text-sm" style={{ color: pnlColor(totals.realisedPnl) }}>
+                        {formatSigned(Math.round(totals.realisedPnl || 0), compactIfLarge)}
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 4 }} title="The latest session's move">1D</p>
+                  <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 4 }} title="Change since yesterday">1D</p>
                   <Delta value={Math.round(totals.dayChange || 0)} pct={totals.dayChangePct} compact stacked />
                 </div>
               </div>

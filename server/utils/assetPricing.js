@@ -104,6 +104,22 @@ function accruedPrice(basePrice, ratePct, basisMs, atMs) {
 }
 
 /**
+ * A rate asset's value as a pool where every contribution accrues from its OWN day.
+ * Accruing the average cost from the last trade drops the interest earlier lots had earned.
+ */
+function accrueLot(pool, rate, dayMs, delta) {
+  const value = pool ? accruedPrice(pool.value, rate, pool.basisMs, dayMs) : 0;
+  return { value: value + delta, basisMs: dayMs };
+}
+
+// Two pools (one symbol in two accounts) brought to the later day and added.
+function mergeLots(a, b, rate) {
+  if (!a || !b) return a || b || null;
+  const day = Math.max(a.basisMs, b.basisMs);
+  return accrueLot(accrueLot(a, rate, day, 0), rate, day, accrueLot(b, rate, day, 0).value);
+}
+
+/**
  * The unit price to value a holding at on a given day.
  *
  * @param {{assetType?: string, purity?: string, rate?: number}} meta  holding metadata
@@ -143,5 +159,7 @@ module.exports = {
   purityFactor,
   metalInrPerGram,
   accruedPrice,
+  accrueLot,
+  mergeLots,
   resolveUnitPrice,
 };

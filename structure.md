@@ -163,7 +163,7 @@
 ## 2. Helpers
 
 ### Client (`client/src/lib/`)
-- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s and shared while in flight; any write clears the cache).
+- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s — priced ones 5 min, retired when a newer `X-Price-Snapshot` arrives — and shared while in flight; any write clears the cache).
 - `goals.js` — Goals for the UI: `GOAL_TYPES` (icons, default inflation and payout), `ASSET_COLORS`, `monthsUntil`, `goalModel` (one goal's own cost, corpus, mix — no simulation), `oddsTone`, `goalColours`, `GOAL_DEFAULTS`; re-exports `goalMath`.
 - `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
 - `calendar.js` — Calendar performance, pure: `rollUp(days, 'day'|'month'|'year')` (gain summed, return compounded), `metricOf`, `periodStats` (best/worst, up/down, mean/median, sd, streaks), `maxDrawdown`, `cashTotals`, `byWeekday`, `byCalendarMonth`, `scaleCap`, `periodLabel`.
@@ -203,7 +203,7 @@
 - `tsHelpers.js` — `tsAdder` (merge), `tsConcat` (append), `sliceStartIndex`.
 - `assetClass.js` — `classify(holding, ctx)`: asset-class fractions (hybrids split), SEBI cap tier, region, sector, locked.
 - `spendClass.js` — `spendClass(code)`: essential / discretionary / other from a category code (longest prefix wins).
-- `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`, `listedAssetType` (a traded gold/silver instrument → `etf`).
+- `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`, `listedAssetType` (a traded gold/silver instrument → `etf`). `accrueLot`/`mergeLots`: per-lot accrual pool for rate assets.
 - `currency.js` — FX symbol + currency normalisation.
 - `recurrence.js` — `FREQUENCIES`, `occurrencesBetween`.
 - `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `peWindows` / `weeklyPoints` (historical P/E bands — stock and index pages), `filingsGrowth` (a company's compounded revenue/profit growth from its filings — the stock page and peer growth), `holdingExperience` (SIP + rolling, shared by stock and asset pages).
@@ -284,12 +284,12 @@
 - `holdingsService.js` — AVCO holdings maintenance.
 - `accountBalance.js` — Account balances: store cash + the account's share of `markBook`; sparklines.
 - `calendarService.js` — One row per calendar day: asset book value, flows, gain, daily return, income, expense (`GET /dashboard/calendar`).
-- `bookCache.js` — per-user short-lived memo with version invalidation; `markBook` goes through it, and any write by the user clears it.
-- `portfolioService.js` — THE valuation (`markBook`, memoised 20s), trade replay (cost basis, realised), portfolio, per-account asset values, contribution.
+- `bookCache.js` — per-user price snapshot (`PRICE_SNAPSHOT_MS`): `markBook` results shared for its life, cleared by any write; `snapshotAt` feeds the `X-Price-Snapshot` header.
+- `portfolioService.js` — THE valuation (`markBook`, memoised in the user's price snapshot), trade replay (cost basis, realised), portfolio, per-account asset values, contribution.
 - `portfolioProfileService.js` — `getProfile(holdings)`: the book as a whole (classes, caps, regions, sectors, liquidity, yield, in-profit, holding age); local reads only. Served as `profile` on `/dashboard/portfolio`.
 - `marketDataService.js` — All Yahoo fetching, FX, live/historic prices; historic closes via the price cache; `fetchDailyCloses`, `quoteCurrency`, `refreshPriceCache`.
 - `priceCacheService.js` — `getCloses` (cache-first daily closes, fetch only gaps, failures never advance coverage), `getCurrency`, `refreshAll` (3-hourly top-up).
-- `livePriceService.js` — `getQuotes(symbols)`: live native quotes cached in `currentprices` for 60s per symbol; one batched spark fetch for the rest, concurrent callers share it; a failed fetch serves today's last quote marked stale.
+- `livePriceService.js` — `getQuotes(symbols)`: live native quotes cached in `currentprices` for `PRICE_SNAPSHOT_MS` per symbol, shared across users; one batched spark fetch for the rest, concurrent callers share it; a failed fetch serves today's last quote marked stale.
 - `mfService.js` — AMFI mutual-fund cache, search, NAVs.
 - `symbolResolver.js` — Statement instrument → priceable symbol (ISIN first); prices a row with no printed price at its day's close.
 - `subscriptionService.js` — Materialise due recurring transactions.

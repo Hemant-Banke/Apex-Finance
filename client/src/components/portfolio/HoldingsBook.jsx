@@ -164,7 +164,7 @@ export default function HoldingsBook({ holdings = [], onSell, accountNames, init
                     <Stat label="Value">{formatCurrency(h.value)}</Stat>
                     <Stat label="Unrealised" color={pnlColor(h.unrealisedPnl)}>{h.priced ? formatSigned(h.unrealisedPnl) : '—'}</Stat>
                     {!!h.realisedPnl && <Stat label="Realised" color={pnlColor(h.realisedPnl)}>{formatSigned(h.realisedPnl)}</Stat>}
-                    {h.priced && !!h.dayChange && <Stat label="Today" color={pnlColor(h.dayChange)}>{formatSigned(h.dayChange)}</Stat>}
+                    {h.priced && !!h.dayChange && <Stat label="1D" color={pnlColor(h.dayChange)}>{formatSigned(h.dayChange)}</Stat>}
                     {h.firstPurchaseDate && <Stat label="Held since" plain>{formatDate(h.firstPurchaseDate)}</Stat>}
                     <Stat label="Type" plain>{assetTypeLabel(h.type)}</Stat>
                   </div>

@@ -20,12 +20,11 @@ const Transaction     = require('../models/Transaction');
 const AccountHoldings = require('../models/AccountHoldings');
 
 const { fetchLatestPrices, fetchHistoricPrices, lastOnOrBefore, latestSessionDays } = require('./marketDataService');
-const { resolveUnitPrice, isRateAsset } = require('../utils/assetPricing');
+const { resolveUnitPrice, isRateAsset, accrueLot, mergeLots } = require('../utils/assetPricing');
 const { directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
 const { midnight, todayMs, t1Ms, todayStr, t1Str, toDateStr } = require('../utils/helpers');
 const { DAY_MS }                  = require('../utils/constants');
 const { xirr }                    = require('../utils/series');
-const mfService                   = require('./mfService');
 const bookCache                   = require('./bookCache');
 
 /** How far back to look for a T-1 close: enough to clear a weekend plus a holiday run. */
@@ -88,6 +87,7 @@ async function loadBook(userId, account, pools = {}) {
       // Valuation metadata rides along — without purity/rate a metal or an FD cannot price.
       pos.purity ??= h.purity ?? null;
       pos.rate   ??= h.rate ?? null;
+      pos.lot = mergeLots(pos.lot, pool?.lot, pos.rate);
 
       const first = h.firstPurchaseDate && new Date(h.firstPurchaseDate).getTime();
       const last  = h.lastTransactionDate && new Date(h.lastTransactionDate).getTime();
@@ -141,12 +141,12 @@ function applyTrade(pos, dir, units, amount, assetType) {
 async function replayTrades(userId, account) {
   const txns = await Transaction
     .find({ user: userId, type: { $in: ['buy', 'sell'] }, ...(account && { account }) })
-    .select('account type assetSymbol assetType units amount date')
+    .select('account type assetSymbol assetType units amount date rate')
     .sort({ date: 1 })
     .lean()
     .then(chronological);
 
-  const pools    = {};     // `${account}|${symbol}` → { units, invested }
+  const pools    = {};     // `${account}|${symbol}` → { units, invested, lot? }
   const bySymbol = {};     // symbol → realised INR
   const trades   = {};     // symbol → [{ ms, dir, units, amount }]
   const flows    = [];     // [dayMs, ±INR] — money into (−) and out of (+) the book
@@ -164,6 +164,7 @@ async function replayTrades(userId, account) {
 
     const pos = (pools[`${tx.account}|${sym}`] ??= { units: 0, invested: 0 });
     const r = applyTrade(pos, dir, tx.units, amt, tx.assetType);
+    if (tx.rate) pos.lot = accrueLot(pos.lot, tx.rate, ms, dir * amt);
     if (r) {
       bySymbol[sym] = (bySymbol[sym] || 0) + r;
       total += r;
@@ -177,6 +178,11 @@ async function replayTrades(userId, account) {
 // sell, and replaying the sell first books a phantom short with its whole proceeds as profit.
 const chronological = (txns) => txns.sort((a, b) =>
   midnight(a.date) - midnight(b.date) || directionalAssetImpact(b.type) - directionalAssetImpact(a.type));
+
+// What a rate asset accrues from: its per-lot pool, else the average cost from the last trade.
+const accrualBasis = (pos) => (pos.lot && pos.units
+  ? { basePrice: pos.lot.value / pos.units, basisMs: pos.lot.basisMs }
+  : { basePrice: pos.avgPricePerUnit ?? null, basisMs: midnight(pos.lastTransactionDate || pos.firstPurchaseDate || todayMs()) });
 
 /**
  * Live price + previous close for every position, both in INR.
@@ -204,64 +210,32 @@ async function priceBook(book, wantLive = true) {
 
   const live = {};
   const prev = {};
-  const dayBase = {};   // what today's move is measured FROM — `prev`, except for a fund
+  const dayBase = {};   // what the 1D is measured FROM
   const baseDay = {};
   let liveMissing = 0;
-  // Which session each live price is from: on a weekend or holiday it is one already
-  // stored as a close, and the day's move is that session's, not zero.
+  // Which session each live price is from: one already stored as a close is valued AT it.
   const sessions = latestSessionDays(book.map(p => p.assetSymbol));
 
   for (const pos of book) {
     const sym     = pos.assetSymbol;
-    const basisMs = midnight(pos.lastTransactionDate || pos.firstPurchaseDate || todayMs());
+    const { basePrice, basisMs } = accrualBasis(pos);
 
     const last = lastOnOrBefore(history[sym] || {}, t1);
-    const before = last ? lastOnOrBefore(history[sym] || {}, last.day - DAY_MS) : null;
     const prevQuote = last?.value ?? null;
-    // The day change is measured from a STORED close — in INR at that day's own FX, the
-    // same close the settled basis uses. The live feed's previous close converted at
-    // today's FX dropped the rupee's own move from a rupee figure. When the live price is
-    // from a session already stored as a close (a weekend, before the open), the move is
-    // that session's: its close against the one before.
-    let dayBaseQuote = prevQuote;
-    baseDay[sym] = last?.day ?? t1;
-    const lastSessionDone = wantLive
-      ? (latest[sym] == null || (sessions[sym] != null && last != null && sessions[sym] <= last.day))
-      : true;
-    if (lastSessionDone && before) {
-      dayBaseQuote = before.value;
-      baseDay[sym] = before.day;
-    }
 
-    // Settled basis: no live quote is asked for, so the day's move is the LAST SETTLED
-    // session — the close before T-1's against T-1's own.
+    // 1D is a CALENDAR day, never "the last session": from T-1's value to now (live), or
+    // from T-2's close to T-1's (settled). On a weekend it is what moved since yesterday.
     if (!wantLive) {
-      live[sym] = resolveUnitPrice(pos, { marketPrice: prevQuote, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: t1 });
+      live[sym] = resolveUnitPrice(pos, { marketPrice: prevQuote, basePrice, basisMs, atMs: t1 });
       prev[sym] = live[sym];
-      // With no close at all (an FD, an EPF) the "session" is the last day's accrual.
-      const fromMs = before?.day ?? t1 - DAY_MS;
-      if (!before) baseDay[sym] = fromMs;
+      baseDay[sym] = t1 - DAY_MS;
       dayBase[sym] = resolveUnitPrice(pos, {
-        marketPrice: before?.value ?? null, basePrice: pos.avgPricePerUnit ?? null, basisMs, atMs: fromMs,
+        marketPrice: lastOnOrBefore(history[sym] || {}, t1 - DAY_MS)?.value ?? null, basePrice, basisMs, atMs: t1 - DAY_MS,
       });
       continue;
     }
 
     if (latest[sym] == null && !isRateAsset(pos.assetType)) liveMissing++;
-
-    // A fund reprices once a day, and its NAV for today is published only at night. All
-    // day, then, its "latest" NAV IS yesterday's, and comparing it with yesterday's close
-    // reported every fund as unchanged. A fund's day change is its LAST NAV move: when the
-    // latest NAV is the one already on or before T-1, compare it with the NAV before that.
-    // Only the day change's BASE moves — the fund is still VALUED at its latest NAV.
-    if (mfService.isMfSymbol(sym) && latest[sym] != null) {
-      const navDays = Object.keys(history[sym] || {}).map(Number).filter(d => d <= t1).sort((a, b) => a - b);
-      const lastNav = navDays.length ? history[sym][navDays[navDays.length - 1]] : null;
-      if (lastNav != null && Math.abs(lastNav - latest[sym]) < 1e-9 && navDays.length > 1) {
-        dayBaseQuote = history[sym][navDays[navDays.length - 2]];
-        baseDay[sym] = navDays[navDays.length - 2];
-      }
-    }
 
     // A missing LIVE quote falls back to the last market CLOSE, not to book cost.
     //
@@ -271,8 +245,6 @@ async function priceBook(book, wantLive = true) {
     // the settled store — the Accounts page and the Analytics page disagreed about the
     // same holding. Yesterday's close is a real market price; what you paid for it is not.
     //
-    // When this fallback fires the position is at the last close, so its day change is
-    // that session's move — exactly what the settled basis reports for it.
     // A live price from a session that is already a stored close IS that close; its last
     // trade differs from the official close by noise, and live would disagree with settled.
     const closedSession = sessions[sym] != null && last != null && sessions[sym] <= last.day;
@@ -280,24 +252,20 @@ async function priceBook(book, wantLive = true) {
 
     live[sym] = resolveUnitPrice(pos, {
       marketPrice: marketNow,
-      basePrice:   pos.avgPricePerUnit ?? null,
+      basePrice,
       basisMs,
       atMs: todayMs(),
     });
 
     prev[sym] = resolveUnitPrice(pos, {
       marketPrice: prevQuote,
-      basePrice:   pos.avgPricePerUnit ?? null,
+      basePrice,
       basisMs,
       atMs: t1,
     });
 
-    dayBase[sym] = dayBaseQuote === prevQuote ? prev[sym] : resolveUnitPrice(pos, {
-      marketPrice: dayBaseQuote,
-      basePrice:   pos.avgPricePerUnit ?? null,
-      basisMs,
-      atMs: baseDay[sym],
-    });
+    dayBase[sym] = prev[sym];
+    baseDay[sym] = t1;
   }
 
   return { live, prev, dayBase, baseDay, liveMissing };
@@ -310,10 +278,9 @@ async function priceBook(book, wantLive = true) {
  *
  * @returns {Promise<{ holdings: Object[], replay: Object, allPriced: boolean, dayBase: number, asof: string }>}
  */
-// Memoised briefly: a page load values the same book from several endpoints at once.
-const BOOK_TTL_MS = 20_000;
+// Memoised in the user's price snapshot, so every endpoint reads one valuation (see bookCache).
 function markBook(userId, { live = true, account = null } = {}) {
-  return bookCache.memo(userId, `book|${live}|${account || ''}|${todayMs()}`, BOOK_TTL_MS,
+  return bookCache.memo(userId, `book|${live}|${account || ''}|${todayMs()}`,
     () => computeBook(userId, { live, account }));
 }
 
@@ -364,8 +331,8 @@ async function computeBook(userId, { live: wantLive = true, account = null } = {
     const day = comparable ? moveSince(baseDay[sym], fromPrice) : { change: 0, base: 0 };
     const dayChange = day.change, prevValue = day.base;
     dayBase += prevValue;
-    // The same move measured from T-1's close instead of the session's base: what the
-    // calendar series did, so net worth's 1D can swap one for the other (`assetValuesByAccount`).
+    // The move since T-1's close: equal to dayChange live; on the settled basis (where
+    // dayChange is T-2 → T-1) it lets net worth's 1D swap one for the other.
     const calendarChange = comparable && prevPrice != null ? moveSince(t1Ms(), prevPrice).change : dayChange;
 
     const unrealisedPnl = value - invested;
@@ -636,6 +603,7 @@ async function getContribution(userId, { fromMs = null, account = null, live: li
       h.units   -= tx.units;
       h.invested = h.units > 0 ? avg * h.units : 0;
     }
+    if (tx.rate) h.lot = accrueLot(h.lot, tx.rate, ms, dir * amt);
     h.lastTxMs = ms;
   }
 
@@ -666,8 +634,8 @@ async function getContribution(userId, { fromMs = null, account = null, live: li
     const base  = snap.units ? snap.invested / snap.units : null;
     const price = resolveUnitPrice(h, {
       marketPrice: quote,
-      basePrice:   base,
-      basisMs:     snap.lastTxMs,
+      basePrice:   snap.lot && snap.units ? snap.lot.value / snap.units : base,
+      basisMs:     snap.lot ? snap.lot.basisMs : snap.lastTxMs,
       atMs,
     });
     // No opinion at all → the position is worth what it cost. Never zero.
@@ -737,7 +705,7 @@ async function getContribution(userId, { fromMs = null, account = null, live: li
 }
 
 /** The running state of a position, frozen at a window edge. */
-const snapshot = (h) => ({ units: h.units, invested: h.invested, lastTxMs: h.lastTxMs });
+const snapshot = (h) => ({ units: h.units, invested: h.invested, lastTxMs: h.lastTxMs, lot: h.lot });
 
 /**
  * How much capital this holding has committed, and the most it ever committed.

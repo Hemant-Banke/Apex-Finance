@@ -41,10 +41,8 @@ function netWorthChange(doc, daysAgo, current) {
 }
 
 /**
- * Net worth's 1D: everything that moved since yesterday's point, with the book's calendar
- * move swapped for its SESSION move — so it is the portfolio's 1D plus the day's cash
- * flows, and the two figures on the dashboard cannot disagree (on a weekend, a calendar
- * day had the stocks flat while the portfolio reported Friday's session).
+ * Net worth's 1D: the change since yesterday. Live, this is exactly the chart's last step.
+ * Settled, the book's figure is T-1's close, so its 1D is T-2 → T-1 plus today's cash flows.
  */
 function netWorthDayChange(doc, current, values) {
   const ts = doc?.valuesTS || [];

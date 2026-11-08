@@ -81,11 +81,21 @@ mongoose.connection.once('open', async () => {
 // Middleware
 app.use(helmet());
 app.use(compression());
-app.use(cors());
+app.use(cors({ exposedHeaders: ['X-Price-Snapshot'] }));
 app.use(express.json());
 // Any write by a user drops their memoised reads; `protect` sets req.user before it finishes.
 app.use((req, res, next) => {
   if (req.method !== 'GET') res.on('finish', () => { if (req.user) bookCache.invalidate(req.user._id); });
+  next();
+});
+// Stamp every reply with the user's price snapshot, so the client can drop copies from an older one.
+app.use((req, res, next) => {
+  const json = res.json.bind(res);
+  res.json = (body) => {
+    const at = req.user && bookCache.snapshotAt(req.user._id);
+    if (at) res.set('X-Price-Snapshot', String(at));
+    return json(body);
+  };
   next();
 });
 

@@ -1,39 +1,44 @@
+const { PRICE_SNAPSHOT_MS } = require('../utils/constants');
+
 /**
- * Short-lived per-user memo for expensive reads (the marked book). One page load asks for the
- * same valuation several times at once; this computes it once and shares the promise.
- * Any write by the user bumps their version, so a stale result is never served after a change.
+ * Per-user price snapshot. The first priced read opens one; every read in the next
+ * PRICE_SNAPSHOT_MS shares its results, so all endpoints report the same figures.
  */
-const entries  = new Map();   // `${user}|${key}` → { at, version, promise }
-const versions = new Map();   // user → number
+const snapshots = new Map();   // user → { at, entries: Map<key, Promise> }
 
 const userKey = (userId) => String(userId);
-const versionOf = (u) => versions.get(u) || 0;
+const isFresh = (s) => s && Date.now() - s.at < PRICE_SNAPSHOT_MS;
 
-function invalidate(userId) {
-  const u = userKey(userId);
-  versions.set(u, versionOf(u) + 1);
-  for (const k of entries.keys()) if (k.startsWith(`${u}|`)) entries.delete(k);
+function snapshotOf(u) {
+  let s = snapshots.get(u);
+  if (!isFresh(s)) { s = { at: Date.now(), entries: new Map() }; snapshots.set(u, s); }
+  return s;
 }
 
-function memo(userId, key, ttlMs, compute) {
-  const u = userKey(userId);
-  const k = `${u}|${key}`;
-  const version = versionOf(u);
-  const hit = entries.get(k);
-  if (hit && hit.version === version && Date.now() - hit.at < ttlMs) return hit.promise;
-
+function memo(userId, key, compute) {
+  const s = snapshotOf(userKey(userId));
+  const hit = s.entries.get(key);
+  if (hit) return hit;
   const promise = compute();
-  const entry = { at: Date.now(), version, promise };
-  entries.set(k, entry);
+  s.entries.set(key, promise);
   // A failure is not remembered; the next caller tries again.
-  promise.catch(() => { if (entries.get(k) === entry) entries.delete(k); });
+  promise.catch(() => { if (s.entries.get(key) === promise) s.entries.delete(key); });
   return promise;
 }
 
-// Drop expired entries now and then so the map cannot grow without bound.
-setInterval(() => {
-  const now = Date.now();
-  for (const [k, e] of entries) if (now - e.at > 5 * 60_000) entries.delete(k);
-}, 60_000).unref();
+// A write drops the user's results but keeps the snapshot, so the recompute reuses its quotes.
+function invalidate(userId) {
+  snapshots.get(userKey(userId))?.entries.clear();
+}
 
-module.exports = { memo, invalidate };
+// When the user's current snapshot opened, or null. Sent to the client as X-Price-Snapshot.
+function snapshotAt(userId) {
+  const s = snapshots.get(userKey(userId));
+  return isFresh(s) ? s.at : null;
+}
+
+setInterval(() => {
+  for (const [u, s] of snapshots) if (!isFresh(s)) snapshots.delete(u);
+}, PRICE_SNAPSHOT_MS).unref();
+
+module.exports = { memo, invalidate, snapshotAt };

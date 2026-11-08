@@ -32,7 +32,7 @@ export default function PerformancePanel({ totals, account, id, sub, omit = [] }
           sub={muted('booked on sales')} />}
         {!skip.has('xirr') && <MastheadFigure tight label="XIRR" value={t.xirr == null ? '—' : formatPct(t.xirr, 1)} accent={t.xirr == null ? undefined : pnlColor(t.xirr)}
           sub={muted(t.xirr == null ? 'needs 90 days of history' : 'a year, money-weighted')} />}
-        {!skip.has('day') && <MastheadFigure tight label="Last session" value={compactIfLarge(Math.round(t.dayChange || 0))} accent={pnlColor(t.dayChange)}
+        {!skip.has('day') && <MastheadFigure tight label="1D" value={compactIfLarge(Math.round(t.dayChange || 0))} accent={pnlColor(t.dayChange)}
           sub={t.holdingsCount
             ? <span className="figure text-xs" style={{ color: pnlColor(t.dayChange) }}>{formatPct(t.dayChangePct, 2)}</span>
             : muted('nothing held')} />}

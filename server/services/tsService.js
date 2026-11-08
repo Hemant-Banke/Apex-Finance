@@ -13,7 +13,7 @@ const { DAY_MS } = require('../utils/constants');
 const { midnight, todayMs, t1Ms } = require('../utils/helpers');
 const { tsAdder } = require('../utils/tsHelpers');
 const { buildCashImpactMap, directionalAssetImpact, isFlatUnits } = require('../utils/transactionHelpers');
-const { resolveUnitPrice, accruedPrice } = require('../utils/assetPricing');
+const { resolveUnitPrice, accrueLot } = require('../utils/assetPricing');
 
 // ─── Pure TS builders ─────────────────────────────────────────────────────────
 
@@ -107,10 +107,8 @@ function buildAssetTS(assetTxns, pricesBySymbol, startMs, endMs = t1Ms(), seedPr
 
         // Rate asset: accrue the pool to today, then fold this contribution in.
         if (tx.rate && inrUnitCost != null) {
-          const pool = (ratePool[sym] ??= { value: 0, basisMs: dayMs });
-          pool.value = accruedPrice(pool.value, tx.rate, pool.basisMs, dayMs)
-                     + directionalAssetImpact(tx.type) * Number(tx.units) * inrUnitCost;
-          pool.basisMs = dayMs;
+          ratePool[sym] = accrueLot(ratePool[sym], tx.rate, dayMs,
+            directionalAssetImpact(tx.type) * Number(tx.units) * inrUnitCost);
         }
       }
     }

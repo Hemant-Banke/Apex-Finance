@@ -149,8 +149,8 @@ export default function Analytics() {
           }
           action={
             <div style={{ textAlign: 'right' }}>
-              <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 5 }} title="The latest session's move">1D</p>
-              <Delta value={totals.dayChange} pct={totals.dayChangePct} compact stacked />
+              <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginBottom: 5 }} title="Change since yesterday">1D</p>
+              <Delta value={Math.round(totals.dayChange || 0)} pct={totals.dayChangePct} compact stacked />
             </div>
           }
           band={
