@@ -73,6 +73,9 @@ const SYMBOL_EMOJI = {
   'UNLISTED-BOND': '📜', 'OTHER-ASSET': '💠',
 };
 
+// logo.dev serves another company's logo for these (Sky Gold gets Amazon's, even by its own domain), so they draw the type glyph.
+const WRONG_LOGOS = new Set(['SKYGOLD.NS', 'SKYGOLD.BO']);
+
 // Equity-like assets resolve on logo.dev's /ticker endpoint; crypto has its own
 // /crypto endpoint. Everything else (bonds, commodities, physical & unlisted
 // holdings) has no brand behind it and falls to the emoji.
@@ -88,7 +91,7 @@ function logoSrc(symbol, type, px) {
   if (!LOGODEV_TOKEN || !symbol) return null;
   // Off-market holdings have no logo to find — don't ask for one. Nor do AMFI
   // schemes, whose "symbol" is a scheme code (AMFI:120828), not a ticker.
-  if (isManualSymbol(symbol) || symbol.startsWith('AMFI:')) return null;
+  if (isManualSymbol(symbol) || symbol.startsWith('AMFI:') || WRONG_LOGOS.has(symbol.trim().toUpperCase())) return null;
   const q = `token=${LOGODEV_TOKEN}&size=${px}&format=png&fallback=404`;
   if (type === 'crypto') {
     const coin = symbol.replace(/-[A-Z]{3,4}$/i, '').trim().toLowerCase();

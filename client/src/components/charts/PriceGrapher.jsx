@@ -279,6 +279,7 @@ function EndLabels({ series = [], base }) {
 
 // ── Animated value hook ───────────────────────────────────────────────────────
 
+// `null` means no figure yet: the first real one appears at once instead of counting up from 0.
 function useAnimatedValue(target, duration = 380) {
   const [value, setValue] = useState(target);
   const frameRef = useRef();
@@ -288,6 +289,12 @@ function useAnimatedValue(target, duration = 380) {
     const from = fromRef.current;
     const to   = target;
     if (from === to) return;
+    if (from == null || to == null) {
+      fromRef.current = to;
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = requestAnimationFrame(() => setValue(to));
+      return () => cancelAnimationFrame(frameRef.current);
+    }
 
     const start = performance.now();
     const tick  = (now) => {
@@ -302,7 +309,7 @@ function useAnimatedValue(target, duration = 380) {
     return () => cancelAnimationFrame(frameRef.current);
   }, [target, duration]);
 
-  return value;
+  return target == null ? null : value ?? target;
 }
 
 // ── Drag-selection summary label ───────────────────────────────────────────────
@@ -766,9 +773,10 @@ export default function PriceGrapher({
   const isFlat  = data.length > 0 && maxVal === minVal;
 
   // Animated stats
-  const aLast = useAnimatedValue(lastVal);
-  const aAbs  = useAnimatedValue(absChng);
-  const aPct  = useAnimatedValue(pctChng);
+  const has   = data.length > 0;
+  const aLast = useAnimatedValue(has ? lastVal : null);
+  const aAbs  = useAnimatedValue(has ? absChng : null);
+  const aPct  = useAnimatedValue(has ? pctChng : null);
 
   // Resolve the drag selection into ordered endpoints + change metrics.
   //
@@ -1102,7 +1110,8 @@ export default function PriceGrapher({
             </p>
           )}
           <p className="figure" style={{ fontSize: 28, fontWeight: 600, letterSpacing: '-0.02em', color: 'var(--color-text-primary)', lineHeight: 1, marginBottom: 8 }}>
-            {growth ? effFormatValue(aLast) : compactIfLarge(aLast, formatValue)}
+            {/* No series yet (loading, or empty): hold the line's height rather than print a 0. */}
+            {aLast == null ? '\u00A0' : growth ? effFormatValue(aLast) : compactIfLarge(aLast, formatValue)}
           </p>
           {data.length > 1 && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

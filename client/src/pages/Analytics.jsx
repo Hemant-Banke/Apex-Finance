@@ -18,6 +18,7 @@ import PriceGrapher from '../components/charts/PriceGrapher';
 import CashflowChart from '../components/charts/CashflowChart';
 import CategoryBreakdown from '../components/charts/CategoryBreakdown';
 import MonthlyLedger from '../components/charts/MonthlyLedger';
+import MoneyFlow from '../components/charts/MoneyFlow';
 import HoldingsBook from '../components/portfolio/HoldingsBook';
 import AllocationPanel from '../components/portfolio/AllocationPanel';
 import PerformancePanel from '../components/portfolio/PerformancePanel';
@@ -255,6 +256,8 @@ export default function Analytics() {
           </>
         ) : <Empty text="No income or expenses in this period" height={260} />}
       </Card>
+
+      <MoneyFlow />
 
       {/* Both directions, side by side. Spending was the only half ever shown, which
           made the page an account of what you lose. The whole ranking goes in — the

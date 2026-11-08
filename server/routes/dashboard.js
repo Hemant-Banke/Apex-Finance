@@ -12,6 +12,7 @@ const { holdingsToArray } = require('../services/holdingsService');
 const { getPortfolio, getContribution, allocationByType, assetValuesByAccount } = require('../services/portfolioService');
 const { getProfile } = require('../services/portfolioProfileService');
 const { getCalendar } = require('../services/calendarService');
+const { getMoneyFlow } = require('../services/moneyFlowService');
 const { todayMs } = require('../utils/helpers');
 const { DAY_MS } = require('../utils/constants');
 
@@ -304,6 +305,12 @@ router.get('/income-expense', asyncHandler(async (req, res) => {
   }
 
   res.json(out);
+}));
+
+// @route   GET /api/dashboard/money-flow?months=N
+// Each month's money: where it came from and where it went (moneyFlowService), plus the window before.
+router.get('/money-flow', asyncHandler(async (req, res) => {
+  res.json(await getMoneyFlow(req.user._id, req.query.months));
 }));
 
 // @route   GET /api/dashboard/categories?type=expense|income&months=N

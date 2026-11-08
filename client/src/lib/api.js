@@ -119,6 +119,8 @@ export const dashboardAPI = {
   getCalendar:         () => api.get('/dashboard/calendar'),
   getContribution:     (days, account) => api.get('/dashboard/contribution', { params: { days, ...(account && { account }) } }),
   getIncomeExpense:    (months) => api.get('/dashboard/income-expense',    { params: { months } }),
+  // Each month's money: where it came from and where it went, plus the window before.
+  getMoneyFlow:        (months) => api.get('/dashboard/money-flow', { params: { months } }),
   // Category totals for one direction — where it goes, and where it comes from.
   getCategoryTotals:   (type, months) => api.get('/dashboard/categories', { params: { type, months } }),
   // Monthly income / spending averages, spending split essential / discretionary / other.
