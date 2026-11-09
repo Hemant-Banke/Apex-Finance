@@ -31,7 +31,7 @@ const { DAY_MS } = require('../utils/constants');
 const { toDateStr } = require('../utils/helpers');
 const { notFound } = require('../utils/httpError');
 const { round, pctChange, toSorted, windowReturns, holdingExperience, filingsGrowth, peWindows } = require('../utils/series');
-const { fetchChart, closesByDay, fetchYahooAuthed } = require('./marketDataService');
+const { fetchChart, closesByDay, fetchYahooAuthed, withRecentSessions } = require('./marketDataService');
 const sectorService = require('./sectorService');
 const screenerService = require('./screenerService');
 
@@ -421,7 +421,7 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
   // Abroad, money stays in native units; at home it is ₹ crore.
   const money = global ? (v) => (v == null ? null : v) : crore;
 
-  const stock = toSorted(closesByDay(chart));
+  const stock = await withRecentSessions(ysym, toSorted(closesByDay(chart)));
   if (stock.length < 2 && !q.price) throw notFound(`No market data for ${symbol}`);
   const nifty = toSorted(closesByDay(index));
   const price = q.price || {}, sd = q.summaryDetail || {}, ks = q.defaultKeyStatistics || {};

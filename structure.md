@@ -287,7 +287,7 @@
 - `bookCache.js` — per-user price snapshot (`PRICE_SNAPSHOT_MS`): `markBook` results shared for its life, cleared by any write; `snapshotAt` feeds the `X-Price-Snapshot` header.
 - `portfolioService.js` — THE valuation (`markBook`, memoised in the user's price snapshot), trade replay (cost basis, realised), portfolio, per-account asset values, contribution.
 - `portfolioProfileService.js` — `getProfile(holdings)`: the book as a whole (classes, caps, regions, sectors, liquidity, yield, in-profit, holding age); local reads only. Served as `profile` on `/dashboard/portfolio`.
-- `marketDataService.js` — All Yahoo fetching, FX, live/historic prices; historic closes via the price cache; `fetchDailyCloses`, `quoteCurrency`, `refreshPriceCache`.
+- `marketDataService.js` — All Yahoo fetching, FX, live/historic prices; historic closes via the price cache; `fetchDailyCloses`, `withRecentSessions` (adds cached closes Yahoo's chart skips), `quoteCurrency`, `refreshPriceCache`.
 - `priceCacheService.js` — `getCloses` (cache-first daily closes, fetch only gaps, failures never advance coverage), `getCurrency`, `refreshAll` (3-hourly top-up).
 - `livePriceService.js` — `getQuotes(symbols)`: live native quotes cached in `currentprices` for `PRICE_SNAPSHOT_MS` per symbol, shared across users; one batched spark fetch for the rest, concurrent callers share it; a failed fetch serves today's last quote marked stale.
 - `mfService.js` — AMFI mutual-fund cache, search, NAVs.

@@ -96,6 +96,19 @@ async function fetchDailyCloses(symbol, startMs, endMs, { assetType = 'stock' } 
   return closes;
 }
 
+/**
+ * Adds cached closes for recent sessions a `range=` chart skips (Yahoo's 5y daily drops a
+ * Muhurat session; its dated query does not). Without it 1D on Monday measured from Friday.
+ */
+async function withRecentSessions(symbol, series, days = 10) {
+  if (!series?.length) return series;
+  const today = todayMs();
+  const cached = await _fetchHistoricForSymbol(symbol, 'stock', today - days * DAY_MS, today - DAY_MS).catch(() => ({}));
+  const have = new Set(series.map(([d]) => d));
+  const extra = Object.entries(cached).map(([d, v]) => [Number(d), v]).filter(([d, v]) => !have.has(d) && v != null);
+  return extra.length ? [...series, ...extra].sort((a, b) => a[0] - b[0]) : series;
+}
+
 // Today's native quote for a chart's last point, from the same live cache.
 async function _nativeLive(symbol) {
   const q = (await livePrices.getQuotes([symbol]).catch(() => ({})))[symbol];
@@ -604,5 +617,6 @@ module.exports = {
   fetchPriceOnDate,
   refreshPriceCache,
   fetchDailyCloses,
+  withRecentSessions,
   quoteCurrency,
 };

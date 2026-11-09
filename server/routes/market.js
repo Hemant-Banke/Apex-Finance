@@ -8,7 +8,7 @@ const { isPurityAsset } = require('../utils/assetPricing');
 const { fxSymbol, normalizeCurrency } = require('../utils/currency');
 const {
   fetchChart, closesByDay, lastOnOrBefore, fetchMetalPricePerGram, fetchFxRate, searchYahoo,
-  fetchHistoricPrices, fetchDailyCloses, quoteCurrency,
+  fetchHistoricPrices, fetchDailyCloses, quoteCurrency, withRecentSessions,
 } = require('../services/marketDataService');
 const mfService = require('../services/mfService');
 const sectorService = require('../services/sectorService');
@@ -185,6 +185,15 @@ router.get('/ohlc', asyncHandler(async (req, res) => {
       };
     })
     .filter(c => c.open != null && c.high != null && c.low != null && c.close != null);
+
+  // Yahoo drops a Sunday Muhurat bar from its daily series; the cache kept its close.
+  if (interval === '1d' && candles.length) {
+    const have = candles.map(c => [Date.parse(c.date), c.close]);
+    for (const [day, c] of await withRecentSessions(symbol, have)) {
+      if (day >= have[0][0] && !candles.some(x => Date.parse(x.date) === day)) candles.push({ date: toDateStr(day), open: c, high: c, low: c, close: c, volume: 0 });
+    }
+    candles.sort((a, b) => a.date.localeCompare(b.date));
+  }
 
   res.json({ symbol, interval, candles });
 }));

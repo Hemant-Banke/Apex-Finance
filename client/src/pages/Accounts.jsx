@@ -191,8 +191,8 @@ export default function Accounts() {
               <div style={{ marginBottom: 20 }}>
                 {/* No total here: it is Cash + Investments, printed just below. */}
                 <p className="heading-sm" style={{ letterSpacing: '0.12em', marginBottom: 10 }}>Assets by account type</p>
-                {/* No legend: each group's header below names it, in its colour, with the same share and total. */}
-                <AllocationBar height={8} legend={false} items={assetGroups.filter(g => g.total > 0).map(g => ({
+                {/* Legend gives each type's share; its amount is on the group's header below. */}
+                <AllocationBar height={8} showValue={false} items={assetGroups.filter(g => g.total > 0).map(g => ({
                   key: g.type, name: ACCOUNT_TYPE_STYLE[g.type].group, color: ACCOUNT_TYPE_STYLE[g.type].tone,
                   value: g.total, weight: (g.total / assetsSum) * 100,
                 }))} />

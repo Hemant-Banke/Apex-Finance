@@ -28,7 +28,7 @@ const { nowMs, toDateStr } = require('../utils/helpers');
 const { notFound } = require('../utils/httpError');
 const { round, toSorted, valueAt, windowReturns, holdingExperience, peWindows } = require('../utils/series');
 const { PURITY_OPTIONS } = require('../utils/assetPricing');
-const { fetchChart, closesByDay, fetchHistoricPrices } = require('./marketDataService');
+const { fetchChart, closesByDay, fetchHistoricPrices, withRecentSessions } = require('./marketDataService');
 const fundPortfolioService = require('./fundPortfolioService');
 const mfService = require('./mfService');
 const indiaMarketService = require('./indiaMarketService');
@@ -111,7 +111,7 @@ async function _load(symbol) {
   // Yahoo files some Indian ETFs as EQUITY; the same name rule `searchYahoo` applies.
   const type = /\b(ETF|BEES)\b|AMC\s*-\s/i.test(name) ? 'etf' : (YAHOO_TYPES[meta.instrumentType] || 'other');
   return {
-    series: toSorted(closesByDay(chart)),
+    series: await withRecentSessions(symbol, toSorted(closesByDay(chart))),
     name,
     sub: meta.fullExchangeName || meta.exchangeName || null,
     type,
