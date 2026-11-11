@@ -235,12 +235,12 @@ function calibrationPrice(h, lot, dayMs) {
  * asset, which the shared start-day builder can't express — so the two series
  * are extended independently here.)
  */
-async function extendStores(userId, { rebuildNetWorth = true } = {}) {
+async function extendStores(userId, { rebuildNetWorth = true, revise = false } = {}) {
   const today = todayMs();
   const t1    = t1Ms();
 
   const nwDoc = await DailyNetWorth.findOne({ user: userId }).select('endDate').lean();
-  if (nwDoc && midnight(nwDoc.endDate) >= today) return; // already current
+  if (nwDoc && midnight(nwDoc.endDate) >= today && !revise) return; // already current
 
   const acctDocs = await DailyAccountBalance
     .find({ user: userId })
@@ -390,6 +390,19 @@ async function extendStores(userId, { rebuildNetWorth = true } = {}) {
 }
 
 
+/**
+ * Re-values every user's last REVISE_DAYS settled days. Run after the price caches refresh:
+ * a close or NAV that lands after the day's extend (AMFI publishes late) otherwise waits a day.
+ */
+async function reviseAll() {
+  let n = 0;
+  for (const user of await DailyNetWorth.distinct('user')) {
+    await extendStores(user, { revise: true }).then(() => n++).catch(e => console.error(`[reviseAll] ${user}:`, e.message));
+  }
+  return n;
+}
+
+
 // ─── Delta update service ─────────────────────────────────────────────────────
 
 /** Apply a delta set of transactions to existing stores (create/update/delete). */
@@ -516,6 +529,7 @@ async function upsertNetWorth(userId, valuesTS, lastCashValue, settledValue, sta
 
 module.exports = {
   rebuildNW,
+  reviseAll,
   rebuildAll,
   ensureUpToToday,
   updateForTxns,

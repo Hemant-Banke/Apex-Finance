@@ -13,7 +13,7 @@ const { getPortfolio, getContribution, allocationByType, assetValuesByAccount } 
 const { getProfile } = require('../services/portfolioProfileService');
 const { getCalendar } = require('../services/calendarService');
 const { getMoneyFlow } = require('../services/moneyFlowService');
-const { todayMs } = require('../utils/helpers');
+const { todayMs, midnight } = require('../utils/helpers');
 const { DAY_MS } = require('../utils/constants');
 
 const { spendClass } = require('../utils/spendClass');
@@ -41,13 +41,20 @@ function netWorthChange(doc, daysAgo, current) {
 }
 
 /**
- * Net worth's 1D: the change since yesterday. Live, this is exactly the chart's last step.
- * Settled, the book's figure is T-1's close, so its 1D is T-2 → T-1 plus today's cash flows.
+ * Net worth's 1D = the portfolio's 1D + today's cash flows, so the two can never disagree.
+ * Not read off the stored series: a late close would put its T-1 point on a different price.
  */
-function netWorthDayChange(doc, current, values) {
-  const ts = doc?.valuesTS || [];
-  if (ts.length < 2) return null;
-  const abs = current - ts[ts.length - 1] - values.calendarChange + values.dayChange;
+function netWorthDayChange(cashDocs, current, values) {
+  const today = todayMs();
+  let flows = 0;
+  for (const d of cashDocs) {
+    const ts = d.cashTS || [];
+    if (!ts.length) continue;
+    const end = midnight(d.startDate) + (d.cashLen - 1) * DAY_MS;   // last cash day
+    const t1Cash = end >= today ? (ts.length > 1 ? ts[ts.length - 2] : 0) : ts[ts.length - 1];
+    flows += (d.lastCashValue || 0) - t1Cash;
+  }
+  const abs = (values.dayChange || 0) + flows;
   return change(current, current - abs, false);
 }
 
@@ -86,7 +93,10 @@ router.get('/summary', asyncHandler(async (req, res) => {
 
   const [accounts, dailyBalances, holdingsDocs, nwDoc, values] = await Promise.all([
     Account.find({ user: userId }).lean(),
-    DailyAccountBalance.find({ user: userId }).select('account lastCashValue').lean(),
+    DailyAccountBalance.aggregate([
+      { $match: { user: userId } },
+      { $project: { account: 1, lastCashValue: 1, startDate: 1, cashLen: { $size: { $ifNull: ['$cashTS', []] } }, cashTS: { $slice: [{ $ifNull: ['$cashTS', []] }, -2] } } },
+    ]),
     AccountHoldings.find({ user: userId }).select('holdings').lean(),
     DailyNetWorth.findOne({ user: userId }).lean(),
     assetValuesByAccount(userId, { live }),
@@ -148,7 +158,7 @@ router.get('/summary', asyncHandler(async (req, res) => {
     netWorth:         totalAssets - totalLiabilities,
     asof,
     netWorthChange: {
-      day: netWorthDayChange(nwDoc, totalAssets - totalLiabilities, values),
+      day: netWorthDayChange(dailyBalances, totalAssets - totalLiabilities, values),
       ...Object.fromEntries([['week', 7], ['month', 30], ['year', 365]].map(([k, n]) =>
         [k, netWorthChange(nwDoc, n, totalAssets - totalLiabilities)])),
     },

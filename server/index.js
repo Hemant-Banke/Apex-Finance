@@ -53,8 +53,14 @@ mongoose.connection.once('open', async () => {
         + (backfilled ? `, ${backfilled} backfilled from a stale gap` : '')))
     .catch(e => console.error('MF cache refresh failed:', e.message));
 
-  refreshMf();
-  setInterval(refreshMf, 24 * 60 * 60 * 1000).unref();
+  // Stores re-value their last few days once new closes/NAVs are in, so the chart matches the book.
+  const { reviseAll } = require('./services/dailyValueService');
+  const revise = () => reviseAll().catch(e => console.error('Store revision failed:', e.message));
+
+  const refreshMfAndRevise = () => refreshMf().then(revise);
+  refreshMfAndRevise();
+  // Every 3h, not daily: AMFI posts NAVs late in the evening, and a daily timer lagged them up to a day.
+  setInterval(refreshMfAndRevise, 3 * 60 * 60 * 1000).unref();
 
   // Market flows (FII/DII, MF, participant OI) for the Markets page. The exchanges
   // publish each evening and no upstream keeps more than a short window, so this runs
@@ -74,8 +80,9 @@ mongoose.connection.once('open', async () => {
     .then(({ symbols, refreshed }) => symbols && console.log(`Price cache topped up — ${refreshed}/${symbols} symbols`))
     .catch(e => console.error('Price cache refresh failed:', e.message));
 
-  refreshPrices();
-  setInterval(refreshPrices, 3 * 60 * 60 * 1000).unref();
+  const refreshPricesAndRevise = () => refreshPrices().then(revise);
+  refreshPricesAndRevise();
+  setInterval(refreshPricesAndRevise, 3 * 60 * 60 * 1000).unref();
 });
 
 // Middleware

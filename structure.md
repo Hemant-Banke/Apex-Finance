@@ -279,7 +279,7 @@
 - `transactionQueryService.js` — The shared transaction filter (`buildFilter`), paged list + totals, and insights (daily flows, categories, largest, type counts, prior window).
 - `cashflowService.js` — `getCashflow(user, account, months)`: one account's monthly flows incl. transfers, sources/destinations, categories vs the prior window, daily in/out, recurring payments, main income's rhythm, saving potential (discretionary categories vs their own lean months). The window never reaches back past the account's first month (`window.available`).
 - `moneyFlowService.js` — `getMoneyFlow(user, months)` (`GET /dashboard/money-flow`): per month income, sold, spent (essential/discretionary/other), invested, outside in/out, net into non-debt cash (by account type) and into debt, balanced by construction; adjustments excluded. Returns `{ months, prev }` (the window before, summed).
-- `dailyValueService.js` — Store orchestration: rebuild, extend, delta merge, NW, `assetTotalSeries`.
+- `dailyValueService.js` — Store orchestration: rebuild, extend, delta merge, NW, `assetTotalSeries`, `reviseAll` (re-values the last 3 days after a cache refresh).
 - `tsService.js` — Pure cash/asset/net-worth series builders, `buildAssetTotalTS` (Σ assetTS).
 - `holdingsService.js` — AVCO holdings maintenance.
 - `accountBalance.js` — Account balances: store cash + the account's share of `markBook`; sparklines.
