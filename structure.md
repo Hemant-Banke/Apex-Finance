@@ -52,7 +52,7 @@
 ### forms
 - `forms/TransactionForm.jsx` — Add/edit cash transactions (income, expense, transfer, adjustment).
 - `forms/TxnTypeTiles.jsx` — The coloured cash-type tiles (icon + label); shared by the transaction form and import review (`inline`).
-- `forms/TypePicker.jsx` — Generic dropdown-select (searchable, clearable); replaces native `<select>`.
+- `forms/TypePicker.jsx` — Generic dropdown-select (searchable, clearable); replaces native `<select>`. `showIcon` puts the chosen option's icon in the closed picker.
 - `forms/CategoryPicker.jsx` — Hierarchical category picker wired to the categories API.
 - `forms/CategoryMultiPicker.jsx` — Multi-select category filter: tick whole groups or single categories (tri-state groups, search); used by the Transactions ledger.
 - `forms/DatePicker.jsx` — Date picker + `DateRangePicker`.
@@ -151,7 +151,17 @@
 - `Markets.jsx` — Indian market overview, growth chart, sectors, flows.
 - `Stock.jsx` — One company in full; `/markets/stocks/:nse` and `/markets/world/:yahoo` (`global` prop).
 - `Asset.jsx` — Price page for any non-NSE-equity instrument.
-- `Settings.jsx` — Subscriptions and custom categories.
+- `Settings.jsx` — Subscriptions, custom categories, and AI (connections + the connector); `?tab=` opens a section.
+- `Assistant.jsx` — The assistant (`/assistant`): conversation list, streamed answers with tool progress, suggestions, the model picker in the top bar; empty state offers a connection or the connector.
+- `ConnectAuthorize.jsx` — `/connect/authorize`: the consent page Claude / ChatGPT send the user to before the connector can read their data (outside the shell; resumes after sign-in).
+
+### Assistant (`client/src/components/assistant/`)
+- `Markdown.jsx` — The markdown subset the assistant writes, rendered as React elements (never HTML); numeric table columns right-aligned in the ledger face.
+- `ConnectAiModal.jsx` — Connect a provider with the user's own API key (checked by listing its models, which fills the model picker), or edit a saved connection.
+- `AiConnections.jsx` — The user's AI connections: default, edit, remove; plus `ConnectorPanel`.
+- `ProviderLogo.jsx` — An AI provider's logo (logo.dev by domain) on a light tile, so black marks stay visible; a plain icon for a custom endpoint or a failed load.
+- `ThinkingLine.jsx` — The assistant's working state: a small bloom, a rotating money-themed word with a gold shimmer, and seconds elapsed.
+- `ConnectorPanel.jsx` — "Use Apex inside Claude or ChatGPT": the connector URL, setup steps, apps with access (revoke).
 
 ### Context (`client/src/context/`)
 - `AuthContext.jsx` — User/session state and auth actions.
@@ -163,7 +173,7 @@
 ## 2. Helpers
 
 ### Client (`client/src/lib/`)
-- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s — priced ones 5 min, retired when a newer `X-Price-Snapshot` arrives — and shared while in flight; any write clears the cache).
+- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `assistantAPI` (`chat` streams over fetch), `mcpAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s — priced ones 5 min, retired when a newer `X-Price-Snapshot` arrives — and shared while in flight; any write clears the cache).
 - `goals.js` — Goals for the UI: `GOAL_TYPES` (icons, default inflation and payout), `ASSET_COLORS`, `monthsUntil`, `goalModel` (one goal's own cost, corpus, mix — no simulation), `oddsTone`, `goalColours`, `GOAL_DEFAULTS`; re-exports `goalMath`.
 - `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
 - `calendar.js` — Calendar performance, pure: `rollUp(days, 'day'|'month'|'year')` (gain summed, return compounded), `metricOf`, `periodStats` (best/worst, up/down, mean/median, sd, streaks), `maxDrawdown`, `cashTotals`, `byWeekday`, `byCalendarMonth`, `scaleCap`, `periodLabel`.
@@ -206,10 +216,13 @@
 - `assetPricing.js` — Metal per-gram pricing, purity, rate accrual, `resolveUnitPrice`, `listedAssetType` (a traded gold/silver instrument → `etf`). `accrueLot`/`mergeLots`: per-lot accrual pool for rate assets.
 - `currency.js` — FX symbol + currency normalisation.
 - `recurrence.js` — `FREQUENCIES`, `occurrencesBetween`.
+- `secretBox.js` — AES-256-GCM `seal`/`open` for secrets at rest (users' AI keys; `AI_KEYS_SECRET`), `hint` (last four).
+- `safeUrl.js` — `assertPublicHttps`: a user-supplied endpoint must be https and resolve to a public address.
 - `series.js` — `round`, `pctChange` (server; client equivalent in `lib/utils`), `toSorted`, `valueAt`, `windowReturns`, `WINDOWS`, `xirr`, `sipReturns`, `rollingReturns`, `peWindows` / `weeklyPoints` (historical P/E bands — stock and index pages), `filingsGrowth` (a company's compounded revenue/profit growth from its filings — the stock page and peer growth), `holdingExperience` (SIP + rolling, shared by stock and asset pages).
 
 ### Server lib (`server/lib/`)
-- `llmService.js` — All Claude calls: extraction (text/image) and categorisation. Long text is split into ~12k-char chunks, 4 at a time, and merged.
+- `aiProviders.js` — The assistant's model calls on the USER's key: Anthropic (SDK, cached system prompt, refusal fallback) and any OpenAI-compatible API (OpenAI, Gemini, OpenRouter, Groq, … or a custom https endpoint). `runStep` streams one tool-loop step, `toolResults`, `listModels` (doubles as the key check), `fromTranscript`, `repair`.
+- `llmService.js` — All Claude calls on the APP's key: extraction (text/image) and categorisation. Long text is split into ~12k-char chunks, 4 at a time, and merged.
 - `statementParsers.js` — `parseStatement`: regex parsers (`parseDematText` for CDSL/NSDL demat statements, HDFC lines, `parseLedgerBlocks` for date-block layouts like Union Bank) and HTML, with LLM fallback.
 - `txnFeatures.js` — `buildFeatures(rows)`: per-row payee, payee kind (business / vendor QR / person), file-wide payee count, days and median, weekday, day of month, hour — the behavioural signals the LLM categoriser reasons from.
 - `categoryRules.js` — Keyword category rules, merchant tokens, Misc fallback.
@@ -260,6 +273,10 @@
 - `PriceHistory.js` — Daily closes per Yahoo symbol (native), with covered range and quote currency.
 - `CurrentPrice.js` — The latest live quote per Yahoo symbol (native price, previous session's close, IST day, fetchedAt). A shared cache; closes never go here.
 - `MarketFlow.js` — Daily FII/DII/MF flows + participant OI.
+- `AiConnection.js` — A user's AI provider for the assistant: provider, model (+ display name), sealed key and its hint, default.
+- `AssistantConversation.js` — A conversation: visible `messages` and the provider's own `native` transcript (append-only; `minimize: false`).
+- `McpClient.js` — An app registered for the connector (OAuth dynamic client registration).
+- `McpGrant.js` — One app's access to one user: pending request → one-time code → tokens (hashes only); TTL-expired.
 
 #### Routes (`server/routes/`)
 - `auth.js` — Register, login, OAuth, me.
@@ -267,7 +284,9 @@
 - `transactions.js` — Transaction CRUD, bulk; list + `/insights` via transactionQueryService.
 - `subscriptions.js` — Subscription list/create/pause/delete.
 - `goals.js` — Goal list/create/update/delete (`/api/goals`).
-- `dashboard.js` — Summary, portfolio, holdings, contribution, income-expense, categories.
+- `dashboard.js` — Thin: summary, portfolio, holdings, contribution, calendar, income-expense, money-flow, categories, spending-profile.
+- `assistant.js` — `/api/assistant`: providers, connections (CRUD, `/models` key check), conversations, `POST /chat` (Server-Sent Events, one answer per user at a time).
+- `mcp.js` — The Apex connector: `mountMcp(app)` (OAuth endpoints at the root via the MCP SDK, stateless Streamable HTTP server at `/mcp` serving the assistant's tools) and `/api/mcp` (connector URL, consent request/decision, grants).
 - `networth.js` — Net worth series (`basis=assets` → the asset book alone, Analytics' chart), ensure, rebuild.
 - `market.js` — Asset search, price, OHLC, index series (`INR:<symbol>` = a foreign index converted to ₹ day by day; `RATE:<pct>` = a fixed annual return).
 - `markets.js` — Markets page: overview, sectors, stocks, assets, flows.
@@ -276,6 +295,12 @@
 
 #### Services (`server/services/`)
 - `transactionService.js` — Transaction lifecycle; asset pricing on save.
+- `dashboardService.js` — The Dashboard's figures, shared by its routes and the assistant: `getSummary` (net worth, components, 1D/1W/1M/1Y), `getHoldingsAtCost`, `getIncomeExpense`, `getCategoryTotals`, `getSpendingProfile`.
+- `behaviourService.js` — `getBehaviour(user)`: measured habits — trading (turnover, FIFO holding periods, sales at a profit/loss), timing (each instrument's 30-day move before a trade), concentration, revealed risk score with components, book volatility/drawdown, money habits — plus `observations` with their evidence. Memo 30 min; any write clears it (`forgetBehaviour`).
+- `assistantTools.js` — The READ-ONLY tools shared by the assistant and the connector (`get_overview`, `get_accounts`, `get_portfolio`, `get_performance`, `get_transactions`, `get_cashflow`, `get_behaviour`, `get_goals`, `search_instruments`, `get_instrument`, `get_market_overview`); `runTool` (casts the user id, caps output), `compact`.
+- `assistantService.js` — The conversation loop (`runTurn`: stream → tools → repeat, ≤8 steps), the system prompt (`SYSTEM`; `POLICY` = the advice rules, shared with the connector), `buildBrief` (the user's money in a few lines).
+- `mcpAuthService.js` — OAuth 2.1 server for the connector (`provider` for the MCP SDK: client store, authorize → consent page, PKCE codes, rotating refresh tokens, revoke), `pendingRequest`, `decide`, `listGrants`, `revokeGrant`.
+- `marketSearchService.js` — `searchInstruments(q, { indices })`: Yahoo ∥ AMFI ∥ Nifty 500, ranked together (`/market/search` and the assistant).
 - `transactionQueryService.js` — The shared transaction filter (`buildFilter`), paged list + totals, and insights (daily flows, categories, largest, type counts, prior window).
 - `cashflowService.js` — `getCashflow(user, account, months)`: one account's monthly flows incl. transfers, sources/destinations, categories vs the prior window, daily in/out, recurring payments, main income's rhythm, saving potential (discretionary categories vs their own lean months). The window never reaches back past the account's first month (`window.available`).
 - `moneyFlowService.js` — `getMoneyFlow(user, months)` (`GET /dashboard/money-flow`): per month income, sold, spent (essential/discretionary/other), invested, outside in/out, net into non-debt cash (by account type) and into debt, balanced by construction; adjustments excluded. Returns `{ months, prev }` (the window before, summed).

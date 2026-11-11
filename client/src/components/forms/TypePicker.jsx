@@ -36,6 +36,7 @@ export default function TypePicker({
   // display / behaviour
   placeholder = 'Select…',
   clearable = false,
+  showIcon = false,   // flat mode: the chosen option's `icon` also shows in the closed picker
   searchable = false,
   loading = false,
   // add support
@@ -77,7 +78,7 @@ export default function TypePicker({
 
   // ── Resolve the current value into a display label ──────────────────────────
   const topList = hierarchical ? primaries : options;
-  let displayLabel = null;
+  let displayLabel = null, displayIcon = null;
   if (hierarchical) {
     const [pCode, cCode] = (value || '').split('/');
     const p = primaries.find(o => o.value === pCode);
@@ -88,6 +89,7 @@ export default function TypePicker({
   } else {
     const o = options.find(o => o.value === value);
     if (o) displayLabel = `${o.emoji ? o.emoji + ' ' : ''}${o.label}`;
+    if (o && showIcon) displayIcon = o.icon || null;
   }
 
   // ── Visible rows for the current phase, filtered by search ──────────────────
@@ -161,6 +163,7 @@ export default function TypePicker({
           ...(isOpen ? { borderColor: 'var(--color-accent)', background: 'var(--color-bg-secondary)', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.28), var(--shadow-md), 0 0 0 3px var(--color-accent-dim)' } : null),
         }}
       >
+        {displayIcon && <span style={{ display: 'flex', flexShrink: 0 }}>{displayIcon}</span>}
         <span style={{ flex: 1, color: displayLabel ? 'var(--color-text-primary)' : 'var(--color-text-muted)', fontSize: '0.875rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {displayLabel || placeholder}
         </span>

@@ -1,179 +1,22 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const Transaction = require('../models/Transaction');
-const Account = require('../models/Account');
-const DailyNetWorth = require('../models/DailyNetWorth');
-const DailyAccountBalance = require('../models/DailyAccountBalance');
-const AccountHoldings = require('../models/AccountHoldings');
 const { protect } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const { badRequest } = require('../utils/httpError');
-const { holdingsToArray } = require('../services/holdingsService');
-const { getPortfolio, getContribution, allocationByType, assetValuesByAccount } = require('../services/portfolioService');
+const { getPortfolio, getContribution, allocationByType } = require('../services/portfolioService');
 const { getProfile } = require('../services/portfolioProfileService');
 const { getCalendar } = require('../services/calendarService');
 const { getMoneyFlow } = require('../services/moneyFlowService');
-const { todayMs, midnight } = require('../utils/helpers');
+const dash = require('../services/dashboardService');
+const { todayMs } = require('../utils/helpers');
 const { DAY_MS } = require('../utils/constants');
 
-const { spendClass } = require('../utils/spendClass');
 const router = express.Router();
 router.use(protect);
 
-/**
- * Net worth `daysAgo` days before the end of the series, and the change since.
- *
- * `valuesTS` is one entry per day ending at T-1, so "30 days ago" is simply 30 entries
- * back. When the series is shorter than that, the earliest entry is used and `partial`
- * says so — a two-week-old account has no one-year change, and inventing one by
- * comparing against zero would report a spectacular fake gain.
- */
-function netWorthChange(doc, daysAgo, current) {
-  const ts = doc?.valuesTS || [];
-  if (ts.length < 2) return null;
-
-  // From the headline back to exactly N days before today (`valuesTS` ends at T-1) — the
-  // same start day the chart's N-day range opens on, so the two figures are one.
-  const idx     = ts.length - daysAgo;
-  const partial = idx < 0;
-  const past    = ts[Math.max(0, idx)];
-  return change(current, past, partial);
-}
-
-/**
- * Net worth's 1D = the portfolio's 1D + today's cash flows, so the two can never disagree.
- * Not read off the stored series: a late close would put its T-1 point on a different price.
- */
-function netWorthDayChange(cashDocs, current, values) {
-  const today = todayMs();
-  let flows = 0;
-  for (const d of cashDocs) {
-    const ts = d.cashTS || [];
-    if (!ts.length) continue;
-    const end = midnight(d.startDate) + (d.cashLen - 1) * DAY_MS;   // last cash day
-    const t1Cash = end >= today ? (ts.length > 1 ? ts[ts.length - 2] : 0) : ts[ts.length - 1];
-    flows += (d.lastCashValue || 0) - t1Cash;
-  }
-  const abs = (values.dayChange || 0) + flows;
-  return change(current, current - abs, false);
-}
-
-// Against a zero or negative base a percentage is meaningless (going from -1000 to +500
-// is not "150% growth"), so it is simply withheld.
-const change = (current, past, partial) => ({
-  abs: current - past,
-  pct: past > 0 ? ((current - past) / past) * 100 : null,
-  partial,
-});
-
-// Months from the user's first income/expense to now, so a window never pads empty months.
-async function monthsAvailable(userId) {
-  const first = await Transaction.findOne({ user: userId, type: { $in: ['income', 'expense'] } })
-    .sort({ date: 1 }).select('date').lean();
-  if (!first) return 1;
-  const f = new Date(first.date), now = new Date(todayMs());
-  return Math.max(1, (now.getUTCFullYear() - f.getUTCFullYear()) * 12 + (now.getUTCMonth() - f.getUTCMonth()) + 1);
-}
-
-// The first day of the month n months before the app's today (IST), encoded as UTC midnight like
-// every stored date. Built in one step: setMonth on the 31st rolled into the wrong month.
-const startOfMonthsAgo = (n) => {
-  const d = new Date(todayMs());
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - n, 1));
-};
-const monthKey = (d) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
-
-// @route   GET /api/dashboard/summary
-// Reads the pre-computed stores rather than re-aggregating transactions per request.
-// Assets = T cash + the book from `assetValuesByAccount` — the portfolio's own valuation, so
-// "Portfolio" on the dashboard and the net worth it sums into are one number.
+// @route   GET /api/dashboard/summary — net worth, its components and changes (dashboardService).
 router.get('/summary', asyncHandler(async (req, res) => {
-  const userId = req.user._id;
-  const live   = req.query.fetchLatestBal === 'true';
-
-  const [accounts, dailyBalances, holdingsDocs, nwDoc, values] = await Promise.all([
-    Account.find({ user: userId }).lean(),
-    DailyAccountBalance.aggregate([
-      { $match: { user: userId } },
-      { $project: { account: 1, lastCashValue: 1, startDate: 1, cashLen: { $size: { $ifNull: ['$cashTS', []] } }, cashTS: { $slice: [{ $ifNull: ['$cashTS', []] }, -2] } } },
-    ]),
-    AccountHoldings.find({ user: userId }).select('holdings').lean(),
-    DailyNetWorth.findOne({ user: userId }).lean(),
-    assetValuesByAccount(userId, { live }),
-  ]);
-
-  const cashByAccount = {};
-  dailyBalances.forEach(d => { cashByAccount[d.account.toString()] = d.lastCashValue || 0; });
-
-  // Debt balances are already stored negative, so liabilities is just their sum flipped
-  // for display (a positive "you owe"). Nothing is forced: an OVERPAID debt account
-  // reports a negative liability, which is the truth.
-  let totalAssets = 0, totalLiabilities = 0, totalCash = 0, totalInvestments = 0;
-  accounts.forEach(acc => {
-    const id = acc._id.toString();
-    if (acc.isDebt) {
-      totalLiabilities -= cashByAccount[id] || 0;
-    } else {
-      totalCash        += cashByAccount[id] || 0;
-      totalInvestments += values.byAccount[id] || 0;
-    }
-  });
-  totalAssets = totalCash + totalInvestments;
-  const asof = values.asof;
-
-  const symbolsSeen = new Set();
-  holdingsDocs.forEach(doc => (doc.holdings || []).forEach(h => {
-    if (Math.abs(h.units || 0) > 1e-9) symbolsSeen.add(h.assetSymbol);
-  }));
-
-  // This month's flows; the averages live on /income-expense, so the cashflow card owns them.
-  const [thisMonth, recentTransactions] = await Promise.all([
-    Transaction.aggregate([
-      { $match: { user: userId, date: { $gte: startOfMonthsAgo(0) }, type: { $in: ['income', 'expense'] } } },
-      { $group: { _id: '$type', total: { $sum: '$amount' } } },
-    ]),
-    Transaction.find({ user: userId })
-      .populate('account',   'name type')
-      .populate('toAccount', 'name type')
-      .sort({ date: -1 })
-      .limit(5)
-      .lean(),
-  ]);
-
-  const monthlyIncome  = thisMonth.find(f => f._id === 'income')?.total  || 0;
-  const monthlyExpense = thisMonth.find(f => f._id === 'expense')?.total || 0;
-
-  res.json({
-    // Net worth is derived from the ACCOUNT stores, not from `DailyNetWorth.settledValue`.
-    //
-    // They are not the same figure. The net-worth series runs to T-1, so anything that
-    // happened TODAY — an account opened, a salary credited — is not in it yet, while the
-    // account stores carry cash to T. Reading the headline from the series while the tiles
-    // beneath it read from the accounts made the page contradict itself: a ₹22L home loan
-    // added today was missing from the headline and present in "Liabilities", so net worth
-    // overstated by exactly the loan.
-    //
-    // `DailyNetWorth` remains the source for the CHART and for the changes below, where a
-    // settled T-1 series is exactly what is wanted.
-    netWorth:         totalAssets - totalLiabilities,
-    asof,
-    netWorthChange: {
-      day: netWorthDayChange(dailyBalances, totalAssets - totalLiabilities, values),
-      ...Object.fromEntries([['week', 7], ['month', 30], ['year', 365]].map(([k, n]) =>
-        [k, netWorthChange(nwDoc, n, totalAssets - totalLiabilities)])),
-    },
-    totalAssets,
-    totalLiabilities,
-    totalCash,
-    totalInvestments,
-
-    monthlyIncome,
-    monthlyExpense,
-
-    accountCount:  accounts.length,
-    holdingsCount: symbolsSeen.size,
-    recentTransactions,
-  });
+  res.json(await dash.getSummary(req.user._id, { live: req.query.fetchLatestBal === 'true' }));
 }));
 
 // @route   GET /api/dashboard/portfolio
@@ -217,81 +60,14 @@ router.get('/calendar', asyncHandler(async (req, res) => {
   res.json(await getCalendar(req.user._id, { live: req.query.fetchLatestBal === 'true' }));
 }));
 
-// @route   GET /api/dashboard/holdings
-// The raw book at COST (no pricing, no network). `/portfolio` is what the UI wants for
-// anything about performance; this stays for callers that only need the instrument list.
+// @route   GET /api/dashboard/holdings — the raw book at COST; `/portfolio` is the marked one.
 router.get('/holdings', asyncHandler(async (req, res) => {
-  const holdingsDocs = await AccountHoldings.find({ user: req.user._id }).select('holdings').lean();
-
-  const merged = {};
-  holdingsDocs.forEach(doc => (doc.holdings || []).forEach(h => {
-    const sym = h.assetSymbol;
-    if (!sym) return;
-    merged[sym] ??= {
-      assetSymbol: sym, assetName: h.assetName, assetType: h.assetType,
-      units: 0, totalInvested: 0,
-      // How the asset is VALUED travels with it. The merge used to keep only the
-      // quantities, so this route's answer said a physical gold holding had no purity
-      // and a US stock no quote currency — facts about the instrument, identical in
-      // every account that holds it, and the difference between re-opening a position
-      // correctly and re-opening it as 22K rupees. First non-null wins; they cannot
-      // disagree across accounts, because they describe the same asset.
-      purity: null, rate: null, currency: null,
-    };
-    merged[sym].units         += h.units         || 0;
-    merged[sym].totalInvested += h.totalInvested || 0;
-    merged[sym].purity   ??= h.purity   ?? null;
-    merged[sym].rate     ??= h.rate     ?? null;
-    merged[sym].currency ??= h.currency ?? null;
-  }));
-
-  Object.values(merged).forEach(h => {
-    h.avgPricePerUnit = h.units > 0 ? h.totalInvested / h.units : 0;
-  });
-
-  res.json(holdingsToArray(Object.values(merged)).filter(h => h.totalInvested > 0));
+  res.json(await dash.getHoldingsAtCost(req.user._id));
 }));
 
 // @route   GET /api/dashboard/income-expense?months=N
-// Monthly income / expense / net, with EVERY month in the window present — a month with
-// no transactions must still plot as a zero, or the chart silently closes the gap and
-// draws a spend-free month as if it never happened.
 router.get('/income-expense', asyncHandler(async (req, res) => {
-  const months = Math.min(Math.max(1, Math.min(parseInt(req.query.months) || 6, 60)), await monthsAvailable(req.user._id));
-
-  const rows = await Transaction.aggregate([
-    { $match: {
-      user: req.user._id,
-      date: { $gte: startOfMonthsAgo(months - 1) },
-      type: { $in: ['income', 'expense'] },
-    } },
-    { $group: {
-      _id: { m: { $dateToString: { format: '%Y-%m', date: '$date' } }, type: '$type' },
-      total: { $sum: '$amount' },
-    } },
-  ]);
-
-  const byMonth = {};
-  rows.forEach(r => {
-    byMonth[r._id.m] ??= { income: 0, expense: 0 };
-    byMonth[r._id.m][r._id.type] = r.total;
-  });
-
-  const out = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d   = startOfMonthsAgo(i);
-    const key = monthKey(d);
-    const { income = 0, expense = 0 } = byMonth[key] || {};
-    out.push({
-      month: key,
-      income,
-      expense,
-      net: income - expense,
-      savingsRate: income > 0 ? ((income - expense) / income) * 100 : null,
-    });
-  }
-
-  res.json(out);
+  res.json(await dash.getIncomeExpense(req.user._id, req.query.months));
 }));
 
 // @route   GET /api/dashboard/money-flow?months=N
@@ -300,97 +76,14 @@ router.get('/money-flow', asyncHandler(async (req, res) => {
   res.json(await getMoneyFlow(req.user._id, req.query.months));
 }));
 
-// @route   GET /api/dashboard/categories?type=expense|income&months=N
-//
-// Category totals for ONE direction of cashflow. Where the money goes is only half the
-// question — where it comes from is the other half, and the aggregation is identical, so
-// the direction is a parameter rather than a second route. (Was `/expense-categories`,
-// which could only ever answer the half.)
-//
-// TWO windows, in ONE pass: the one asked for, and the equal-length one immediately
-// before it. A category total on its own says how BIG something is and nothing about
-// which way it is going — "₹42,000 on eating out" is only actionable next to what the
-// same six months cost last time. Grouping by { category, month } gets both out of a
-// single aggregation, and the month buckets double as the category's own series.
+// @route   GET /api/dashboard/categories?type=expense|income&months=N — with the window before.
 router.get('/categories', asyncHandler(async (req, res) => {
-  const months = Math.min(Math.max(1, Math.min(parseInt(req.query.months) || 1, 60)), await monthsAvailable(req.user._id));
-  const type   = req.query.type === 'income' ? 'income' : 'expense';
-
-  const rows = await Transaction.aggregate([
-    // Reaching back 2N months costs the same index scan; the previous window is simply
-    // the buckets that fall outside the current one.
-    { $match: { user: req.user._id, type, date: { $gte: startOfMonthsAgo(months * 2 - 1) } } },
-    { $group: {
-      _id: { c: '$category', m: { $dateToString: { format: '%Y-%m', date: '$date' } } },
-      total: { $sum: '$amount' },
-      count: { $sum: 1 },
-    } },
-  ]);
-
-  // The month keys of the CURRENT window, oldest first. A month the category was left
-  // alone must still carry a zero, or its series silently closes the gap and a habit
-  // picked up last month looks like one held all year.
-  const keys = [];
-  for (let i = months - 1; i >= 0; i--) {
-    const d = startOfMonthsAgo(i);
-    keys.push(monthKey(d));
-  }
-  const at = new Map(keys.map((k, i) => [k, i]));
-
-  const byCategory = new Map();
-  for (const r of rows) {
-    const code = r._id.c ?? null;              // an uncategorised row groups under null
-    let entry = byCategory.get(code);
-    if (!entry) {
-      entry = { _id: code, total: 0, count: 0, prev: 0, series: new Array(months).fill(0) };
-      byCategory.set(code, entry);
-    }
-
-    // Compare the key, don't just miss the map: a month is "previous" only when it is
-    // BEFORE the window. A future-dated transaction also misses, and counting it as
-    // last period's spending would be worse than the chart above, which drops it.
-    const i = at.get(r._id.m);
-    if (i !== undefined) {
-      entry.total += r.total;
-      entry.count += r.count;
-      entry.series[i] += r.total;
-    } else if (r._id.m < keys[0]) {
-      entry.prev += r.total;
-    }
-  }
-
-  // A category that appears ONLY in the previous window has nothing to rank in this one.
-  // It is still not silence — the total it used to carry is gone from the window total,
-  // which is the honest way that reads.
-  res.json([...byCategory.values()]
-    .filter(c => c.total > 0)
-    .sort((a, b) => b.total - a.total));
+  res.json(await dash.getCategoryTotals(req.user._id, { type: req.query.type, months: req.query.months }));
 }));
 
-// @route   GET /api/dashboard/spending-profile?months=N
-// Monthly averages of income and spending, spending split essential / discretionary / other
-// (utils/spendClass) — the inputs the FIRE page plans from. Averaged over ACTIVE months.
+// @route   GET /api/dashboard/spending-profile?months=N — the inputs the FIRE page plans from.
 router.get('/spending-profile', asyncHandler(async (req, res) => {
-  const months = Math.min(Math.max(1, Math.min(parseInt(req.query.months) || 12, 60)), await monthsAvailable(req.user._id));
-  const rows = await Transaction.aggregate([
-    { $match: { user: req.user._id, type: { $in: ['income', 'expense'] }, date: { $gte: startOfMonthsAgo(months - 1) } } },
-    { $group: {
-      _id: { type: '$type', category: '$category', m: { $dateToString: { format: '%Y-%m', date: '$date' } } },
-      total: { $sum: '$amount' },
-    } },
-  ]);
-  const active = new Set(rows.map(r => r._id.m)).size || 1;
-  const sum = { income: 0, expense: 0, essential: 0, discretionary: 0, other: 0 };
-  for (const r of rows) {
-    sum[r._id.type] += r.total;
-    if (r._id.type === 'expense') sum[spendClass(r._id.category)] += r.total;
-  }
-  const avg = (v) => v / active;
-  res.json({
-    months, activeMonths: active,
-    income: avg(sum.income), expense: avg(sum.expense),
-    essential: avg(sum.essential), discretionary: avg(sum.discretionary), other: avg(sum.other),
-  });
+  res.json(await dash.getSpendingProfile(req.user._id, req.query.months));
 }));
 
 module.exports = router;

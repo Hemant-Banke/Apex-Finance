@@ -249,4 +249,61 @@ export const networthAPI = {
   rebuild:  ()     => api.post('/networth/rebuild'),
 };
 
+// The assistant — runs on the user's own AI key; the key never comes back from the server.
+export const assistantAPI = {
+  providers:     ()         => api.get('/assistant/providers'),
+  connections:   ()         => api.get('/assistant/connections'),
+  // A key check that also lists the models it can use. `connectionId` checks a saved key.
+  models:        (data)     => api.post('/assistant/connections/models', data, { timeout: 30000 }),
+  connect:       (data)     => api.post('/assistant/connections', data, { timeout: 30000 }),
+  updateConnection: (id, d) => api.patch(`/assistant/connections/${id}`, d, { timeout: 30000 }),
+  disconnect:    (id)       => api.delete(`/assistant/connections/${id}`),
+  conversations: ()         => api.get('/assistant/conversations'),
+  conversation:  (id)       => api.get(`/assistant/conversations/${id}`),
+  rename:        (id, title) => api.patch(`/assistant/conversations/${id}`, { title }),
+  deleteConversation: (id)  => api.delete(`/assistant/conversations/${id}`),
+
+  /**
+   * One streamed answer. `onEvent` gets each server event (conversation, text, tool, done, error).
+   * fetch, not axios: the browser adapter cannot read a response as it arrives.
+   */
+  async chat({ conversationId, connectionId, message }, onEvent, signal) {
+    const res = await fetch(`${API_BASE_URL}/assistant/chat`, {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('apex_token') || ''}` },
+      body: JSON.stringify({ conversationId, connectionId, message, live: isLive() }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.message || 'The assistant could not answer right now');
+    }
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let cut;
+      while ((cut = buf.indexOf('\n\n')) >= 0) {
+        const line = buf.slice(0, cut).trim();
+        buf = buf.slice(cut + 2);
+        if (line.startsWith('data:')) {
+          try { onEvent(JSON.parse(line.slice(5))); } catch { /* a malformed event is skipped */ }
+        }
+      }
+    }
+  },
+};
+
+// The Apex connector (Claude / ChatGPT): its URL, the consent page, and apps with access.
+export const mcpAPI = {
+  connector: ()               => api.get('/mcp/connector'),
+  request:   (id)             => api.get(`/mcp/requests/${encodeURIComponent(id)}`),
+  decide:    (id, approve)    => api.post(`/mcp/requests/${encodeURIComponent(id)}`, { approve }),
+  grants:    ()               => api.get('/mcp/grants'),
+  revoke:    (id)             => api.delete(`/mcp/grants/${id}`),
+};
+
 export default api;

@@ -27,8 +27,13 @@ const categoryRoutes = require('./routes/categories');
 const importRoutes = require('./routes/import');
 const subscriptionRoutes = require('./routes/subscriptions');
 const goalRoutes = require('./routes/goals');
+const assistantRoutes = require('./routes/assistant');
+const mcp = require('./routes/mcp');
+const { forgetBehaviour } = require('./services/behaviourService');
 
 const app = express();
+// One proxy in front in production (Render); the OAuth endpoints rate-limit by client IP.
+app.set('trust proxy', 1);
 
 // Connect to MongoDB then seed default data
 const mongoose = require('mongoose');
@@ -91,8 +96,15 @@ app.use(compression());
 app.use(cors({ exposedHeaders: ['X-Price-Snapshot'] }));
 app.use(express.json());
 // Any write by a user drops their memoised reads; `protect` sets req.user before it finishes.
+// The assistant's own requests change no money, so they keep the snapshot.
 app.use((req, res, next) => {
-  if (req.method !== 'GET') res.on('finish', () => { if (req.user) bookCache.invalidate(req.user._id); });
+  if (req.method !== 'GET' && !req.originalUrl.startsWith('/api/assistant')) {
+    res.on('finish', () => {
+      if (!req.user) return;
+      bookCache.invalidate(req.user._id);
+      forgetBehaviour(req.user._id);
+    });
+  }
   next();
 });
 // Stamp every reply with the user's price snapshot, so the client can drop copies from an older one.
@@ -106,6 +118,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// The Apex connector: OAuth endpoints at the root and the MCP server at /mcp.
+mcp.mountMcp(app);
+
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/accounts', accountRoutes);
@@ -118,6 +133,8 @@ app.use('/api/market', marketRoutes);
 app.use('/api/markets', marketsRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/import', importRoutes);
+app.use('/api/assistant', assistantRoutes);
+app.use('/api/mcp', mcp.router);
 
 // Health check
 app.get('/api/health', (req, res) => {

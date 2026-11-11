@@ -7,69 +7,19 @@ const { nowMs, toDateStr, todayMs, midnight } = require('../utils/helpers');
 const { isPurityAsset } = require('../utils/assetPricing');
 const { fxSymbol, normalizeCurrency } = require('../utils/currency');
 const {
-  fetchChart, closesByDay, lastOnOrBefore, fetchMetalPricePerGram, fetchFxRate, searchYahoo,
+  fetchChart, closesByDay, lastOnOrBefore, fetchMetalPricePerGram, fetchFxRate,
   fetchHistoricPrices, fetchDailyCloses, quoteCurrency, withRecentSessions,
 } = require('../services/marketDataService');
 const mfService = require('../services/mfService');
-const sectorService = require('../services/sectorService');
+const { searchInstruments } = require('../services/marketSearchService');
 
-
-/**
- * How well a result answers the query. Yahoo hits and AMFI funds are ranked TOGETHER
- * by this, rather than one list always sitting above the other: "quant small" was
- * surfacing a US "TIAA-CREF Quant Small-Cap" above the Indian quant Small Cap Fund
- * purely because the query happened not to contain the word "fund".
- */
-function relevanceTo(query) {
-  const qLower  = query.trim().toLowerCase();
-  const qTokens = qLower.split(/[^a-z0-9]+/).filter(t => t.length > 1);
-
-  return (r) => {
-    if (!qTokens.length) return 0;
-    const symbol = (r.symbol || '').toLowerCase();
-    const name   = `${r.name} ${r.symbol}`.toLowerCase();
-
-    // Someone typing a ticker exactly means THAT instrument. Without this, "AAPL"
-    // ranked a Thai depositary receipt (AAPL19.BK) above Apple, because its name
-    // happens to begin with the query string.
-    if (symbol === qLower) return 10;
-
-    const hits = qTokens.filter(t => name.includes(t)).length;
-    return hits / qTokens.length
-      + (symbol.startsWith(qLower) ? 0.3 : 0)
-      + (name.startsWith(qTokens[0]) ? 0.15 : 0);
-  };
-}
 
 const router = express.Router();
 router.use(protect);
 
 // GET /api/market/search?q=QUERY[&indices=true]
 router.get('/search', asyncHandler(async (req, res) => {
-  const { q = '' } = req.query;
-  if (q.trim().length < 1) return res.json([]);
-  // `?indices=true` — the Markets page, which can show an index (the asset form cannot buy one).
-  const indices = req.query.indices === 'true';
-
-  // The sources are independent — hit them CONCURRENTLY, or the user waits for them
-  // back to back. None is allowed to sink the others: a failing source contributes
-  // nothing rather than failing the whole search. The Nifty 500 match is local and
-  // guarantees the NSE listing of an Indian company Yahoo's ten rows may miss.
-  const [quotes, funds, nse] = await Promise.all([
-    searchYahoo(q, { indices }).catch(() => []),
-    mfService.searchSchemes(q, 8).catch(() => []),
-    sectorService.searchUniverse(q, 8).catch(() => []),
-  ]);
-
-  // One row per symbol — the Nifty 500 row wins, as it carries the company's sector.
-  const seen = new Set(nse.map(r => r.symbol));
-  const score = relevanceTo(q);
-  const merged = [...nse, ...quotes.filter(r => !seen.has(r.symbol)), ...funds]
-    .map((r, i) => ({ r, i, s: score(r) }))
-    .sort((a, b) => (b.s - a.s) || (a.i - b.i))   // stable within equal relevance
-    .map(({ r }) => r);
-
-  res.json(merged);
+  res.json(await searchInstruments(req.query.q || '', { indices: req.query.indices === 'true' }));
 }));
 
 // GET /api/market/price?symbol=AAPL&date=2024-01-15

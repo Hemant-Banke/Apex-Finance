@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import AiConnections from '../components/assistant/AiConnections';
 import SegmentedControl from '../components/ui/SegmentedControl';
 import { subscriptionsAPI, categoriesAPI, accountsAPI } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/utils';
@@ -15,18 +17,22 @@ import EmojiPicker from '../components/forms/EmojiPicker';
 import { FREQUENCIES } from '../lib/recurrence';
 import { useCategoryNames, invalidateCategories } from '../lib/categoryNames';
 import {
-  Repeat, Tags, Pause, Play, Trash2, Pencil, Plus, Infinity as InfinityIcon,
+  Repeat, Tags, Sparkles, Pause, Play, Trash2, Pencil, Plus, Infinity as InfinityIcon,
 } from 'lucide-react';
 
 const TABS = [
   { key: 'subscriptions', label: 'Subscriptions', Icon: Repeat },
   { key: 'categories',    label: 'Categories',    Icon: Tags },
+  { key: 'ai',            label: 'AI',            Icon: Sparkles },
 ];
 
 const freqLabel = (f) => FREQUENCIES.find(x => x.value === f)?.label || f;
 
 export default function Settings() {
-  const [tab, setTab] = useState('subscriptions');
+  // `?tab=` opens a section directly (the assistant links to AI).
+  const [params, setParams] = useSearchParams();
+  const tab = TABS.some(t => t.key === params.get('tab')) ? params.get('tab') : 'subscriptions';
+  const setTab = (key) => setParams(key === 'subscriptions' ? {} : { tab: key }, { replace: true });
 
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
@@ -34,7 +40,7 @@ export default function Settings() {
         <p className="eyebrow" style={{ marginBottom: 12 }}>Settings</p>
         <h1 className="heading-lg">Manage</h1>
         <p className="text-sm mt-2" style={{ color: 'var(--color-text-muted)' }}>
-          Recurring transactions and your custom categories.
+          Recurring transactions, your custom categories, and the AI the assistant runs on.
         </p>
       </div>
 
@@ -44,7 +50,7 @@ export default function Settings() {
           options={TABS.map(({ key, label, Icon }) => ({ key, label, icon: Icon }))} />
       </div>
 
-      {tab === 'subscriptions' ? <SubscriptionsManager /> : <CategoriesManager />}
+      {tab === 'subscriptions' ? <SubscriptionsManager /> : tab === 'categories' ? <CategoriesManager /> : <AiConnections />}
     </div>
   );
 }

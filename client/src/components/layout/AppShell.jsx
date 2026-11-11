@@ -3,7 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Spinner from '../ui/Spinner';
 import { useAuth } from '../../context/AuthContext';
 import {
-  LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw, Flame, Target
+  LayoutDashboard, Wallet, ArrowLeftRight, BarChart3, Landmark, Settings as SettingsIcon, LogOut, RefreshCw, Flame, Target, Sparkles
 } from 'lucide-react';
 import ApexLogo from '../ui/ApexLogo';
 import DitherField from '../ui/DitherField';
@@ -21,6 +21,7 @@ const nav = [
   { to: '/plan', icon: Flame, label: 'Freedom Plan' },
   { to: '/goals', icon: Target, label: 'Goals' },
   { to: '/markets', icon: Landmark, label: 'Markets' },
+  { to: '/assistant', icon: Sparkles, label: 'Assistant' },
   { to: '/settings', icon: SettingsIcon, label: 'Settings' },
 ];
 

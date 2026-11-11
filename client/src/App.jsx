@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 import { PricingProvider } from './context/PricingContext';
@@ -21,8 +21,10 @@ const pages = {
   Stock:         () => import('./pages/Stock'),
   Asset:         () => import('./pages/Asset'),
   Settings:      () => import('./pages/Settings'),
+  Assistant:     () => import('./pages/Assistant'),
 };
 const Login         = lazy(() => import('./pages/Login'));
+const ConnectAuthorize = lazy(() => import('./pages/ConnectAuthorize'));
 const Register      = lazy(() => import('./pages/Register'));
 const Dashboard     = lazy(pages.Dashboard);
 const Accounts      = lazy(pages.Accounts);
@@ -35,6 +37,7 @@ const Goals         = lazy(pages.Goals);
 const Stock         = lazy(pages.Stock);
 const Asset         = lazy(pages.Asset);
 const Settings      = lazy(pages.Settings);
+const Assistant     = lazy(pages.Assistant);
 
 const preloadPages = () => Object.values(pages).forEach(load => load().catch(() => {}));
 if (typeof window !== 'undefined') {
@@ -42,9 +45,22 @@ if (typeof window !== 'undefined') {
   window.addEventListener('load', () => idle(preloadPages), { once: true });
 }
 
+// A consent link opened while signed out resumes after sign-in, wherever login sends the user.
+const RETURN_KEY = 'apex_return_to';
 function ProtectedRoute({ children }) {
   const { user } = useAuth();
-  return user ? children : <Navigate to="/login" />;
+  const { pathname, search } = useLocation();
+  if (!user) {
+    if (pathname.startsWith('/connect/')) { try { sessionStorage.setItem(RETURN_KEY, pathname + search); } catch { /* best effort */ } }
+    return <Navigate to="/login" />;
+  }
+  let back = null;
+  try { back = sessionStorage.getItem(RETURN_KEY); } catch { /* best effort */ }
+  if (back && back !== pathname + search) {
+    try { sessionStorage.removeItem(RETURN_KEY); } catch { /* best effort */ }
+    return <Navigate to={back} replace />;
+  }
+  return children;
 }
 
 function PublicRoute({ children }) {
@@ -67,6 +83,9 @@ function App() {
           <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
           <Route path="/register" element={<PublicRoute><Register /></PublicRoute>} />
 
+          {/* Approving the Apex connector for Claude / ChatGPT — signed in, outside the shell. */}
+          <Route path="/connect/authorize" element={<ProtectedRoute><ConnectAuthorize /></ProtectedRoute>} />
+
           {/* Protected routes share one shell, which stays mounted across pages. */}
           <Route element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
             <Route path="/" element={<Dashboard />} />
@@ -76,6 +95,7 @@ function App() {
             <Route path="/analytics" element={<Analytics />} />
             <Route path="/plan" element={<Plan />} />
             <Route path="/goals" element={<Goals />} />
+            <Route path="/assistant" element={<Assistant />} />
             <Route path="/markets" element={<Markets />} />
             <Route path="/markets/stocks/:symbol" element={<Stock />} />
             <Route path="/markets/world/:symbol" element={<Stock global />} />
