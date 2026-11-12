@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/logo_insp.png" alt="Apex" width="72" />
+  <img src="assets/logo.svg" alt="Apex" width="72" />
 
   <h1>Apex</h1>
   <p><strong>A premium portfolio tracker.</strong><br/>Every transaction tells your financial story.</p>

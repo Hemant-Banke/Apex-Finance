@@ -266,7 +266,8 @@
 
 ### Client config
 - `client/package.json`, `vite.config.js`, `eslint.config.js`, `postcss.config.mjs`, `index.html`, `.env.example` — Build/tooling config.
-- `client/public/favicon.svg`, `icons.svg` — Static icons.
+- `client/public/favicon.svg`, `favicon-32.png`, `apple-touch-icon.png` — The tab icon: the `ApexLogo` mark in accent gold on the app's ink (PNGs for Safari, rendered from the SVG). `icons.svg` — static icons.
+- `assets/logo.svg` — The same mark, gold on transparent, for the README.
 - `client/.claude/agents/*.md` — Claude Code agent definitions.
 - `client/src/main.jsx` — React entry point.
 - `client/src/App.jsx` — Routes and providers. Every page is `lazy()` and preloaded once the browser is idle.
