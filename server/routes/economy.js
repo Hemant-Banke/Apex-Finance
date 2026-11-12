@@ -3,6 +3,7 @@ const { protect } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/asyncHandler');
 const economy = require('../services/economyService');
 const world = require('../services/worldEconomyService');
+const { badRequest, notFound } = require('../utils/httpError');
 
 // India's economy as a whole (the Economy page); read from the MacroPoint cache, never from upstream.
 const router = express.Router();
@@ -22,6 +23,15 @@ router.get('/production', asyncHandler(async (req, res) => res.json(await econom
 
 // @route GET /api/economy/world — IMF and World Bank figures for India's peers, and who adds the world's growth.
 router.get('/world', asyncHandler(async (req, res) => res.json(await world.getWorld())));
+
+// @route GET /api/economy/country/:iso — one country's IMF and World Bank series, against India and the world.
+router.get('/country/:iso', asyncHandler(async (req, res) => {
+  const iso = String(req.params.iso).toUpperCase();
+  if (!/^[A-Z]{3}$/.test(iso)) throw badRequest('Unknown country');
+  const data = await world.getCountry(iso);
+  if (!data) throw notFound('No figures for this country');
+  res.json(data);
+}));
 
 // @route GET /api/economy/markets — each country's stock market in US dollars, US yields and the dollar.
 router.get('/markets', asyncHandler(async (req, res) => res.json(await world.getMarkets())));

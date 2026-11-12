@@ -68,3 +68,26 @@ export function bopFlows(items) {
   const keep = (rows) => rows.filter(r => r.value >= 0.05);
   return { inflows: keep(inflows), outflows: keep(outflows) };
 }
+
+// Country funds as a dollar investor holds them: the overlay catalogue for any country's market chart.
+export const WORLD_BENCHMARKS = [
+  { symbol: 'EEM', label: 'Emerging markets', group: 'Groups' },
+  { symbol: 'ACWI', label: 'World', group: 'Groups' },
+  { symbol: 'INDA', label: 'India', group: 'Countries' },
+  { symbol: 'SPY', label: 'United States', group: 'Countries' },
+  { symbol: 'MCHI', label: 'China', group: 'Countries' },
+  { symbol: 'EWJ', label: 'Japan', group: 'Countries' },
+  { symbol: 'EWG', label: 'Germany', group: 'Countries' },
+  { symbol: 'EWU', label: 'United Kingdom', group: 'Countries' },
+  { symbol: 'EWY', label: 'South Korea', group: 'Countries' },
+  { symbol: 'EWT', label: 'Taiwan', group: 'Countries' },
+  { symbol: 'EIDO', label: 'Indonesia', group: 'Countries' },
+  { symbol: 'VNM', label: 'Vietnam', group: 'Countries' },
+  { symbol: 'EWZ', label: 'Brazil', group: 'Countries' },
+  { symbol: 'EWW', label: 'Mexico', group: 'Countries' },
+];
+
+/** An economy's size from US$ billions: "$4.06T", "$668B". */
+export const usdSize = (bn) => (bn >= 1000 ? `$${(bn / 1000).toFixed(2)}T` : `$${Math.round(bn)}B`);
+
+export const ordinal = (n) => `${n}${['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'}`;

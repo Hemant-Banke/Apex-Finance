@@ -4,6 +4,7 @@ import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import SegmentedControl from '../ui/SegmentedControl';
 import DivergingBar from '../ui/DivergingBar';
+import ShowMore from '../ui/ShowMore';
 import Sparkline from '../ui/Sparkline';
 import { CHART_COLORS, formatPoints, monthLabel, pnlColor } from '../../lib/utils';
 import { assetPath } from '../../lib/markets';
@@ -81,7 +82,7 @@ export default function CapitalRotation({ data, gsec10y }) {
         <span className="col-head" style={{ textAlign: 'center' }}>Against the world</span>
         <span className="col-head" style={{ textAlign: 'right' }}>Gap</span>
       </div>
-      {rows.map(m => {
+      <ShowMore items={rows} initial={14} ends noun="markets" render={(m) => {
         const india = m.iso === 'IND';
         return (
           <div key={m.iso} style={{ display: 'grid', gridTemplateColumns: COLS, gap: 14, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--color-border-subtle)' }}>
@@ -101,9 +102,9 @@ export default function CapitalRotation({ data, gsec10y }) {
             <span className="figure text-xs" style={{ textAlign: 'right', color: 'var(--color-text-secondary)' }}>{m.iso === 'WLD' ? '' : formatPoints(m.gap)}</span>
           </div>
         );
-      })}
+      }} />
       <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 10, lineHeight: 1.5 }}>
-        Price returns of US-listed country funds (INDA for India, SPY for the US, ACWI for the world, EEM for emerging markets) through {data.through}. Prices, not money flows: no free source tracks money moving between countries day by day.
+        Price returns of US-listed country funds (INDA for India, SPY for the US, ACWI for the world, EEM for emerging markets; iShares and Global X funds elsewhere) through {data.through}. Prices, not money flows: no free source tracks money moving between countries day by day.
       </p>
     </Card>
   );

@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { economyAPI, marketAPI } from '../lib/api';
 import { formatPct, pnlColor } from '../lib/utils';
-import { usdBn } from '../lib/economy';
+import { usdBn, ordinal, WORLD_BENCHMARKS } from '../lib/economy';
 import { formatLevel, axisFormatFor, toChartSeries } from '../lib/markets';
 import Spinner from '../components/ui/Spinner';
 import Card from '../components/ui/Card';
@@ -9,6 +10,9 @@ import SectionHeader from '../components/ui/SectionHeader';
 import Masthead, { MastheadFigure } from '../components/ui/Masthead';
 import PriceGrapher from '../components/charts/PriceGrapher';
 import StoryGrid, { StoryLede } from '../components/economy/StoryGrid';
+import WorldMap from '../components/economy/WorldMap';
+import CountryProfile from '../components/economy/CountryProfile';
+import { CountryHeading } from '../components/economy/Flag';
 import WorldStanding from '../components/economy/WorldStanding';
 import PeerCompare from '../components/economy/PeerCompare';
 import Production from '../components/economy/Production';
@@ -33,26 +37,8 @@ const Section = ({ title, sub }) => <SectionHeader title={title} sub={sub} style
 
 const Loading = ({ height = 220 }) => <Card><Spinner height={height} /></Card>;
 
-// Country funds as a dollar investor holds them; the overlay catalogue for India's own fund.
-const WORLD_BENCHMARKS = [
-  { symbol: 'EEM', label: 'Emerging markets', group: 'Groups' },
-  { symbol: 'ACWI', label: 'World', group: 'Groups' },
-  { symbol: 'SPY', label: 'United States', group: 'Countries' },
-  { symbol: 'MCHI', label: 'China', group: 'Countries' },
-  { symbol: 'EWJ', label: 'Japan', group: 'Countries' },
-  { symbol: 'EWG', label: 'Germany', group: 'Countries' },
-  { symbol: 'EWU', label: 'United Kingdom', group: 'Countries' },
-  { symbol: 'EWY', label: 'South Korea', group: 'Countries' },
-  { symbol: 'EWT', label: 'Taiwan', group: 'Countries' },
-  { symbol: 'EIDO', label: 'Indonesia', group: 'Countries' },
-  { symbol: 'VNM', label: 'Vietnam', group: 'Countries' },
-  { symbol: 'EWZ', label: 'Brazil', group: 'Countries' },
-  { symbol: 'EWW', label: 'Mexico', group: 'Countries' },
-];
 const fetchIndia = (days, growth, opts) => marketAPI.ohlc('INDA', days, opts?.pad).then(r => toChartSeries(r.data?.candles, growth));
 const fmtUsd = (v) => formatLevel(v, 'USD');
-
-const ordinal = (n) => `${n}${['th', 'st', 'nd', 'rd'][(n % 100 - 20) % 10] || ['th', 'st', 'nd', 'rd'][n % 100] || 'th'}`;
 
 /** India against the world: what it makes, the capital it draws in and sends out, and what it does with it. */
 export default function Economy() {
@@ -65,6 +51,15 @@ export default function Economy() {
   const [story, setStory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
+  const [params, setParams] = useSearchParams();
+  const selected = (params.get('country') || 'IND').toUpperCase();
+  const [countryData, setCountryData] = useState(null);
+  // The URL carries the chosen country so it survives a reload; India is the default and is left out.
+  const select = useCallback((iso) => setParams(p => {
+    const next = new URLSearchParams(p);
+    if (iso === 'IND') next.delete('country'); else next.set('country', iso);
+    return next;
+  }, { replace: true }), [setParams]);
 
   useEffect(() => {
     Promise.all([
@@ -77,6 +72,22 @@ export default function Economy() {
     economyAPI.domestic().then(r => setDomestic(r.data)).catch(() => setDomestic({}));
     economyAPI.story().then(r => setStory(r.data)).catch(() => setStory({ findings: [] }));
   }, []);
+
+  useEffect(() => {
+    if (selected === 'IND') return;
+    let live = true;
+    economyAPI.country(selected).then(r => live && setCountryData(r.data)).catch(() => live && setCountryData({ iso: selected, failed: true }));
+    return () => { live = false; };
+  }, [selected]);
+  const country = countryData?.iso === selected ? countryData : null;
+
+  // The chosen country's full series laid over the peers', so the comparison cards can draw it.
+  const focusWorld = useMemo(() => {
+    if (!world || !country?.imf) return null;
+    const merge = (base, add) => Object.fromEntries([...new Set([...Object.keys(base || {}), ...Object.keys(add || {})])]
+      .map(m => [m, { ...(base?.[m] || {}), ...(add?.[m] || {}) }]));
+    return { ...world, imf: merge(world.imf, country.imf), wb: merge(world.wb, country.wb) };
+  }, [world, country]);
 
   if (loading) return <Spinner />;
 
@@ -94,14 +105,26 @@ export default function Economy() {
   return (
     <div className="animate-in" style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       <SectionHeader title="Economy"
-        sub="India against the world: what it makes, how fast it grows, the capital it draws in and sends out, and what it does with its own" />
+        sub="The world's economies, where capital is going and how fast each grows; then one economy in full. India by default, or pick any country on the map" />
       <PageBar />
+
+      {world?.map && (
+        <WorldMap map={world.map} markets={markets?.markets} year={world.thisYear} selected={selected} onSelect={select} />
+      )}
+
+      {selected !== 'IND' ? (
+        !country ? <Loading height={300} />
+          : country.failed || !focusWorld ? <Card><p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>No figures for this country yet.</p></Card>
+            : <CountryProfile country={country} world={focusWorld} onBack={() => select('IND')} />
+      ) : (<>
+      <CountryHeading iso="IND" name="India"
+        sub="Followed through its own statistics, release by release: output, spending, the money crossing its border and capital at home" />
 
       {h.gdp && (
         <Masthead
           lead={
             <>
-              <p className="eyebrow" style={{ marginBottom: 12 }}>Real GDP growth</p>
+              <p className="eyebrow" style={{ marginBottom: 12 }}>India · real GDP growth</p>
               <h1 className="display-number" style={{ fontSize: 'clamp(1.6rem, 4vw, 2rem)', color: 'var(--color-text-primary)' }}>
                 {formatPct(h.gdp.real, 1).replace('+', '')}
               </h1>
@@ -193,17 +216,19 @@ export default function Economy() {
         </>
       )}
 
+      </>)}
+
       {failed && (
         <Card><p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>Some economic data could not be loaded. Try again shortly.</p></Card>
       )}
 
-      <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+      {selected === 'IND' && <p className="text-xs" style={{ color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
         World figures from the IMF World Economic Outlook (growth, inflation, current account, size, share of world output; {yr} onward are projections)
         and the World Bank (investment, saving, manufacturing, FDI). GDP, output by industry, spending and saving from MoSPI (2022-23 base);
         the balance of payments, reserves, policy rates, bank credit, liquidity and money supply from the RBI; foreign portfolio flows from NSDL;
         mutual-fund flows from AMFI; India's 10-year yield from the OECD via FRED; markets, US yields, the dollar and the rupee from Yahoo Finance.
         Each figure is as of its own release: GDP and the balance of payments arrive about a quarter late, world figures yearly.
-      </p>
+      </p>}
     </div>
   );
 }

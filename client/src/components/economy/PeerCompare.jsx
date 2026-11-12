@@ -21,21 +21,26 @@ const METRICS = [
   { key: 'ca', src: 'imf', label: 'Current account', fmt: pct, sub: 'Current account, % of GDP. Below zero the economy spends more abroad than it earns and must borrow or attract the difference.' },
   { key: 'inflation', src: 'imf', label: 'Inflation', fmt: pct, sub: 'Consumer price inflation, average for the year.' },
   { key: 'perCapita', src: 'imf', label: 'Income', fmt: usd, sub: 'GDP per person in US dollars: how far an economy still has to grow.' },
+  { key: 'debt', src: 'imf', label: 'Govt debt', fmt: pct, sub: 'General government gross debt, % of GDP: how much room the state has left to borrow.' },
 ];
-const HISTORY = [
-  { iso: 'IND', color: CHART_COLORS[0], width: 2.25 },
-  { iso: 'CHN', color: CHART_COLORS[3] },
-  { iso: 'USA', color: CHART_COLORS[1] },
-  { iso: 'EME', color: CHART_COLORS[2] },
+// The focus country is always the gold line; India keeps a line of its own when it is not the focus.
+const historyFor = (focus) => [
+  { iso: focus, color: CHART_COLORS[0], width: 2.25 },
+  ...(focus !== 'IND' ? [{ iso: 'IND', color: CHART_COLORS[5] }] : []),
+  ...[{ iso: 'CHN', color: CHART_COLORS[3] }, { iso: 'USA', color: CHART_COLORS[1] }, { iso: 'EME', color: CHART_COLORS[2] }].filter(h => h.iso !== focus),
   { iso: 'WLD', color: 'var(--color-text-secondary)' },
 ];
 
-/** India beside the economies global capital chooses between, one measure at a time, now and over time. */
-export default function PeerCompare({ world }) {
+/**
+ * A country (India unless `focus` says otherwise) beside the economies global capital chooses between,
+ * one measure at a time, now and over time. `focusName` names a focus that is not one of the peers.
+ */
+export default function PeerCompare({ world, focus = 'IND', focusName }) {
   const [key, setKey] = useState('growth');
   const m = METRICS.find(x => x.key === key);
   const src = useMemo(() => world[m.src]?.[key] || {}, [world, m, key]);
-  const names = useMemo(() => Object.fromEntries([...world.peers, ...world.groups].map(p => [p.iso, p.name])), [world]);
+  const names = useMemo(() => ({ ...Object.fromEntries([...world.peers, ...world.groups].map(p => [p.iso, p.name])), ...(focusName ? { [focus]: focusName } : {}) }), [world, focus, focusName]);
+  const HISTORY = useMemo(() => historyFor(focus), [focus]);
   const year = world.thisYear;
 
   // IMF figures are this year's (estimate); World Bank figures are each economy's latest year.
@@ -48,34 +53,34 @@ export default function PeerCompare({ world }) {
   const history = useMemo(() => {
     const years = [...new Set(HISTORY.flatMap(h => (src[h.iso] || []).map(p => p.year)))].sort();
     return years.map(y => ({ label: String(y), ...Object.fromEntries(HISTORY.map(h => [h.iso, src[h.iso]?.find(p => p.year === y)?.value ?? null])) }));
-  }, [src]);
+  }, [src, HISTORY]);
 
   const signed = rows.some(r => r.value < 0);
   const max = Math.max(...rows.map(r => Math.abs(r.value)), 1e-9);
   const latestYears = [...new Set(rows.map(r => r.year))].sort();
-  const india = rows.find(r => r.iso === 'IND');
-  const rank = rows.filter(r => !r.group).findIndex(r => r.iso === 'IND') + 1;
+  const focusRow = rows.find(r => r.iso === focus);
+  const rank = rows.filter(r => !r.group).findIndex(r => r.iso === focus) + 1;
   const ranked = rows.filter(r => !r.group).length;
 
   return (
     <Card>
-      <SectionHeader eyebrow="India against its peers" size="sm" style={{ marginBottom: 14 }}
+      <SectionHeader eyebrow={`${names[focus] || focus} against ${focus === 'IND' ? 'its' : 'India and its'} peers`} size="sm" style={{ marginBottom: 14 }}
         sub={`${m.sub} ${m.src === 'imf' ? `IMF, ${year} estimate.` : `World Bank, latest year (${latestYears.length > 1 ? `${latestYears[0]}–${latestYears[latestYears.length - 1]}` : latestYears[0]}).`}`} />
       <SegmentedControl size="sm" ariaLabel="Measure" value={key} onChange={setKey}
         options={METRICS.map(x => ({ key: x.key, label: x.label }))} style={{ marginBottom: 20 }} />
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(280px, 2fr) minmax(0, 3fr)', gap: 32, alignItems: 'start' }}>
         <div>
-          {india && <p className="col-head" style={{ marginBottom: 10 }}>India ranks {rank} of {ranked}</p>}
+          {focusRow && <p className="col-head" style={{ marginBottom: 10 }}>{names[focus]} ranks {rank} of {ranked}</p>}
           {rows.map(r => {
             const w = Math.abs(r.value) / max * (signed ? 50 : 100);
-            const isIndia = r.iso === 'IND';
+            const isFocus = r.iso === focus;
             return (
               <div key={r.iso} className="flex items-center" style={{ gap: 12, padding: '6px 0', borderBottom: '1px solid var(--color-border-subtle)' }}
                 title={`${r.name}: ${m.fmt(r.value)} (${r.year})`}>
                 <span className="text-sm" style={{
                   width: 140, flexShrink: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  color: isIndia ? 'var(--color-text-primary)' : r.group ? 'var(--color-text-muted)' : 'var(--color-text-secondary)',
-                  fontWeight: isIndia ? 500 : 400, fontStyle: r.group ? 'italic' : 'normal',
+                  color: isFocus ? 'var(--color-text-primary)' : r.group ? 'var(--color-text-muted)' : 'var(--color-text-secondary)',
+                  fontWeight: isFocus ? 500 : 400, fontStyle: r.group ? 'italic' : 'normal',
                 }}>{r.name}</span>
                 <div style={{ flex: 1, position: 'relative', height: 6 }}>
                   {signed && <span style={{ position: 'absolute', left: '50%', top: -3, bottom: -3, width: 1, background: 'var(--color-border-hover)' }} />}
@@ -83,11 +88,11 @@ export default function PeerCompare({ world }) {
                     position: 'absolute', top: 0, height: '100%', borderRadius: 3,
                     left: signed ? (r.value >= 0 ? '50%' : `${50 - w}%`) : 0, width: `${Math.max(w, 0.6)}%`,
                     // India solid gold, a group as an outline, every other economy a quiet fill.
-                    background: isIndia ? CHART_COLORS[0] : r.group ? 'transparent' : 'color-mix(in srgb, var(--color-text-muted) 55%, transparent)',
+                    background: isFocus ? CHART_COLORS[0] : r.group ? 'transparent' : 'color-mix(in srgb, var(--color-text-muted) 55%, transparent)',
                     boxShadow: r.group ? 'inset 0 0 0 1px var(--color-text-muted)' : 'none',
                   }} />
                 </div>
-                <span className="figure text-xs" style={{ width: 64, textAlign: 'right', color: isIndia ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>{m.fmt(r.value)}</span>
+                <span className="figure text-xs" style={{ width: 64, textAlign: 'right', color: isFocus ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>{m.fmt(r.value)}</span>
               </div>
             );
           })}

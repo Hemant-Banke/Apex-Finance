@@ -30,15 +30,31 @@ const GROUPS = [
   { iso: 'ADV', name: 'Advanced economies', imf: 'ADVEC', wb: 'HIC' },
 ];
 
+// More country markets a dollar investor can buy, for the map and the rotation table (iShares/Global X country funds).
+const MARKETS = [
+  { iso: 'AUS', etf: 'EWA' }, { iso: 'CAN', etf: 'EWC' }, { iso: 'FRA', etf: 'EWQ' }, { iso: 'ITA', etf: 'EWI' },
+  { iso: 'ESP', etf: 'EWP' }, { iso: 'CHE', etf: 'EWL' }, { iso: 'NLD', etf: 'EWN' }, { iso: 'SWE', etf: 'EWD' },
+  { iso: 'BEL', etf: 'EWK' }, { iso: 'AUT', etf: 'EWO' }, { iso: 'IRL', etf: 'EIRL' }, { iso: 'NOR', etf: 'NORW' },
+  { iso: 'DNK', etf: 'EDEN' }, { iso: 'FIN', etf: 'EFNL' }, { iso: 'POL', etf: 'EPOL' }, { iso: 'GRC', etf: 'GREK' },
+  { iso: 'SGP', etf: 'EWS' }, { iso: 'HKG', etf: 'EWH' }, { iso: 'MYS', etf: 'EWM' }, { iso: 'THA', etf: 'THD' },
+  { iso: 'PHL', etf: 'EPHE' }, { iso: 'NZL', etf: 'ENZL' }, { iso: 'ISR', etf: 'EIS' }, { iso: 'TUR', etf: 'TUR' },
+  { iso: 'SAU', etf: 'KSA' }, { iso: 'ARE', etf: 'UAE' }, { iso: 'QAT', etf: 'QAT' }, { iso: 'KWT', etf: 'KWT' },
+  { iso: 'ZAF', etf: 'EZA' }, { iso: 'CHL', etf: 'ECH' }, { iso: 'PER', etf: 'EPU' }, { iso: 'ARG', etf: 'ARGT' },
+];
+// IMF labels that read badly once the qualifier after the comma is cut.
+const NAME_FIX = {
+  KOR: 'South Korea', HKG: 'Hong Kong', MAC: 'Macao', COD: 'DR Congo', COG: 'Congo', IRN: 'Iran', SYR: 'Syria',
+  LAO: 'Laos', RUS: 'Russia', VEN: 'Venezuela', BHS: 'Bahamas', GMB: 'Gambia', FSM: 'Micronesia', KGZ: 'Kyrgyzstan',
+  SVK: 'Slovakia', TUR: 'Türkiye', YEM: 'Yemen', EGY: 'Egypt', SSD: 'South Sudan',
+};
+
 const IMF_API = (code) => `https://www.imf.org/external/datamapper/api/v1/${code}`;
 const IMF = {
   growth: 'NGDP_RPCH', inflation: 'PCPIPCH', ca: 'BCA_NGDPD', gdpUsd: 'NGDPD', pppShare: 'PPPSH', perCapita: 'NGDPDPC', debt: 'GGXWDG_NGDP',
 };
-// Kept for every country (not just peers): the world's growth is split between all of them.
-const IMF_ALL = new Set(['growth', 'pppShare', 'gdpUsd']);
 const IMF_FROM = 2000;
 
-const WB_API = (codes, ind) => `https://api.worldbank.org/v2/country/${codes}/indicator/${ind}?format=json&date=2005:2030&per_page=2000`;
+const WB_API = (ind) => `https://api.worldbank.org/v2/country/all/indicator/${ind}?format=json&date=2005:2030&per_page=20000`;
 const WB = {
   invest: { id: 'NE.GDI.FTOT.ZS' }, savings: { id: 'NY.GNS.ICTR.ZS' }, manufacturing: { id: 'NV.IND.MANF.ZS' },
   fdiPct: { id: 'BX.KLT.DINV.WD.GD.ZS' }, fdiUsd: { id: 'BX.KLT.DINV.CD.WD', bn: true },
@@ -74,16 +90,19 @@ async function _due(key) {
 const _done = (key, points) => MacroRelease.updateOne({ key }, { $set: { title: key, points } }, { upsert: true });
 
 /** IMF World Economic Outlook: history and projections, per country and group. */
+// Keys carry a version: raising it re-fetches once (v2 widened every measure to every country).
+const IMF_KEY = 'world:imf:v2';
+const WB_KEY = 'world:wb:v2';
+
 async function _refreshImf() {
-  if (!(await _due('world:imf'))) return { skipped: true };
-  const isos = new Set(PEERS.map(p => p.iso));
+  if (!(await _due(IMF_KEY))) return { skipped: true };
   const groupOf = Object.fromEntries(GROUPS.map(g => [g.imf, g.iso]));
   // Regions are three-letter codes too (APQ, EAQ…); only real countries may split the world's growth.
   const list = (await _json(IMF_API('countries'), 60000))?.countries || {};
   const countries = new Set(Object.keys(list));
   if (!countries.size) return { saved: 0 };
   // "China, People's Republic of" → "China".
-  const names = Object.fromEntries(Object.entries(list).map(([iso, c]) => [iso, String(c.label || iso).replace(/,\s.*$/, '')]));
+  const names = Object.fromEntries(Object.entries(list).map(([iso, c]) => [iso, NAME_FIX[iso] || String(c.label || iso).replace(/,\s.*$/, '')]));
   await MacroRelease.updateOne({ key: 'world:names' }, { $set: { title: JSON.stringify(names) } }, { upsert: true });
   let saved = 0;
   for (const [key, code] of Object.entries(IMF)) {
@@ -93,25 +112,24 @@ async function _refreshImf() {
     const points = [];
     for (const [c, years] of Object.entries(byCountry)) {
       const iso = groupOf[c] || c;
-      if (!groupOf[c] && !isos.has(c) && !(IMF_ALL.has(key) && countries.has(c))) continue;
+      if (!groupOf[c] && !countries.has(c)) continue;
       for (const [y, v] of Object.entries(years || {})) {
         if (+y >= IMF_FROM && v != null) points.push({ series: `imf.${key}.${iso}`, date: _yearEnd(y), value: +v });
       }
     }
     saved += await _save(points, 'imf');
   }
-  if (saved) await _done('world:imf', saved);
+  if (saved) await _done(IMF_KEY, saved);
   return { saved };
 }
 
 /** World Bank: how much each economy invests and saves, what it makes, and the foreign money it draws. */
 async function _refreshWorldBank() {
-  if (!(await _due('world:wb'))) return { skipped: true };
+  if (!(await _due(WB_KEY))) return { skipped: true };
   const groupOf = Object.fromEntries(GROUPS.map(g => [g.wb, g.iso]));
-  const codes = [...PEERS.map(p => p.iso).filter(c => c !== 'TWN'), ...GROUPS.map(g => g.wb)].join(';');
   let saved = 0;
   for (const [key, { id, bn }] of Object.entries(WB)) {
-    const body = await _json(WB_API(codes, id), 90000);
+    const body = await _json(WB_API(id), 120000);
     const rows = Array.isArray(body) ? body[1] || [] : [];
     // High income comes back with no ISO3 code, only its own id.
     const isoOf = (r) => r.countryiso3code || { XD: 'HIC', XO: 'LMY', '1W': 'WLD' }[r.country?.id];
@@ -120,7 +138,7 @@ async function _refreshWorldBank() {
     }));
     saved += await _save(points, 'worldbank');
   }
-  if (saved) await _done('world:wb', saved);
+  if (saved) await _done(WB_KEY, saved);
   return { saved };
 }
 
@@ -156,12 +174,45 @@ function _growthContributions(imf, year) {
   const total = rows.reduce((s, r) => s + r.pp, 0);
   if (!total) return null;
   const all = rows.map(r => ({ ...r, share: round(r.pp / total * 100, 1), pp: round(r.pp, 2) })).sort((a, b) => b.pp - a.pp);
-  const top = all.slice(0, 10);
+  const top = all.slice(0, 10).map(r => ({ ...r }));
   const rest = all.slice(10);
   return {
-    year, world: at(growth.WLD) ?? null, countries: all.length, rows: top,
+    year, world: at(growth.WLD) ?? null, countries: all.length, rows: top, all,
     rest: { pp: round(rest.reduce((s, r) => s + r.pp, 0), 2), share: round(rest.reduce((s, r) => s + r.share, 0), 1), count: rest.length },
   };
+}
+
+const ETF_OF = Object.fromEntries([...PEERS, ...MARKETS].map(m => [m.iso, m.etf]));
+const IMF_MAP = ['growth', 'ca', 'inflation', 'perCapita', 'gdpUsd', 'pppShare', 'debt'];
+const WB_MAP = ['fdiPct', 'fdiUsd', 'invest', 'savings', 'exportsUsd', 'remitUsd'];
+
+/**
+ * Every country's latest figures, for the world map: IMF measures for `year` (an estimate), World Bank ones
+ * at each country's latest year, its size rank and its share of the world's growth.
+ */
+function _mapFigures(imf, wb, names, contrib, year) {
+  const out = {};
+  const groupIsos = new Set(GROUPS.map(g => g.iso));
+  for (const iso of Object.keys(names)) {
+    if (groupIsos.has(iso)) continue;
+    const row = { name: names[iso] };
+    for (const m of IMF_MAP) {
+      const v = imf[m]?.[iso]?.find(p => p.year === year)?.value;
+      if (v != null) row[m] = v;
+    }
+    for (const m of WB_MAP) {
+      const arr = wb[m]?.[iso];
+      const last = arr?.[arr.length - 1];
+      if (last) { row[m] = last.value; row[`${m}Year`] = last.year; }
+    }
+    if (ETF_OF[iso]) row.etf = ETF_OF[iso];
+    if (Object.keys(row).length > 1) out[iso] = row;
+  }
+  const bySize = Object.entries(out).filter(([, r]) => r.gdpUsd != null).sort((a, b) => b[1].gdpUsd - a[1].gdpUsd);
+  bySize.forEach(([, r], i) => { r.sizeRank = i + 1; });
+  (contrib?.all || []).forEach((r, i) => { if (out[r.iso]) { out[r.iso].growthShare = r.share; out[r.iso].growthOrder = i + 1; } });
+  for (const r of Object.values(out)) r.sizeOf = bySize.length;
+  return out;
 }
 
 let _cache = { at: 0, data: null };
@@ -189,15 +240,32 @@ async function getWorld() {
     if (i >= 0) sizeRank[y] = { rank: i + 1, ahead: sized.slice(0, i).map(([iso]) => names[iso] || iso), of: sized.length };
   }
   for (const c of Object.values(contributions)) for (const r of c.rows) r.name = names[r.iso] || r.iso;
-  // Only the peers leave; the all-country series exist to split the world's growth and rank its economies.
-  for (const m of Object.keys(imf)) for (const iso of Object.keys(imf[m])) if (!keep.has(iso)) delete imf[m][iso];
+  const map = _mapFigures(imf, wb, names, contributions[thisYear], thisYear);
+  for (const c of Object.values(contributions)) delete c.all;
+  // Only the peers' full series leave; every other country is in `map` (latest figures) and /country/:iso.
+  for (const src of [imf, wb]) for (const m of Object.keys(src)) for (const iso of Object.keys(src[m])) if (!keep.has(iso)) delete src[m][iso];
   const data = {
     peers: PEERS.map(({ iso, name }) => ({ iso, name })),
     groups: GROUPS.map(({ iso, name }) => ({ iso, name })),
-    imf, wb, contributions, sizeRank, thisYear,
+    imf, wb, contributions, sizeRank, thisYear, map,
   };
   _cache = { at: Date.now(), data };
   return data;
+}
+
+/** One country's full IMF and World Bank series, with India and the world groups to measure it against. */
+async function getCountry(iso) {
+  const world = await getWorld();
+  const standing = world.map[iso];
+  if (!standing) return null;
+  const isos = [iso, 'IND', ...GROUPS.map(g => g.iso)].join('|');
+  const rows = await MacroPoint.find({ series: { $regex: `^(imf|wb)\\.\\w+\\.(${isos})$` } }, { series: 1, date: 1, value: 1, _id: 0 }).sort({ date: 1 }).lean();
+  const out = { imf: {}, wb: {} };
+  for (const r of rows) {
+    const [src, metric, c] = r.series.split('.');
+    ((out[src][metric] ||= {})[c] ||= []).push({ year: +r.date.slice(0, 4), value: round(r.value, 2) });
+  }
+  return { iso, name: standing.name, standing, imf: out.imf, wb: out.wb, thisYear: world.thisYear };
 }
 
 // ── Country markets ────────────────────────────────────────────────────────────
@@ -211,7 +279,8 @@ let _marketsCache = { at: 0, data: null };
 async function getMarkets() {
   if (_marketsCache.data && Date.now() - _marketsCache.at < 30 * 60 * 1000) return _marketsCache.data;
   const from = todayMs() - (5 * 365 + 15) * DAY_MS;
-  const items = [...PEERS, ...GROUPS.filter(g => g.etf)];
+  const names = (await getWorld().catch(() => null))?.map || {};
+  const items = [...PEERS, ...MARKETS.map(m => ({ ...m, name: names[m.iso]?.name || m.iso })), ...GROUPS.filter(g => g.etf)];
   const returnsOf = async (symbol) => {
     const closes = await fetchDailyCloses(symbol, from, todayMs()).catch(() => ({}));
     const sorted = toSorted(closes);
@@ -249,4 +318,4 @@ async function getMarkets() {
   return data;
 }
 
-module.exports = { refreshWorld, getWorld, getMarkets, PEERS, GROUPS };
+module.exports = { refreshWorld, getWorld, getCountry, getMarkets, PEERS, GROUPS, MARKETS };
