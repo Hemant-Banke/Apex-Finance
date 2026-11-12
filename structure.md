@@ -82,6 +82,16 @@
 - `markets/SectorMap.jsx` — Nifty 500 sector treemap + ranked table, drillable to stocks.
 - `markets/FlowsPanel.jsx` — FII/DII/MF flows ledger, chart and positioning.
 
+### economy
+- `economy/StoryGrid.jsx` — The "What's happening" findings, one ruled row each: the key figure (`stat`), the headline (its sentence opens under "Why"), then a small labelled trend (`spark`) or signed in/out bars (`bars`), with a link that scrolls to the chart. `StoryLede` is the lede paragraph with its figures lifted out.
+- `economy/BopFlow.jsx` — One quarter's balance of payments as a Sankey (earned and borrowed → India → spent and sent), a quarter picker and a one-line summary.
+- `economy/BopHistory.jsx` — Quarterly BoP bars: current account by part, or capital flows by channel, with the CA / reserves line.
+- `economy/ReservesRupee.jsx` — Weekly forex reserves by holding (stacked) beside USD/INR.
+- `economy/FpiFlows.jsx` — Monthly FPI net flows (equity / debt / other) with calendar-year totals.
+- `economy/FundFlows.jsx` — AMFI monthly net inflows by class (active equity, index & ETFs, hybrid, gold/silver ETFs; debt optional), industry and equity AUM, folios.
+- `economy/BankCredit.jsx` — Bank credit vs deposit growth (fortnightly) and credit growth by sector against a year ago.
+- `economy/LiquidityMoney.jsx` — Daily system liquidity (area, split at zero: teal surplus, amber deficit) with its 30-day average, beside M3 and currency growth.
+
 ### portfolio
 - `portfolio/HoldingsBook.jsx` — The holdings book on Analytics and an account's page: one line per position (size·gain bar, value, return, today), full numbers on click, optional hover Sell.
 - `portfolio/HoldingLink.jsx` — A holding's name linked to its company/asset page (plain text if self-priced); passes router state `from` so the page's back link returns to the origin.
@@ -129,7 +139,7 @@
 - `ui/Switch.jsx` — On/off switch with label and optional sub-line, the whole row the control (white knob when on). Used by the sidebar's Live prices and the goal form's use-existing-money.
 - `ui/AssumptionControls.jsx` — The controls of an assumptions board, shared by the Freedom Plan and the goal plan: `Dial` (slider with its value), `Field` (typed number with unit), `GroupHead` (section title with its figure), `Choice` (radio/check card).
 - `ui/ShowMore.jsx` — Collapses long lists (head or both-ends mode).
-- `ui/Sparkline.jsx` — Tiny SVG trend line.
+- `ui/Sparkline.jsx` — Tiny SVG trend line (`zero` draws the zero line instead of the fill, for series that cross it).
 - `ui/BackLink.jsx` — The one "back" control; `compact` = a 34px chip alone, centred (the top bar).
 - `ui/Spinner.jsx` — The view/panel loader: a disc of gold dots on the dither lattice with a ripple running outward (`Bloom`, also exported). `height`, optional `label`. PriceGrapher uses it while loading.
 - `ui/TopProgressBar.jsx` — Top-of-page bar driven by in-flight API requests.
@@ -149,6 +159,7 @@
 - `Goals.jsx` — Goals (`/goals`, own sidebar entry): loads the spending profile, accounts and portfolio (the plan's inputs), renders `GoalsView`.
 - `Plan.jsx` — the Freedom Plan, FIRE & retirement (`/plan`): `FreedomHero`, assumptions, `Journey`, assumptions, the path, retirement check (surplus/shortfall, SIP to close, money lasts until), runway tiers, sensitivity, levers.
 - `Markets.jsx` — Indian market overview, growth chart, sectors, flows.
+- `Economy.jsx` — India's economy (`/economy`): GDP/rates/rupee/reserves/current-account masthead, BoP flow and history, reserves and rupee, FPI flows, the FII/DII `FlowsPanel` (also on Markets); then money inside the country (fund flows, banks, liquidity and money supply). Opens with "What's happening": the lede paragraph and `StoryGrid`.
 - `Stock.jsx` — One company in full; `/markets/stocks/:nse` and `/markets/world/:yahoo` (`global` prop).
 - `Asset.jsx` — Price page for any non-NSE-equity instrument.
 - `Settings.jsx` — Subscriptions, custom categories, and AI (connections + the connector); `?tab=` opens a section.
@@ -173,11 +184,12 @@
 ## 2. Helpers
 
 ### Client (`client/src/lib/`)
-- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `assistantAPI` (`chat` streams over fetch), `mcpAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s — priced ones 5 min, retired when a newer `X-Price-Snapshot` arrives — and shared while in flight; any write clears the cache).
+- `api.js` — Axios client + `authAPI`, `accountsAPI`, `transactionsAPI`, `dashboardAPI`, `subscriptionsAPI`, `marketAPI`, `marketsAPI`, `economyAPI`, `importAPI`, `categoriesAPI`, `networthAPI`, `assistantAPI` (`chat` streams over fetch), `mcpAPI`, `subscribeLoading`, `clearResponseCache` (GETs are cached 60s — priced ones 5 min, retired when a newer `X-Price-Snapshot` arrives — and shared while in flight; any write clears the cache).
 - `goals.js` — Goals for the UI: `GOAL_TYPES` (icons, default inflation and payout), `ASSET_COLORS`, `monthsUntil`, `goalModel` (one goal's own cost, corpus, mix — no simulation), `oddsTone`, `goalColours`, `GOAL_DEFAULTS`; re-exports `goalMath`.
 - `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
 - `calendar.js` — Calendar performance, pure: `rollUp(days, 'day'|'month'|'year')` (gain summed, return compounded), `metricOf`, `periodStats` (best/worst, up/down, mean/median, sd, streaks), `maxDrawdown`, `cashTotals`, `byWeekday`, `byCalendarMonth`, `scaleCap`, `periodLabel`.
 - `moneyFlow.js` — Money-flow vocabulary, pure: `SOURCES` / `USES` (key, label, fixed hue; cash in muted ink), `flowValues(row)` (net cash/debt split onto their side), `sumRows(rows, div)`, `isActive`, `flowRatios` (savings, invest, lifestyle).
+- `economy.js` — `usdBn` (US$ billions), `FLOW_TONE` (one hue per kind of cross-border money), `bopFlows(items)` (a quarter's BoP as balanced inflows / outflows).
 - `goalPlan.js` — The plan across all goals (pure): `fundingSources` (liquid money per account by class, less the reserve), `buildPlan` (seeded Monte Carlo + greedy marginal allocation, strict priority tiers to target odds, scarcity-priced pools, earmarks, monthly phases, routing to accounts, moves, payouts), `planLevers`, `goalLevers`, `PLAN_DEFAULTS`, `withDefaults`, `PLAN_METHOD` (the fixed constants — scenarios, λ, κ, step size, price cap, seed — so the method modal never states a number the code does not use).
 - `goalPlan.worker.js` — Runs `buildPlan` then the levers off the main thread.
 - `useGoalPlan.js` — `useGoalPlan(input, settings, focusId)` (worker, debounced, stale answers dropped), `goalPlanInput` (slims goals/accounts/portfolio/spending for the worker), `load`/`saveGoalPlanSettings` (localStorage `apex_goal_plan`).
@@ -273,6 +285,8 @@
 - `PriceHistory.js` — Daily closes per Yahoo symbol (native), with covered range and quote currency.
 - `CurrentPrice.js` — The latest live quote per Yahoo symbol (native price, previous session's close, IST day, fetchedAt). A shared cache; closes never go here.
 - `MarketFlow.js` — Daily FII/DII/MF flows + participant OI.
+- `MacroPoint.js` — One observation of an economic series (`series`, period-end `date`, `freq`, `value`, `src`); a shared, accumulating cache.
+- `MacroRelease.js` — Publications already read (RBI press-release ids, with the parser version `v`) and recorded backfills.
 - `AiConnection.js` — A user's AI provider for the assistant: provider, model (+ display name), sealed key and its hint, default.
 - `AssistantConversation.js` — A conversation: visible `messages` and the provider's own `native` transcript (append-only; `minimize: false`).
 - `McpClient.js` — An app registered for the connector (OAuth dynamic client registration).
@@ -290,6 +304,7 @@
 - `networth.js` — Net worth series (`basis=assets` → the asset book alone, Analytics' chart), ensure, rebuild.
 - `market.js` — Asset search, price, OHLC, index series (`INR:<symbol>` = a foreign index converted to ₹ day by day; `RATE:<pct>` = a fixed annual return).
 - `markets.js` — Markets page: overview, sectors, stocks, assets, flows.
+- `economy.js` — `/api/economy`: `headline`, `external`, `domestic`, `story` (reads MacroPoint only).
 - `categories.js` — Category list/create/delete.
 - `import.js` — Statement parse → resolve symbols → categorise.
 
@@ -322,6 +337,7 @@
 - `categoryProfileService.js` — Learn/predict categories from user history.
 - `oauthService.js` — Verify Google/Apple identity tokens.
 - `indiaMarketService.js` — NSE indices, asset classes, breadth, flows; historical index P/E from niftyindices (`resolvePeIndex`, `getIndexPeHistory`).
+- `economyService.js` — The Economy page's series into MacroPoint: RBI press releases via the archive postback (weekly supplement → reserves, bank credit/deposits; quarterly and monthly BoP), RBI home-page policy rates, NSDL monthly FPI (equity/debt/hybrid), MoSPI quarterly GDP, FRED 10Y yield, AMFI monthly fund flows (XLS), RBI sectoral credit growth (release text), and from the weekly supplement M3, currency and daily liquidity. `refreshEconomy` (6-hourly from index.js, backfills once; RBI parsers are versioned so a new field re-reads old releases), `getHeadline`, `getExternal`, `getDomestic`, `getStory` (`{ lede, findings }`: rule-based sentences, each a comparison the data proves); parsers exported.
 - `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights), `peekClassification` (cache-only sector + cap rank; warms in background), `matchUniverseName` (exact normalised name → NSE symbol).
 - `stockService.js` — One company (NSE, or abroad with `global`): price, risk, financials, valuation, holders, peers, SIP/rolling.
 - `screenerService.js` — Screener.in filings, shareholding and annual-report links; falls back to standalone when consolidated is empty or stale; the half-year balance sheet is `interim`, not an annual row.

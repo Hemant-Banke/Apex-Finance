@@ -23,6 +23,7 @@ const dashboardRoutes = require('./routes/dashboard');
 const networthRoutes = require('./routes/networth');
 const marketRoutes = require('./routes/market');
 const marketsRoutes = require('./routes/markets');
+const economyRoutes = require('./routes/economy');
 const categoryRoutes = require('./routes/categories');
 const importRoutes = require('./routes/import');
 const subscriptionRoutes = require('./routes/subscriptions');
@@ -78,6 +79,14 @@ mongoose.connection.once('open', async () => {
   refreshFlows();
   setInterval(refreshFlows, 60 * 60 * 1000).unref();
 
+  // The Economy page's series (RBI, NSDL, MoSPI, FRED). Releases are weekly at most, so every 6h is plenty.
+  const economy = require('./services/economyService');
+  const refreshEconomy = () => economy.refreshEconomy()
+    .then(r => console.log('Economy refreshed', JSON.stringify(r)))
+    .catch(e => console.error('Economy refresh failed:', e.message));
+  refreshEconomy();
+  setInterval(refreshEconomy, 6 * 60 * 60 * 1000).unref();
+
   // Daily closes for every cached Yahoo symbol, topped up to the last settled day so
   // valuation and charts read Mongo, not Yahoo. Every 3h: US closes land after midnight IST.
   const { refreshPriceCache } = require('./services/marketDataService');
@@ -131,6 +140,7 @@ app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/networth', networthRoutes);
 app.use('/api/market', marketRoutes);
 app.use('/api/markets', marketsRoutes);
+app.use('/api/economy', economyRoutes);
 app.use('/api/categories', categoryRoutes);
 app.use('/api/import', importRoutes);
 app.use('/api/assistant', assistantRoutes);

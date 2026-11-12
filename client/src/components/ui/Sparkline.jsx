@@ -24,6 +24,7 @@ export default function Sparkline({
   tone = 'var(--color-accent)',
   title,
   fluid = false,   // stretch to the container's width (no end dot, which would distort)
+  zero = false,    // draw the zero line when the values cross it
 }) {
   const gradientId = useId();
   if (!values || values.length < 2) return null;
@@ -60,7 +61,10 @@ export default function Sparkline({
           <stop offset="100%" stopColor={tone} stopOpacity="0" />
         </linearGradient>
       </defs>
-      <path d={area} fill={`url(#${gradientId})`} />
+      {!zero && <path d={area} fill={`url(#${gradientId})`} />}
+      {zero && min < 0 && max > 0 && (
+        <line x1="0" x2={width} y1={y(0)} y2={y(0)} stroke="var(--color-border-hover)" strokeDasharray="2 3" vectorEffect="non-scaling-stroke" />
+      )}
       <path d={line} fill="none" stroke={tone} strokeWidth="1.5" vectorEffect="non-scaling-stroke"
         strokeLinecap="round" strokeLinejoin="round" opacity="0.85" />
       {/* Where the line has got TO is the figure beside it — the dot ties the two. */}

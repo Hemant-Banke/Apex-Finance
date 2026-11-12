@@ -219,6 +219,14 @@ export const marketsAPI = {
   flows:    (sessions = 60, fresh) => api.get('/markets/flows',  { params: { sessions, ...(fresh ? { fresh: true } : {}) } }),
 };
 
+// India's economy (the Economy page) — served from the server's MacroPoint cache.
+export const economyAPI = {
+  headline: () => api.get('/economy/headline'),
+  external: () => api.get('/economy/external'),
+  domestic: () => api.get('/economy/domestic'),
+  story: () => api.get('/economy/story'),
+};
+
 // Statement import (parse PDF / HTML / image)
 export const importAPI = {
   parse: (formData) => api.post('/import/parse', formData, {

@@ -16,6 +16,7 @@ const pages = {
   Transactions:  () => import('./pages/Transactions'),
   Analytics:     () => import('./pages/Analytics'),
   Markets:       () => import('./pages/Markets'),
+  Economy:       () => import('./pages/Economy'),
   Plan:          () => import('./pages/Plan'),
   Goals:         () => import('./pages/Goals'),
   Stock:         () => import('./pages/Stock'),
@@ -32,6 +33,7 @@ const AccountDetail = lazy(pages.AccountDetail);
 const Transactions  = lazy(pages.Transactions);
 const Analytics     = lazy(pages.Analytics);
 const Markets       = lazy(pages.Markets);
+const Economy       = lazy(pages.Economy);
 const Plan          = lazy(pages.Plan);
 const Goals         = lazy(pages.Goals);
 const Stock         = lazy(pages.Stock);
@@ -97,6 +99,7 @@ function App() {
             <Route path="/goals" element={<Goals />} />
             <Route path="/assistant" element={<Assistant />} />
             <Route path="/markets" element={<Markets />} />
+            <Route path="/economy" element={<Economy />} />
             <Route path="/markets/stocks/:symbol" element={<Stock />} />
             <Route path="/markets/world/:symbol" element={<Stock global />} />
             <Route path="/markets/assets/:symbol" element={<Asset />} />
