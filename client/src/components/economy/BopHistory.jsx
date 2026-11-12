@@ -5,7 +5,7 @@ import SectionHeader from '../ui/SectionHeader';
 import SegmentedControl from '../ui/SegmentedControl';
 import ChartTooltip from '../charts/ChartTooltip';
 import BandCursor from '../charts/BandCursor';
-import { CHART_COLORS } from '../../lib/utils';
+import { CHART_COLORS} from '../../lib/utils';
 import { FLOW_TONE, usdBn } from '../../lib/economy';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
@@ -72,7 +72,7 @@ export default function BopHistory({ quarters }) {
           <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
           {v.bars.map(b => <Bar key={b.key} dataKey={b.key} name={b.name} stackId="s" fill={b.color} maxBarSize={22} isAnimationActive={false} />)}
           <Line dataKey={v.line.key} name={v.line.name} stroke="var(--color-text-primary)" strokeWidth={1.5}
-            dot={{ r: 2.5, strokeWidth: 0, fill: 'var(--color-text-primary)' }} activeDot={{ r: 3.5, strokeWidth: 0 }} isAnimationActive={false} />
+            dot={{ r: 2.5, strokeWidth: 0, fill: 'var(--color-text-primary)' }} activeDot={{ r: 4, strokeWidth: 0 }} /* no ring: it cuts into the bars beneath */ isAnimationActive={false} />
         </ComposedChart>
       </ResponsiveContainer>
     </Card>

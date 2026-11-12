@@ -252,6 +252,9 @@ export function getTransactionName(tx, describe, incoming) {
  * Validated against the card surface (#13171C) for lightness band, chroma floor,
  * colour-blind separation of adjacent pairs, and contrast. Do not edit by eye.
  */
+// THE hover dot for every chart line: the line's colour, ringed in the card's dark surface.
+export const ACTIVE_DOT = { r: 4, strokeWidth: 2, stroke: 'var(--color-bg-card)' };
+
 export const CHART_COLORS = [
   '#B8853A', // gold      — the brand hue, deepened for a data mark
   '#3B82F6', // blue

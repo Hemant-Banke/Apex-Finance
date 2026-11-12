@@ -1,5 +1,5 @@
 import { Area, Bar, BarChart, ComposedChart, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { axisCompact, compactIfLarge } from '../../lib/utils';
+import { axisCompact, compactIfLarge, ACTIVE_DOT } from '../../lib/utils';
 import { ASSETS, ASSET_KEYS, ASSET_COLORS } from '../../lib/goals';
 import { TooltipPanel } from '../charts/ChartTooltip';
 
@@ -54,8 +54,8 @@ export function GoalFanChart({ bands, required, startYear }) {
         <Tooltip content={<FanTip required={required} />} cursor={{ stroke: 'var(--color-border-hover)' }} isAnimationActive={false} />
         <ReferenceLine y={required} stroke="var(--color-text-secondary)" strokeDasharray="4 4" strokeOpacity={0.8}
           label={{ value: 'Needed', position: 'insideTopLeft', fill: '#878D97', fontSize: 10 }} ifOverflow="extendDomain" />
-        <Area dataKey="band" stroke="none" fill="var(--color-accent)" fillOpacity={0.14} isAnimationActive={false} />
-        <Line dataKey="p50" stroke="var(--color-accent)" strokeWidth={2} dot={false} isAnimationActive={false} />
+        <Area dataKey="band" stroke="none" fill="var(--color-accent)" fillOpacity={0.14} isAnimationActive={false} activeDot={false} />
+        <Line dataKey="p50" stroke="var(--color-accent)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={ACTIVE_DOT} />
       </ComposedChart>
     </ResponsiveContainer>
   );

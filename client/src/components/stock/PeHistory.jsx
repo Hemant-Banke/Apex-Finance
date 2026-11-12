@@ -6,7 +6,7 @@ import SegmentedControl from '../ui/SegmentedControl';
 import { MastheadFigure } from '../ui/Masthead';
 import ChartTooltip from '../charts/ChartTooltip';
 import { RangeBar } from './PricePerformance';
-import { monthYearShort } from '../../lib/utils';
+import { monthYearShort, ACTIVE_DOT } from '../../lib/utils';
 
 /**
  * Is the share cheap or dear against its OWN past? Weekly P/E (close ÷ trailing EPS known
@@ -92,7 +92,7 @@ export default function PeHistory({ history, name, sub, note, own }) {
                 valueLabel={hit?.dataKey === 'peLag' && hit.payload.pe == null ? 'P/E · yearly EPS' : 'P/E'} />;
             }} />
           <Line dataKey="pe" name="P/E" type="monotone" stroke="var(--color-accent)" strokeWidth={2} dot={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: 'var(--color-bg-card)' }} connectNulls={false} isAnimationActive={false} />
+            activeDot={ACTIVE_DOT} connectNulls={false} isAnimationActive={false} />
           {anyLag && <Line dataKey="peLag" name="P/E" type="monotone" stroke="var(--color-accent)" strokeOpacity={0.45} strokeWidth={1.5}
             strokeDasharray="4 4" dot={false} activeDot={false} connectNulls={false} isAnimationActive={false} />}
         </LineChart>

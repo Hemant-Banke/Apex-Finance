@@ -7,7 +7,7 @@ import {
 } from 'recharts';
 import { TrendingUp, TrendingDown, Plus, Calendar } from 'lucide-react';
 import { networthAPI, marketAPI } from '../../lib/api';
-import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT as MONTHS, todayStr } from '../../lib/utils';
+import { formatCurrency, compactIfLarge, formatPct, CHART_COLORS, MONTHS_SHORT as MONTHS, todayStr, ACTIVE_DOT } from '../../lib/utils';
 import { indicatorTypeOf, indicatorLabel, computeIndicator, lookbackDays, paddedDays } from '../../lib/indicators';
 import { DateRangePicker } from '../forms/DatePicker';
 import { BENCHMARKS } from '../../lib/constants';
@@ -1057,7 +1057,7 @@ export default function PriceGrapher({
                 // Suppressed while measuring so it never covers the selection box.
                 const v = props?.payload?.value;
                 const color = isFlat ? '#C9A96A' : (v >= openVal ? '#22c55e' : '#ef4444');
-                return <circle cx={props.cx} cy={props.cy} r={3} fill={color} stroke="none" />;
+                return <circle cx={props.cx} cy={props.cy} r={ACTIVE_DOT.r} fill={color} stroke={ACTIVE_DOT.stroke} strokeWidth={ACTIVE_DOT.strokeWidth} />;
               }}
               isAnimationActive={true}
               animationDuration={350}
@@ -1078,8 +1078,7 @@ export default function PriceGrapher({
                 dot={false}
                 connectNulls
                 isAnimationActive={true}
-                animationDuration={350}
-              />
+                animationDuration={350} activeDot={ACTIVE_DOT} />
             ))}
 
             {/* Indicators — thin lines in their own palette slot: averages solid (EMA
@@ -1135,7 +1134,7 @@ export default function PriceGrapher({
                   }} />
                 {paneLines.map(l => (
                   <Line key={l.dataKey} type="monotone" dataKey={l.dataKey} name={l.name} stroke={benchmarkColor(indSlot(l.id))}
-                    strokeWidth={1.25} dot={false} activeDot={{ r: 2.5, strokeWidth: 0 }} connectNulls isAnimationActive={false} />
+                    strokeWidth={1.25} dot={false} activeDot={ACTIVE_DOT} connectNulls isAnimationActive={false} />
                 ))}
               </ComposedChart>
             </ResponsiveContainer>

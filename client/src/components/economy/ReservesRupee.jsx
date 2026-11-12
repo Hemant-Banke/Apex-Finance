@@ -3,7 +3,7 @@ import { AreaChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveCont
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import ChartTooltip from '../charts/ChartTooltip';
-import { CHART_COLORS, monthYearShort, dayLabel } from '../../lib/utils';
+import { CHART_COLORS, monthYearShort, dayLabel, ACTIVE_DOT } from '../../lib/utils';
 import { usdBn } from '../../lib/economy';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
@@ -32,9 +32,9 @@ export default function ReservesRupee({ reserves, rupee }) {
             <YAxis tick={AXIS} axisLine={false} tickLine={false} width={52} tickFormatter={x => `$${x}B`} />
             <Tooltip isAnimationActive={false} cursor={RULE} content={<ChartTooltip formatValue={x => usdBn(x)} />} />
             <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
-            <Area dataKey="fca" name="Foreign currency" stackId="r" stroke={CHART_COLORS[1]} fill={CHART_COLORS[1]} fillOpacity={0.25} isAnimationActive={false} />
-            <Area dataKey="gold" name="Gold" stackId="r" stroke={CHART_COLORS[0]} fill={CHART_COLORS[0]} fillOpacity={0.35} isAnimationActive={false} />
-            <Area dataKey="other" name="SDRs & IMF" stackId="r" stroke="var(--color-text-muted)" fill="var(--color-text-muted)" fillOpacity={0.2} isAnimationActive={false} />
+            <Area dataKey="fca" name="Foreign currency" stackId="r" stroke={CHART_COLORS[1]} fill={CHART_COLORS[1]} fillOpacity={0.25} isAnimationActive={false} activeDot={ACTIVE_DOT} />
+            <Area dataKey="gold" name="Gold" stackId="r" stroke={CHART_COLORS[0]} fill={CHART_COLORS[0]} fillOpacity={0.35} isAnimationActive={false} activeDot={ACTIVE_DOT} />
+            <Area dataKey="other" name="SDRs & IMF" stackId="r" stroke="var(--color-text-muted)" fill="var(--color-text-muted)" fillOpacity={0.2} isAnimationActive={false} activeDot={ACTIVE_DOT} />
           </AreaChart>
         </ResponsiveContainer>
       </Card>
@@ -46,7 +46,7 @@ export default function ReservesRupee({ reserves, rupee }) {
             <XAxis dataKey="date" tick={AXIS} axisLine={false} tickLine={false} dy={8} tickFormatter={monthYearShort} minTickGap={36} />
             <YAxis tick={AXIS} axisLine={false} tickLine={false} width={44} domain={['auto', 'auto']} tickFormatter={x => `₹${x}`} />
             <Tooltip isAnimationActive={false} cursor={RULE} content={<ChartTooltip formatValue={x => `₹${x.toFixed(2)}`} valueLabel="₹ per $" />} />
-            <Line dataKey="value" stroke={CHART_COLORS[2]} strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+            <Line dataKey="value" stroke={CHART_COLORS[2]} strokeWidth={1.75} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </Card>

@@ -2,7 +2,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import ChartTooltip from '../charts/ChartTooltip';
-import { CHART_COLORS, monthYearShort, monthLabel, dayLabel, formatPoints } from '../../lib/utils';
+import { CHART_COLORS, monthYearShort, monthLabel, dayLabel, formatPoints, ACTIVE_DOT } from '../../lib/utils';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 const RULE = { stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' };
@@ -36,8 +36,8 @@ export default function BankCredit({ banks, credit }) {
               <YAxis tick={AXIS} axisLine={false} tickLine={false} width={40} domain={['auto', 'auto']} tickFormatter={v => `${v}%`} />
               <Tooltip isAnimationActive={false} cursor={RULE} content={<ChartTooltip formatValue={v => `${v.toFixed(1)}%`} />} />
               <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
-              <Line dataKey="creditYoY" name="Bank credit" stroke={CHART_COLORS[0]} strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} connectNulls isAnimationActive={false} />
-              <Line dataKey="depositsYoY" name="Deposits" stroke={CHART_COLORS[1]} strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} connectNulls isAnimationActive={false} />
+              <Line dataKey="creditYoY" name="Bank credit" stroke={CHART_COLORS[0]} strokeWidth={1.75} dot={false} activeDot={ACTIVE_DOT} connectNulls isAnimationActive={false} />
+              <Line dataKey="depositsYoY" name="Deposits" stroke={CHART_COLORS[1]} strokeWidth={1.75} dot={false} activeDot={ACTIVE_DOT} connectNulls isAnimationActive={false} />
             </LineChart>
           </ResponsiveContainer>
           <p className="text-xs" style={{ color: 'var(--color-text-muted)', marginTop: 8 }}>

@@ -3,7 +3,7 @@ import { ComposedChart, Area, LineChart, Line, XAxis, YAxis, Tooltip, Responsive
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import ChartTooltip from '../charts/ChartTooltip';
-import { CHART_COLORS, formatCrore, axisCompact, monthYearShort, dayLabel } from '../../lib/utils';
+import { CHART_COLORS, formatCrore, axisCompact, monthYearShort, dayLabel, ACTIVE_DOT } from '../../lib/utils';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 const RULE = { stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' };
@@ -43,8 +43,8 @@ export default function LiquidityMoney({ liquidity, money }) {
             <ReferenceLine y={0} stroke="var(--color-border-hover)" />
             <Tooltip isAnimationActive={false} cursor={RULE} content={<ChartTooltip formatValue={v => formatCrore(v, { signed: true })} />} />
             <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
-            <Area dataKey="surplus" name="Each day" type="linear" stroke={`url(#${gid})`} strokeWidth={1} fill={`url(#${gid})`} fillOpacity={0.22} legendType="none" isAnimationActive={false} />
-            <Line dataKey="avg" name="30-day average" stroke="var(--color-text-primary)" strokeOpacity={0.8} strokeWidth={1.5} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} isAnimationActive={false} />
+            <Area dataKey="surplus" name="Each day" type="linear" stroke={`url(#${gid})`} strokeWidth={1} fill={`url(#${gid})`} fillOpacity={0.22} legendType="none" isAnimationActive={false} activeDot={ACTIVE_DOT} />
+            <Line dataKey="avg" name="30-day average" stroke="var(--color-text-primary)" strokeOpacity={0.8} strokeWidth={1.5} dot={false} activeDot={ACTIVE_DOT} isAnimationActive={false} />
           </ComposedChart>
         </ResponsiveContainer>
       </Card>
@@ -57,8 +57,8 @@ export default function LiquidityMoney({ liquidity, money }) {
             <YAxis tick={AXIS} axisLine={false} tickLine={false} width={40} domain={['auto', 'auto']} tickFormatter={v => `${v}%`} />
             <Tooltip isAnimationActive={false} cursor={RULE} content={<ChartTooltip formatValue={v => `${v.toFixed(1)}%`} />} />
             <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
-            <Line dataKey="m3YoY" name="Broad money (M3)" stroke={CHART_COLORS[1]} strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} connectNulls isAnimationActive={false} />
-            <Line dataKey="currencyYoY" name="Currency with the public" stroke={CHART_COLORS[0]} strokeWidth={1.75} dot={false} activeDot={{ r: 3, strokeWidth: 0 }} connectNulls isAnimationActive={false} />
+            <Line dataKey="m3YoY" name="Broad money (M3)" stroke={CHART_COLORS[1]} strokeWidth={1.75} dot={false} activeDot={ACTIVE_DOT} connectNulls isAnimationActive={false} />
+            <Line dataKey="currencyYoY" name="Currency with the public" stroke={CHART_COLORS[0]} strokeWidth={1.75} dot={false} activeDot={ACTIVE_DOT} connectNulls isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       </Card>

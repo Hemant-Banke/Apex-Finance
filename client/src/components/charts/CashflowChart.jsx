@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import ChartTooltip from './ChartTooltip';
 import BandCursor from './BandCursor';
-import { MONTHS_SHORT, axisCompact, pnlColor, chartBandWidth } from '../../lib/utils';
+import { MONTHS_SHORT, axisCompact, pnlColor, chartBandWidth, ACTIVE_DOT } from '../../lib/utils';
 
 /** "2026-03" → "Mar" (and "Jan 26" at a year's turn, so a 24-month axis stays legible). */
 const monthTick = (key) => {
@@ -70,7 +70,7 @@ export default function CashflowChart({ rows, height = 260, incomeLabel = 'Incom
               two bars rather than a third thing; each dot takes the sign's colour. */}
           <Line dataKey="net" name="Net cashflow" type="monotone" stroke="var(--color-text-primary)"
             strokeWidth={1.5} strokeOpacity={0.75} isAnimationActive={false}
-            dot={<NetDot />} activeDot={{ r: 4, fill: 'var(--color-text-primary)', strokeWidth: 0 }} />
+            dot={<NetDot />} activeDot={{ ...ACTIVE_DOT, fill: 'var(--color-text-primary)' }} />
         </ComposedChart>
       </ResponsiveContainer>
     </div>

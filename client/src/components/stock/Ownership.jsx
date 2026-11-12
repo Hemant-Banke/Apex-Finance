@@ -2,7 +2,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } f
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import ChartTooltip from '../charts/ChartTooltip';
-import { CHART_COLORS, pnlColor, fiscalQuarter, monthLabel, formatPoints, formatCount, formatPct, dayLabel } from '../../lib/utils';
+import { CHART_COLORS, pnlColor, fiscalQuarter, monthLabel, formatPoints, formatCount, formatPct, dayLabel, ACTIVE_DOT } from '../../lib/utils';
 import ShowMore from '../ui/ShowMore';
 import AllocationBar from '../portfolio/AllocationBar';
 
@@ -62,7 +62,7 @@ export default function Ownership({ ownership, money }) {
             <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 10 }} iconType="circle" iconSize={7} />
             {charted.map(g => (
               <Line key={g.key} dataKey={g.key} name={GROUPS[g.key].label} stroke={GROUPS[g.key].color}
-                strokeWidth={2} dot={{ r: 2.5, strokeWidth: 0, fill: GROUPS[g.key].color }} isAnimationActive={false} connectNulls />
+                strokeWidth={2} dot={{ r: 2.5, strokeWidth: 0, fill: GROUPS[g.key].color }} isAnimationActive={false} connectNulls activeDot={ACTIVE_DOT} />
             ))}
           </LineChart>
         </ResponsiveContainer>

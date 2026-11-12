@@ -39,6 +39,11 @@ function roleOf(d, isDebt) {
   return { label, inflow, outflow };
 }
 
+// Accounts past the top three fold into one neutral row, so each side still adds up.
+const foldRest = (list, key, name) => list.length > 3
+  ? [{ key, name, value: list.slice(3).reduce((s, x) => s + x.total, 0), color: OTHER_TONE }]
+  : [];
+
 function spreadWord(s) {
   if (s == null) return null;
   return s < 0.2 ? 'Spending steady month to month' : s < 0.45 ? 'Spending varies month to month' : 'Spending swings widely month to month';
@@ -117,6 +122,7 @@ export default function CashflowProfile({ data, balance = 0, isDebt, label }) {
     ...incomeCats.slice(0, 3).map((c, i) => ({ key: `i:${c._id}`, name: label(c._id).split(' · ').pop() || (isDebt ? 'Inflows' : 'Income'), value: c.total, color: CHART_COLORS[i] })),
     ...(incomeCats.length > 3 ? [{ key: 'i:rest', name: isDebt ? 'Other inflows' : 'Other income', value: incomeCats.slice(3).reduce((s, c) => s + c.total, 0), color: OTHER_TONE }] : []),
     ...data.sources.slice(0, 3).map((s, i) => ({ key: `s:${s.account}`, name: `From ${s.name}`, value: s.total, color: CHART_COLORS[4 + i] })),
+    ...foldRest(data.sources, 's:rest', 'From other accounts'),
     { key: 'sold', name: 'Investments sold', value: t.divested, color: CHART_COLORS[7] },
   ];
 
@@ -126,6 +132,7 @@ export default function CashflowProfile({ data, balance = 0, isDebt, label }) {
     { key: 'disc',  name: 'Discretionary',  value: data.spend.discretionary, color: CHART_COLORS[3] },
     { key: 'oth',   name: 'Other spending', value: data.spend.other,         color: CHART_COLORS[5] },
     ...data.destinations.slice(0, 3).map((x, i) => ({ key: `d:${x.account}`, name: `To ${x.name}`, value: x.total, color: [CHART_COLORS[0], CHART_COLORS[2], CHART_COLORS[6]][i] })),
+    ...foldRest(data.destinations, 'd:rest', 'To other accounts'),
     { key: 'bought', name: 'Investments bought', value: t.invested, color: CHART_COLORS[7] },
     { key: 'kept', name: isDebt ? 'Paid down' : 'Kept', value: Math.max(0, kept), color: CASH_TONE },
   ];

@@ -1,5 +1,5 @@
 import { Area, AreaChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { axisCompact, compactIfLarge } from '../../lib/utils';
+import { axisCompact, compactIfLarge, ACTIVE_DOT } from '../../lib/utils';
 import { TooltipPanel } from '../charts/ChartTooltip';
 
 function Tip({ active, payload, fireNumber }) {
@@ -44,7 +44,7 @@ export default function ProjectionChart({ points, fireNumber, marks = [], endAge
         {marks.slice(1).map(mk => (
           <ReferenceLine key={mk.label} x={mk.age} stroke={mk.tone} strokeOpacity={0.55} strokeDasharray="3 3" ifOverflow="extendDomain" />
         ))}
-        <Area dataKey="value" type="monotone" stroke="var(--color-accent)" strokeWidth={1.8} fill="url(#planFill)" isAnimationActive={false} />
+        <Area dataKey="value" type="monotone" stroke="var(--color-accent)" strokeWidth={1.8} fill="url(#planFill)" isAnimationActive={false} activeDot={ACTIVE_DOT} />
       </AreaChart>
     </ResponsiveContainer>
   );

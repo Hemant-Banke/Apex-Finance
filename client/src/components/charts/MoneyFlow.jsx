@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { ArrowLeftRight, X } from 'lucide-react';
 import { dashboardAPI } from '../../lib/api';
-import { formatCurrency, compactIfLarge, axisCompact, formatPoints, formatPct, formatSigned, pnlColor, monthLabel, MONTHS_SHORT, CHART_COLORS } from '../../lib/utils';
+import { formatCurrency, compactIfLarge, axisCompact, formatPoints, formatPct, formatSigned, pnlColor, monthLabel, MONTHS_SHORT, CHART_COLORS} from '../../lib/utils';
 import { SOURCES, USES, flowValues, sumRows, isActive, flowRatios } from '../../lib/moneyFlow';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -161,7 +161,8 @@ export default function MoneyFlow() {
             onClick={(e) => e?.activeLabel && setFocus(f => (f === e.activeLabel ? null : e.activeLabel))}>
             <XAxis dataKey="month" tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} dy={8} tickFormatter={monthTick} interval="preserveStartEnd" />
             <YAxis tick={{ fill: '#878D97', fontSize: 11 }} axisLine={false} tickLine={false} tickFormatter={v => axisCompact(v, '₹')} width={50} />
-            <Tooltip cursor={<BandCursor count={chartRows.length} />} content={<FlowTooltip />} isAnimationActive={false} />
+            <Tooltip cursor={<BandCursor count={chartRows.length} />} content={<FlowTooltip />} isAnimationActive={false}
+              offset={28} /* clears the 26px bar instead of sitting on it */ />
             <ReferenceLine y={0} stroke="var(--color-border-hover)" />
             {USES.map((u, i) => (
               <Bar key={u.key} dataKey={u.key} name={u.label} stackId="uses" fill={u.color} maxBarSize={26}
@@ -170,7 +171,7 @@ export default function MoneyFlow() {
             ))}
             {/* Income against the stack: a stack above the line was paid for by cash, sales or borrowing. */}
             <Line dataKey="income" name="Income" type="monotone" stroke={CHART_COLORS[1]} strokeWidth={1.75}
-              dot={{ r: 2.5, fill: CHART_COLORS[1], strokeWidth: 0 }} activeDot={{ r: 4, strokeWidth: 0 }} isAnimationActive={false} />
+              dot={{ r: 2.5, fill: CHART_COLORS[1], strokeWidth: 0 }} activeDot={{ r: 4, strokeWidth: 0 }} /* no ring: it cuts into the bars beneath */ isAnimationActive={false} />
             {focus && <ReferenceLine x={focus} stroke="var(--color-text-secondary)" strokeDasharray="3 3" />}
           </ComposedChart>
         </ResponsiveContainer>
