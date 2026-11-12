@@ -201,6 +201,9 @@ const benchmarkLookups = (list, slots) => ({
   labelOf: (symbol) => list.find(b => b.symbol === symbol)?.label ?? symbol,
 });
 
+// Chips shown on the chart's one row of selected lines before the rest fold into "+N".
+const MAX_CHIPS = 3;
+
 /** The Recharts dataKey a benchmark's rebased series is merged into. */
 const cmpKey = (symbol) => `cmp:${symbol}`;
 
@@ -315,7 +318,8 @@ function useAnimatedValue(target, duration = 380) {
 // ── Drag-selection summary label ───────────────────────────────────────────────
 
 /**
- * Floating summary for a drag-selected range, at the top-centre of the selection.
+ * Floating summary for a drag-selected range, placed OUTSIDE the selected band so both
+ * of its edges stay visible — beyond the anchored edge, away from the one being dragged.
  * Recharts injects `viewBox` (the selected band's pixel box); the box itself is HTML,
  * portalled into the chart's wrapper (`host`) and clamped to its width.
  *
@@ -338,15 +342,20 @@ function SelectionLabel(props) {
   return <SelectionBox {...props} />;
 }
 
-function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, name }) {
+const SEL_GAP = 10;
+
+function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, name, movingRight }) {
   const boxRef = useRef(null);
-  const centre = viewBox.x + viewBox.width / 2;
-  // Centre on the selection, clamped inside the chart — needs the box's own width, so it
-  // is placed after layout.
+  const L = viewBox.x, R = viewBox.x + viewBox.width;
+  // Needs the box's own width, so it is placed after layout. Try beyond the anchored edge,
+  // then beyond the moving one, else the chart corner farthest from the moving edge.
   useLayoutEffect(() => {
     const el = boxRef.current;
     const w = el.offsetWidth, W = host.clientWidth;
-    el.style.transform = `translate3d(${Math.round(Math.max(4, Math.min(centre - w / 2, W - w - 4)))}px, 0, 0)`;
+    const before = L - SEL_GAP - w >= 4 ? L - SEL_GAP - w : null;
+    const after  = R + SEL_GAP + w <= W - 4 ? R + SEL_GAP : null;
+    const x = (movingRight ? before ?? after : after ?? before) ?? (movingRight ? 4 : W - w - 4);
+    el.style.transform = `translate3d(${Math.round(Math.max(4, x))}px, 0, 0)`;
     el.style.visibility = 'visible';
   });
   const color   = pos ? '#22c55e' : '#ef4444';
@@ -366,7 +375,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
         borderRadius: 9, padding: '6px 11px', whiteSpace: 'nowrap',
         boxShadow: 'var(--shadow-popover)',
       }}>
-        <p style={{ ...head, margin: '0 0 3px' }}>{name ? `${name} · period change` : 'Period change'}</p>
+        <p style={{ ...head, margin: '0 0 3px', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>{name ? `${name} · period change` : 'Period change'}</p>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <span style={{ fontSize: 15, fontWeight: 700, color, lineHeight: 1, ...mono }}>
             {sign}{Math.abs(pct).toFixed(2)}%
@@ -390,7 +399,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
               return (
                 <div key={b.key} style={{ display: 'flex', alignItems: 'center', gap: 8, height: SEL_ROW_H }}>
                   <span style={{ width: 6, height: 6, borderRadius: 2, background: b.color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 10.5, color: muted, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  <span title={b.label} style={{ fontSize: 10.5, color: muted, flex: 1, minWidth: 0, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {b.label}
                   </span>
                   <span style={{ fontSize: 10.5, color: muted, width: 58, textAlign: 'right', ...mono }}>
@@ -403,7 +412,7 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
               );
             })}
             {/* The gap is a fact about the main line, so the key says whose it is. */}
-            <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.4)', margin: '5px 0 0' }}>
+            <p style={{ fontSize: 9.5, color: 'rgba(255,255,255,0.4)', margin: '5px 0 0', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis' }}>
               Gap = {name || 'this line'}’s return − each line’s, in points
             </p>
           </div>
@@ -411,6 +420,54 @@ function SelectionBox({ viewBox, pct, abs, pos, benchmarks, formatValue, host, n
       </div>
     </div>,
     host,
+  );
+}
+
+// One row of removable chips for the chart's selected lines; the overflow folds into "+N".
+function ChipRow({ chips, onMore }) {
+  const shown = chips.length > MAX_CHIPS ? chips.slice(0, MAX_CHIPS - 1) : chips;
+  const rest = chips.slice(shown.length);
+  return (
+    <div style={{ display: 'flex', flexWrap: 'nowrap', justifyContent: 'flex-end', gap: 5, maxWidth: 320 }}>
+      {shown.map(c => (
+        <button
+          key={c.key}
+          onClick={c.remove}
+          title={`${c.label} · ${c.title}`}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 5, minWidth: 0,
+            padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
+            border: c.dashed ? '1px dashed var(--color-border-hover)' : '1px solid var(--color-border-subtle)',
+            background: c.dashed ? 'transparent' : 'var(--color-bg-elevated)',
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: c.color, flexShrink: 0 }} />
+          <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 96 }}>
+            {c.label}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
+        </button>
+      ))}
+      {rest.length > 0 && (
+        <button
+          onClick={onMore}
+          title={rest.map(c => c.label).join(', ')}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0,
+            padding: '2px 8px', borderRadius: 999, cursor: 'pointer',
+            border: rest[0].dashed ? '1px dashed var(--color-border-hover)' : '1px solid var(--color-border-subtle)',
+            background: rest[0].dashed ? 'transparent' : 'var(--color-bg-elevated)',
+          }}
+        >
+          <span style={{ display: 'flex', gap: 2 }}>
+            {rest.slice(0, 4).map(c => (
+              <span key={c.key} style={{ width: 5, height: 5, borderRadius: '50%', background: c.color }} />
+            ))}
+          </span>
+          <span className="figure" style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>+{rest.length}</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -825,7 +882,7 @@ export default function PriceGrapher({
 
     return {
       left: Math.min(sel.a.x, sel.b.x), right: Math.max(sel.a.x, sel.b.x),
-      abs, pct, pos: abs >= 0, benchmarks: measured,
+      movingRight: sel.b.x >= sel.a.x, abs, pct, pos: abs >= 0, benchmarks: measured,
     };
   }, [sel, displayData, compareRebased, benchmarkColor, benchmarkLabel]);
 
@@ -971,6 +1028,8 @@ export default function PriceGrapher({
                   />
                 }
                 cursor={{ stroke: 'rgba(255,255,255,0.18)', strokeWidth: 0.75, strokeDasharray: '3 3' }}
+                // With several lines, pin it to the top edge and hold it clear of the cursor so it covers less.
+                {...(comparing || overlays.length ? { position: { y: 0 }, offset: 28 } : {})}
                 isAnimationActive={false}
                 wrapperStyle={{ transition: 'none', outline: 'none' }}
               />
@@ -1159,47 +1218,19 @@ export default function PriceGrapher({
             </div>
           )}
 
-          {/* Selected benchmarks — colour-matched chips, each removable without
-              reopening the picker. */}
-          {((growth && compareSymbols.length > 0) || indicators.length > 0) && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 5, maxWidth: 260 }}>
-              {indicators.map(ind => (
-                <button
-                  key={ind.id}
-                  onClick={() => setIndicators(s => s.filter(x => x.id !== ind.id))}
-                  title="Remove indicator (edit it from +)"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
-                    border: '1px dashed var(--color-border-hover)', background: 'transparent',
-                  }}
-                >
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: benchmarkColor(indSlot(ind.id)), flexShrink: 0 }} />
-                  <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                    {indicatorLabel(ind)}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
-                </button>
-              ))}
-              {growth && compareSymbols.map(sym => (
-                <button
-                  key={sym}
-                  onClick={() => changeCompare(s => s.filter(x => x !== sym))}
-                  title="Remove from comparison"
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    padding: '2px 7px 2px 6px', borderRadius: 999, cursor: 'pointer',
-                    border: '1px solid var(--color-border-subtle)', background: 'var(--color-bg-elevated)',
-                  }}
-                >
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: benchmarkColor(sym), flexShrink: 0 }} />
-                  <span style={{ fontSize: 10.5, color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
-                    {benchmarkLabel(sym)}
-                  </span>
-                  <span style={{ fontSize: 11, color: 'var(--color-text-muted)', lineHeight: 1 }}>×</span>
-                </button>
-              ))}
-            </div>
+          {/* Selected lines — indicators on one row, comparisons on the next, each folding
+              past MAX_CHIPS into a "+N" chip that opens the picker. */}
+          {indicators.length > 0 && (
+            <ChipRow onMore={() => setCompareOpen(true)} chips={indicators.map(ind => ({
+              key: ind.id, dashed: true, color: benchmarkColor(indSlot(ind.id)), label: indicatorLabel(ind),
+              title: 'Remove indicator (edit it from +)', remove: () => setIndicators(s => s.filter(x => x.id !== ind.id)),
+            }))} />
+          )}
+          {growth && compareSymbols.length > 0 && (
+            <ChipRow onMore={() => setCompareOpen(true)} chips={compareSymbols.map(sym => ({
+              key: sym, color: benchmarkColor(sym), label: benchmarkLabel(sym),
+              title: 'Remove from comparison', remove: () => changeCompare(s => s.filter(x => x !== sym)),
+            }))} />
           )}
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1268,6 +1299,7 @@ export default function PriceGrapher({
               pct={selection.pct}
               abs={growth ? null : selection.abs}
               pos={selection.pos}
+              movingRight={selection.movingRight}
               benchmarks={selection.benchmarks}
               formatValue={effFormatValue}
               host={chartAreaRef.current}

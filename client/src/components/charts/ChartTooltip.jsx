@@ -49,16 +49,23 @@ function formatDateLabel(str) {
  *                    the series — and it is the SAME anchor the benchmark overlays are
  *                    rebased to, so every line's percentage is measured from one point.
  */
+// Past this many series the tooltip goes compact: one dense row each, so it stops burying the chart.
+const COMPACT_AT = 4;
+
 export default function ChartTooltip({ active, payload, label, formatValue = formatCurrency, valueLabel, percentBase }) {
   if (!active || !payload?.length) return null;
 
   const dateLabel = formatDateLabel(payload[0]?.payload?.date || label);
+  const compact = payload.length >= COMPACT_AT;
+  const pctOf = (p) => (percentBase && p.value != null) ? (p.value / percentBase - 1) * 100 : null;
+  // Compact rows are ranked by value, so they read top-down in the order the lines sit.
+  const rows = compact ? [...payload].sort((a, b) => (b.value ?? -Infinity) - (a.value ?? -Infinity)) : payload;
 
   return (
-    <TooltipPanel>
+    <TooltipPanel minWidth={compact ? 0 : 170}>
       {dateLabel && (
         <div style={{
-          padding: '6px 12px',
+          padding: compact ? '4px 10px' : '6px 12px',
           background: 'var(--color-bg-elevated)',
           borderBottom: '1px solid var(--color-border-subtle)',
         }}>
@@ -74,14 +81,33 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
           </p>
         </div>
       )}
+      {compact ? (
+        <div style={{ padding: '5px 10px', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {rows.map((p, i) => {
+            const pct = pctOf(p);
+            return (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: p.color || p.fill || 'var(--color-text-primary)' }} />
+                <span style={{ fontSize: 10.5, color: 'var(--color-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 120, flex: 1 }}>
+                  {valueLabel || p.name}
+                </span>
+                {/* The growth index is redundant beside its percentage, so only one figure shows. */}
+                <span style={{
+                  fontSize: 11, fontWeight: 600, fontVariantNumeric: 'tabular-nums', fontFamily: 'var(--font-mono)',
+                  whiteSpace: 'nowrap', marginLeft: 10,
+                  color: pct != null ? pnlColor(pct) : 'var(--color-text-primary)',
+                }}>
+                  {pct != null ? formatPct(pct, 1) : formatValue(p.value)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
       <div style={{ padding: '8px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {payload.map((p, i) => {
-          // A growth reading is a gain or a loss, so the percentage takes the app's
-          // status colours here — unlike the line itself, which stays the series'
-          // own identity colour.
-          const pct = (percentBase && p.value != null)
-            ? (p.value / percentBase - 1) * 100
-            : null;
+        {rows.map((p, i) => {
+          // A growth reading is a gain or a loss, so the percentage takes the status colours.
+          const pct = pctOf(p);
 
           return (
             <div key={i} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
@@ -109,6 +135,7 @@ export default function ChartTooltip({ active, payload, label, formatValue = for
           );
         })}
       </div>
+      )}
     </TooltipPanel>
   );
 }
