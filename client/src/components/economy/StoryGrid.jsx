@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { ArrowDownRight, ChevronDown } from 'lucide-react';
 import Card from '../ui/Card';
 import Sparkline from '../ui/Sparkline';
-import { CHART_COLORS, formatCrore } from '../../lib/utils';
-import { usdBn } from '../../lib/economy';
+import { CHART_COLORS, formatCrore, formatPoints } from '../../lib/utils';
+import { usdBn, signedPct } from '../../lib/economy';
 
 const scrollTo = (id) => document.getElementById(`econ-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -12,10 +12,10 @@ const SPARK_FMT = {
   usd: v => usdBn(v, { signed: true }),
   inr: v => `₹${v.toFixed(2)}`,
 };
-const BAR_FMT = { usd: v => usdBn(v, { signed: true }), cr: v => formatCrore(v, { signed: true }) };
+const BAR_FMT = { usd: v => usdBn(v, { signed: true }), cr: v => formatCrore(v, { signed: true }), pp: v => formatPoints(v, 2), pct: v => signedPct(v) };
 
 // Money amounts, percentages and multiples in the lede; everything else is prose.
-const FIGURE = /([₹$][\d,.]+(?:L Cr| Cr|B)?|\d[\d,.]*(?:%|×))/g;
+const FIGURE = /([+−]?[₹$][\d,.]+(?:L Cr| Cr|B)?|[+−]?\d[\d,.]*(?:%|×))/g;
 
 /** The findings joined into one paragraph, with its figures lifted out of the prose. */
 export function StoryLede({ text }) {

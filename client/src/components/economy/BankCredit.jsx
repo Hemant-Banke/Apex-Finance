@@ -47,7 +47,8 @@ export default function BankCredit({ banks, credit }) {
         {latest && (
           <div>
             <div className="flex items-baseline justify-between" style={{ marginBottom: 10, gap: 12 }}>
-              <p className="col-head">Credit growth by sector · {monthLabel(latest.date)}</p>
+              <p className="col-head">By sector · {monthLabel(latest.date)}</p>
+              {yearAgo && <p className="col-head">vs 1Y ago</p>}
             </div>
             {SECTORS.map(s => {
               const now = latest[s.key];
@@ -58,7 +59,7 @@ export default function BankCredit({ banks, credit }) {
                     <span className="text-sm" style={{ color: s.total ? 'var(--color-text-primary)' : 'var(--color-text-secondary)' }}>{s.label}</span>
                     <span className="figure text-xs" style={{ color: 'var(--color-text-secondary)', whiteSpace: 'nowrap' }}>
                       {now != null ? `${now.toFixed(1)}%` : '—'}
-                      {now != null && then != null && <span style={{ color: 'var(--color-text-muted)' }}> · {formatPoints(now - then)} on a year ago</span>}
+                      {now != null && then != null && <span style={{ color: 'var(--color-text-muted)' }}> · {formatPoints(now - then)}</span>}
                     </span>
                   </div>
                   <div style={{ position: 'relative', height: 6, borderRadius: 3, background: 'var(--color-bg-input)' }}

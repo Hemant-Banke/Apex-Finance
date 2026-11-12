@@ -7,13 +7,13 @@ const { DAY_MS, BROWSER_HEADERS } = require('../utils/constants');
 const { toDateStr, todayMs } = require('../utils/helpers');
 const XLSX = require('xlsx');
 const { fetchDailyCloses } = require('./marketDataService');
+const { refreshWorld, getWorld, getMarkets } = require('./worldEconomyService');
 
 const HEADERS = { ...BROWSER_HEADERS, Accept: 'text/html,application/json;q=0.9,*/*;q=0.8' };
 delete HEADERS.Referer;
 
 const RBI_PR = 'https://www.rbi.org.in/Scripts/BS_PressReleaseDisplay.aspx';
 const NSDL_YEARS = 'https://www.fpi.nsdl.co.in/web/Reports/Yearwise.aspx?RptType=6';
-const MOSPI_GDP = 'https://api.mospi.gov.in/api/nas/getNASData?base_year=2022-23&series=Current&frequency=Quarterly&indicator_code=5&format=json';
 const AMFI_MONTHLY = 'https://www.amfiindia.com/research-information/amfi-monthly';
 const FRED_CSV = (id) => `https://fred.stlouisfed.org/graph/fredgraph.csv?id=${id}`;
 
@@ -431,20 +431,74 @@ async function _refreshAmfi() {
 
 // ── MoSPI, FRED ────────────────────────────────────────────────────────────────
 
-/** Quarterly GDP (₹ crore, 2022-23 base), real and nominal, dated at each quarter's end. */
-async function _refreshGdp() {
-  const r = await _get(MOSPI_GDP, { as: 'json' });
-  const points = [];
-  for (const row of r?.body?.data || []) {
-    if (row.frequency !== 'Quarterly' || !/^Q[1-4]$/.test(row.quarter || '')) continue;
-    const fy = parseInt(row.year, 10);
-    const q = +row.quarter[1];
-    const date = q === 4 ? _monthEnd(fy + 1, 2) : _monthEnd(fy, 2 + q * 3);
-    const real = _num(row.constant_price);
-    const nominal = _num(row.current_price);
-    if (real != null) points.push({ series: 'gdp.real', date, freq: 'Q', value: real });
-    if (nominal != null) points.push({ series: 'gdp.nominal', date, freq: 'Q', value: nominal });
+const MOSPI_NAS = (code, page) => `https://api.mospi.gov.in/api/nas/getNASData?base_year=2022-23&series=Current&indicator_code=${code}&format=json&limit=200&page=${page}`;
+const GVA_INDUSTRIES = {
+  'Agriculture, Livestock, Forestry and Fishing': 'agri', 'Mining and Quarrying': 'mining', Manufacturing: 'mfg',
+  'Electricity, Gas, Water Supply & Other Utility Services': 'utilities', Construction: 'construction',
+  'Trade, Hotels, Transport, Communication & Services Related to Broadcasting': 'trade',
+  'Financial, Real Estate & Professional Services': 'finance', 'Public Administration, Defence & Other Services': 'public',
+  'Total Gross Value Added': 'total',
+};
+// GDP by what it is spent on (indicator code → series key).
+const EXPENDITURE = { 10: 'pfce', 11: 'gfce', 9: 'gfcf', 12: 'stocks', 13: 'valuables', 14: 'exports', 15: 'imports' };
+const SAVERS = {
+  'Households Including NPISH': 'households', 'Private Non-Financial Corporations': 'corporates', 'Private Financial Corporations': 'finCorporates',
+  'Public Non-Financial Corporations': 'publicCorps', 'Public Financial Corporations': 'publicFin', 'General Government': 'government', 'Total Gross Saving': 'total',
+};
+
+/** Every row of one MoSPI national-accounts indicator; the API serves at most 200 a page. */
+async function _mospi(code) {
+  const rows = [];
+  for (let page = 1, pages = 1; page <= pages && page <= 20; page++) {
+    const r = await _get(MOSPI_NAS(code, page), { as: 'json', timeoutMs: 30000 });
+    if (!r?.body?.data) break;
+    rows.push(...r.body.data);
+    pages = r.body.meta_data?.totalPages || 1;
   }
+  return rows;
+}
+
+// A fiscal-year quarter ("2025-26", "Q1") dated at its end: Q1 → 30 Jun 2025, Q4 → 31 Mar 2026.
+const _fyQuarterEnd = (year, quarter) => {
+  const fy = parseInt(year, 10);
+  const q = +quarter[1];
+  return q === 4 ? _monthEnd(fy + 1, 2) : _monthEnd(fy, 2 + q * 3);
+};
+
+/**
+ * MoSPI national accounts (2022-23 base, ₹ crore): GDP, output by industry and spending by component each
+ * quarter, real and nominal; gross saving by sector each year.
+ */
+async function _refreshNational() {
+  const points = [];
+  const quarterly = (rows, key, pick = () => true) => {
+    for (const row of rows) {
+      if (row.frequency !== 'Quarterly' || !/^Q[1-4]$/.test(row.quarter || '') || !pick(row)) continue;
+      const k = typeof key === 'function' ? key(row) : key;
+      if (!k) continue;
+      const date = _fyQuarterEnd(row.year, row.quarter);
+      const real = _num(row.constant_price);
+      const nominal = _num(row.current_price);
+      if (real != null) points.push({ series: `${k}.real`, date, freq: 'Q', value: real });
+      if (nominal != null) points.push({ series: `${k}.nominal`, date, freq: 'Q', value: nominal });
+    }
+  };
+  const [gdp, gva, saving, ...spend] = await Promise.all([_mospi(5), _mospi(1), _mospi(20), ...Object.keys(EXPENDITURE).map(_mospi)]);
+  quarterly(gdp, 'gdp');
+  quarterly(gva, r => GVA_INDUSTRIES[r.industry] && `gva.${GVA_INDUSTRIES[r.industry]}`, r => !r.subindustry && !r.institutional_sector);
+  Object.values(EXPENDITURE).forEach((k, i) => quarterly(spend[i], `exp.${k}`, r => !r.institutional_sector));
+  // Annual saving: a later revision of the same year replaces an earlier one.
+  const rank = (rev) => (/final/i.test(rev || '') ? 3 : /revised/i.test(rev || '') ? 2 : 1);
+  const best = new Map();
+  for (const row of saving) {
+    const k = SAVERS[row.institutional_sector];
+    const v = _num(row.current_price);
+    if (row.frequency !== 'Annual' || !k || v == null) continue;
+    const date = _monthEnd(parseInt(row.year, 10) + 1, 2);
+    const id = `${k}|${date}`;
+    if (!best.has(id) || rank(row.revision) >= best.get(id).rank) best.set(id, { rank: rank(row.revision), point: { series: `saving.${k}`, date, freq: 'A', value: v } });
+  }
+  points.push(...[...best.values()].map(b => b.point));
   return { saved: await _save(points, 'mospi') };
 }
 
@@ -476,7 +530,7 @@ let _refreshing = null;
 function refreshEconomy() {
   if (_refreshing) return _refreshing;
   _refreshing = (async () => {
-    const jobs = { rbi: _refreshRbi, rates: _refreshRates, nsdl: _refreshNsdl, amfi: _refreshAmfi, gdp: _refreshGdp, yield: _refreshYield };
+    const jobs = { rbi: _refreshRbi, rates: _refreshRates, nsdl: _refreshNsdl, amfi: _refreshAmfi, national: _refreshNational, yield: _refreshYield, world: refreshWorld };
     const results = await Promise.allSettled(Object.values(jobs).map(f => f()));
     return Object.fromEntries(Object.keys(jobs).map((k, i) =>
       [k, results[i].status === 'fulfilled' ? results[i].value : { error: results[i].reason?.message }]));
@@ -636,6 +690,94 @@ async function getDomestic() {
   return { funds, banks, credit, money, liquidity };
 }
 
+const INDUSTRY_KEYS = ['agri', 'mining', 'mfg', 'utilities', 'construction', 'trade', 'finance', 'public'];
+const SPEND_KEYS = ['pfce', 'gfce', 'gfcf', 'stocks', 'valuables', 'exports', 'imports'];
+const SAVER_KEYS = ['households', 'corporates', 'finCorporates', 'publicCorps', 'publicFin', 'government', 'total'];
+
+/**
+ * What India makes and what it spends it on, quarter by quarter. Growth is on the same quarter a year
+ * earlier; contributions are in percentage points and add up to the total's growth.
+ */
+async function getProduction() {
+  const s = await _series(/^(gdp|gva|exp|saving)\./);
+  const map = (k) => new Map((s[k] || []).map(p => [p.date, p.value]));
+  const yearBefore = (date) => `${+date.slice(0, 4) - 1}${date.slice(4)}`;
+  const gdpR = map('gdp.real'), gdpN = map('gdp.nominal');
+  const gvaR = Object.fromEntries([...INDUSTRY_KEYS, 'total'].map(k => [k, map(`gva.${k}.real`)]));
+  const gvaN = Object.fromEntries([...INDUSTRY_KEYS, 'total'].map(k => [k, map(`gva.${k}.nominal`)]));
+  const expR = Object.fromEntries(SPEND_KEYS.map(k => [k, map(`exp.${k}.real`)]));
+  const expN = Object.fromEntries(SPEND_KEYS.map(k => [k, map(`exp.${k}.nominal`)]));
+  const dates = [...gdpR.keys()].sort();
+
+  // Trailing four quarters of a nominal series, for shares that do not swing with the season.
+  const trailing = (m, date) => {
+    const i = dates.indexOf(date);
+    if (i < 3) return null;
+    const vals = dates.slice(i - 3, i + 1).map(d => m.get(d));
+    return vals.every(v => v != null) ? vals.reduce((a, b) => a + b, 0) : null;
+  };
+
+  const quarters = dates.map(date => {
+    const ya = yearBefore(date);
+    const growth = (m) => (m.get(date) != null && m.get(ya) ? _round((m.get(date) / m.get(ya) - 1) * 100) : null);
+    const gvaTotalYa = gvaR.total.get(ya);
+    const gdpYa = gdpR.get(ya);
+    const industries = Object.fromEntries(INDUSTRY_KEYS.map(k => [k, {
+      yoy: growth(gvaR[k]),
+      contrib: gvaR[k].get(date) != null && gvaR[k].get(ya) != null && gvaTotalYa ? _round((gvaR[k].get(date) - gvaR[k].get(ya)) / gvaTotalYa * 100, 2) : null,
+      share: trailing(gvaN[k], date) && trailing(gvaN.total, date) ? _round(trailing(gvaN[k], date) / trailing(gvaN.total, date) * 100) : null,
+    }]));
+    // Contributions to real GDP growth; "other" is what the components leave unexplained (MoSPI's discrepancies).
+    const delta = (m) => (m.get(date) != null && m.get(ya) != null ? m.get(date) - m.get(ya) : null);
+    const c = (d) => (d != null && gdpYa ? _round(d / gdpYa * 100, 2) : null);
+    const dNet = delta(expR.exports) != null && delta(expR.imports) != null ? delta(expR.exports) - delta(expR.imports) : null;
+    const named = ['pfce', 'gfce', 'gfcf'].map(k => delta(expR[k]));
+    const dGdp = delta(gdpR);
+    const dOther = dGdp != null && named.every(v => v != null) && dNet != null ? dGdp - named.reduce((a, b) => a + b, 0) - dNet : null;
+    const shareOf = (m) => (trailing(m, date) && trailing(gdpN, date) ? _round(trailing(m, date) / trailing(gdpN, date) * 100) : null);
+    const netN = trailing(expN.exports, date) != null && trailing(expN.imports, date) != null && trailing(gdpN, date)
+      ? _round((trailing(expN.exports, date) - trailing(expN.imports, date)) / trailing(gdpN, date) * 100) : null;
+    return {
+      date, ...(_quarterLabel(date)),
+      gdpYoY: growth(gdpR), gdpNominalYoY: growth(gdpN), gvaYoY: growth(gvaR.total),
+      industries,
+      spend: {
+        pfce: { contrib: c(named[0]), share: shareOf(expN.pfce), yoy: growth(expR.pfce) },
+        gfce: { contrib: c(named[1]), share: shareOf(expN.gfce), yoy: growth(expR.gfce) },
+        gfcf: { contrib: c(named[2]), share: shareOf(expN.gfcf), yoy: growth(expR.gfcf) },
+        net: { contrib: c(dNet), share: netN },
+        other: { contrib: c(dOther) },
+      },
+    };
+  });
+
+  // Saving by sector as a share of the fiscal year's GDP; a fiscal year is the four quarters to its March.
+  const fyGdp = (fyEnd) => {
+    const y = +fyEnd.slice(0, 4);
+    const qs = [_monthEnd(y - 1, 5), _monthEnd(y - 1, 8), _monthEnd(y - 1, 11), _monthEnd(y, 2)].map(d => gdpN.get(d));
+    return qs.every(v => v != null) ? qs.reduce((a, b) => a + b, 0) : null;
+  };
+  const savingDates = [...new Set((s['saving.total'] || []).map(p => p.date))].sort();
+  const savMap = Object.fromEntries(SAVER_KEYS.map(k => [k, map(`saving.${k}`)]));
+  const investFy = (fyEnd) => {
+    const y = +fyEnd.slice(0, 4);
+    const qs = [_monthEnd(y - 1, 5), _monthEnd(y - 1, 8), _monthEnd(y - 1, 11), _monthEnd(y, 2)].map(d => expN.gfcf.get(d));
+    return qs.every(v => v != null) ? qs.reduce((a, b) => a + b, 0) : null;
+  };
+  const saving = savingDates.map(date => {
+    const g = fyGdp(date);
+    if (!g) return null;
+    const pct = (v) => (v == null ? null : _round(v / g * 100));
+    return {
+      date, fy: `FY${date.slice(2, 4)}`,
+      ...Object.fromEntries(SAVER_KEYS.map(k => [k, pct(savMap[k].get(date))])),
+      invest: pct(investFy(date)),
+    };
+  }).filter(Boolean);
+
+  return { quarters: quarters.filter(q => q.gdpYoY != null), saving };
+}
+
 // ── The story ──────────────────────────────────────────────────────────────────
 
 const _cr = (v) => {
@@ -643,6 +785,7 @@ const _cr = (v) => {
   return a >= 1e5 ? `₹${(a / 1e5).toFixed(2)}L Cr` : `₹${Math.round(a).toLocaleString('en-IN')} Cr`;
 };
 const _usd = (v) => `$${Math.abs(v).toFixed(1)}B`;
+const _signed = (v, d = 1) => `${v < 0 ? '−' : '+'}${Math.abs(v).toFixed(d)}%`;
 const _pct = (v, d = 1) => `${v.toFixed(d)}%`;
 const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const _monthName = (date) => MONTH_NAMES[+date.slice(5, 7) - 1];
@@ -655,9 +798,77 @@ const _yearBefore = (date) => toDateStr(Date.parse(date) - 365 * DAY_MS);
  * Every finding is optional and drops out when its data is missing.
  */
 async function getStory() {
-  const [h, x, d] = await Promise.all([getHeadline(), getExternal(), getDomestic()]);
+  const [h, x, d, prod, world, mk] = await Promise.all([getHeadline(), getExternal(), getDomestic(), getProduction(),
+    getWorld().catch(() => null), getMarkets().catch(() => null)]);
   const out = [];
   const facts = {};
+
+  // India against the world: its pace beside the peers, and its share of the world's growth this year.
+  const yr = world?.thisYear;
+  const imfAt = (m, iso, y = yr) => world?.imf[m]?.[iso]?.find(p => p.year === y)?.value ?? null;
+  const contrib = world?.contributions?.[yr];
+  if (imfAt('growth', 'IND') != null && contrib?.rows.some(r => r.iso === 'IND')) {
+    const big = world.peers.filter(p => (imfAt('gdpUsd', p.iso) ?? 0) >= 1000 && imfAt('growth', p.iso) != null)
+      .sort((a, b) => imfAt('growth', b.iso) - imfAt('growth', a.iso));
+    const rank = big.findIndex(p => p.iso === 'IND') + 1;
+    const ind = contrib.rows.find(r => r.iso === 'IND');
+    const order = contrib.rows.findIndex(r => r.iso === 'IND') + 1;
+    const g = imfAt('growth', 'IND');
+    const w = imfAt('growth', 'WLD');
+    facts.world = { g, w, share: ind?.share, order, rank, yr };
+    const ahead = big[0]?.iso !== 'IND' ? big[0] : null;
+    out.push({ key: 'world', theme: 'The world', anchor: 'world',
+      title: rank === 1 ? 'The fastest-growing large economy' : `Among the fastest large economies, behind ${ahead.name}`,
+      detail: `The IMF expects India to grow ${_pct(g)} in ${yr}, against ${_pct(w)} for the world${imfAt('growth', 'CHN') != null ? `, ${_pct(imfAt('growth', 'CHN'))} for China` : ''} and ${_pct(imfAt('growth', 'USA'))} for the United States. With ${_pct(imfAt('pppShare', 'IND'))} of world output (at purchasing power), that makes India ${order === 1 ? 'the largest' : order === 2 ? 'the second-largest' : `the number ${order}`} source of the world's growth${order > 1 ? `, after ${contrib.rows.slice(0, order - 1).map(r => r.name).join(' and ')}` : ''}.`,
+      stat: { value: `${Math.round(ind?.share ?? 0)}%`, label: `of the world's growth in ${yr}` },
+      bars: { fmt: 'pp', rows: contrib.rows.slice(0, 5).map(r => ({ label: r.name, v: r.pp })) } });
+  }
+
+  // Where global investors put their dollars: India's market against emerging markets and the world, over a year.
+  const mOf = (iso) => mk?.markets.find(m => m.iso === iso);
+  if (mOf('IND')?.returns['1y'] != null && mOf('EME')?.returns['1y'] != null) {
+    const r = (iso) => mOf(iso).returns['1y'];
+    const gap = r('IND') - r('EME');
+    const ranked = mk.markets.filter(m => !m.group && m.returns['1y'] != null).sort((a, b) => b.returns['1y'] - a.returns['1y']);
+    const best = ranked[0];
+    const pos = ranked.findIndex(m => m.iso === 'IND') + 1;
+    facts.rotation = { gap, ind: r('IND'), eme: r('EME'), best, pos, n: ranked.length };
+    out.push({ key: 'rotation', theme: 'Global capital', anchor: 'rotation',
+      title: gap <= -5 ? 'Global money has rotated away from India' : gap >= 5 ? 'Global money is favouring India' : 'India is keeping pace with other emerging markets',
+      detail: `In dollars, Indian shares returned ${_signed(r('IND'))} over the past year, against ${_signed(r('EME'))} for emerging markets and ${_signed(r('WLD'))} for the world. India ranks ${pos} of ${ranked.length} markets here; ${best.name} led at ${_signed(best.returns['1y'])}.${mk.pull?.us10y ? ` The US 10-year yield is ${mk.pull.us10y.value.toFixed(2)}%${mk.pull.us10y.yearAgo != null ? `, against ${mk.pull.us10y.yearAgo.toFixed(2)}% a year ago` : ''}.` : ''}`,
+      stat: { value: `${gap >= 0 ? '+' : '−'}${Math.abs(gap).toFixed(1)} pp`, label: 'India against emerging markets, 1 year in dollars' },
+      bars: { fmt: 'pct', rows: ['IND', 'EME', 'WLD', 'USA', 'CHN'].filter(mOf).map(iso => ({ label: mOf(iso).name, v: mOf(iso).returns['1y'] })) } });
+  }
+
+  // What India makes: which industries carried the latest quarter's growth.
+  const pq = prod.quarters[prod.quarters.length - 1];
+  if (pq?.industries) {
+    const names = { agri: 'agriculture', mining: 'mining', mfg: 'manufacturing', utilities: 'utilities', construction: 'construction', trade: 'trade, transport & communication', finance: 'finance, real estate & professional services', public: 'public administration & other services' };
+    const rows = Object.entries(pq.industries).filter(([, v]) => v.contrib != null).sort((a, b) => b[1].contrib - a[1].contrib);
+    const [topK, top] = rows[0];
+    const services = ['trade', 'finance', 'public'].reduce((s, k) => s + (pq.industries[k]?.contrib ?? 0), 0);
+    const mfg = pq.industries.mfg;
+    facts.production = { top: names[topK], servicesShare: pq.gvaYoY ? services / pq.gvaYoY * 100 : null, mfg: mfg?.yoy };
+    out.push({ key: 'production', theme: 'Output', anchor: 'production',
+      title: services / pq.gvaYoY >= 0.6 ? 'Services are carrying growth' : mfg?.yoy >= pq.gvaYoY ? 'Factories are leading growth' : 'Growth is broad-based',
+      detail: `Output grew ${_pct(pq.gvaYoY)} in ${pq.months}. ${names[topK][0].toUpperCase()}${names[topK].slice(1)} added the most, ${top.contrib.toFixed(1)} points of it; services together added ${services.toFixed(1)}.${mfg?.yoy != null ? ` Manufacturing grew ${_pct(mfg.yoy)} and is ${_pct(mfg.share, 0)} of output.` : ''}`,
+      stat: { value: `${Math.round(services / pq.gvaYoY * 100)}%`, label: `of ${pq.short} output growth from services` },
+      bars: { fmt: 'pp', rows: rows.slice(0, 5).map(([k, v]) => ({ label: names[k][0].toUpperCase() + names[k].slice(1).split(',')[0], v: v.contrib })) } });
+
+    // What it does with the money: the investment rate and how much of growth came from investment.
+    const inv = pq.spend.gfcf;
+    const yaQ = prod.quarters.find(q => q.date === `${+pq.date.slice(0, 4) - 1}${pq.date.slice(4)}`);
+    const wbAt = (m, iso) => world?.wb[m]?.[iso]?.slice(-1)[0] ?? null;
+    const worldInv = wbAt('invest', 'WLD');
+    if (inv?.share != null) {
+      facts.invest = { share: inv.share, world: worldInv?.value };
+      out.push({ key: 'invest', theme: 'Investment', anchor: 'spending',
+        title: inv.yoy > pq.gdpYoY ? 'Investment is outgrowing the economy' : 'Consumption is doing the heavy lifting',
+        detail: `India puts ${_pct(inv.share)} of its output into fixed investment (four quarters to ${pq.months.split(' ')[0].split('–')[1]} ${pq.date.slice(0, 4)})${yaQ?.spend.gfcf.share != null ? `, against ${_pct(yaQ.spend.gfcf.share)} a year earlier` : ''}${worldInv ? `; the world invests ${_pct(worldInv.value)} (${worldInv.year})` : ''}. Investment grew ${_pct(inv.yoy)} and added ${inv.contrib.toFixed(1)} points to growth; household spending added ${pq.spend.pfce.contrib.toFixed(1)}.`,
+        stat: { value: _pct(inv.share), label: 'of GDP invested in fixed capital' },
+        spark: { values: prod.quarters.map(q => q.spend.gfcf.share).filter(v => v != null), label: 'Investment rate, by quarter', fmt: 'pct' } });
+    }
+  }
 
   // Growth: the level, its direction, and what nominal minus real says about prices.
   if (h.gdp?.series?.length) {
@@ -792,13 +1003,28 @@ async function getStory() {
       stat: { value: _cr(surplus), label: 'spare cash banks park with the RBI, a day' },
       spark: { values: d.money.slice(-48).map(r => r.m3YoY ?? 0), label: 'Broad money growth, 2 years', fmt: 'pct' } });
   }
+  const ORDER = ['world', 'growth', 'production', 'invest', 'rotation', 'trade', 'funding', 'rupee', 'shares', 'credit', 'money'];
+  out.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
   return { lede: _lede(facts), findings: out };
 }
 
 /** The findings joined into one paragraph: growth, then the money crossing the border, then the money at home. */
-function _lede({ growth, funding, rupee, shares, credit, money }) {
+function _lede({ growth, world, rotation, production, funding, rupee, shares, credit, money }) {
   const parts = [];
-  if (growth) parts.push(`India grew ${_pct(growth.r)} in ${growth.months}${growth.prev != null ? `, ${Math.abs(growth.r - growth.prev) < 0.3 ? (growth.r === growth.prev ? 'as fast as' : `a touch ${growth.r > growth.prev ? 'faster' : 'slower'} than`) : growth.r > growth.prev ? 'faster than' : 'slower than'} the quarter before` : ''}.`);
+  if (growth) {
+    let g = `India grew ${_pct(growth.r)} in ${growth.months}${growth.prev != null ? `, ${Math.abs(growth.r - growth.prev) < 0.3 ? (growth.r === growth.prev ? 'as fast as' : `a touch ${growth.r > growth.prev ? 'faster' : 'slower'} than`) : growth.r > growth.prev ? 'faster than' : 'slower than'} the quarter before` : ''}`;
+    if (production?.servicesShare != null) g += `, ${production.servicesShare >= 60 ? 'most of it from services' : 'from factories and services alike'}`;
+    if (world?.w > 0 && world.g > world.w) {
+      const x = world.g / world.w;
+      g += `. The IMF expects ${_pct(world.g)} for ${world.yr}, ${x >= 2 ? `${Math.floor(x * 10) / 10}× the world's pace` : `ahead of the world's ${_pct(world.w)}`}${world.share != null ? `, so India will supply about ${Math.round(world.share)}% of the world's growth` : ''}`;
+    }
+    parts.push(`${g}.`);
+  }
+  if (rotation && Math.abs(rotation.gap) >= 5) {
+    parts.push(rotation.gap < 0
+      ? `Yet global investors have looked elsewhere: in dollars, Indian shares returned ${_signed(rotation.ind)} in a year against ${_signed(rotation.eme)} for emerging markets.`
+      : `Global investors have noticed: in dollars, Indian shares returned ${_signed(rotation.ind)} in a year against ${_signed(rotation.eme)} for emerging markets.`);
+  }
 
   if (funding || shares) {
     const selling = (shares && shares.f < 0) || (funding && funding.fpi < 0);
@@ -821,4 +1047,4 @@ function _lede({ growth, funding, rupee, shares, credit, money }) {
   return parts.join(' ');
 }
 
-module.exports = { refreshEconomy, getHeadline, getExternal, getDomestic, getStory, parseSectoralCredit, parseAmfiMonth, parseWss, parseBopQuarter, parseBopMonth, parseNsdlYear };
+module.exports = { refreshEconomy, getHeadline, getExternal, getDomestic, getProduction, getStory, parseSectoralCredit, parseAmfiMonth, parseWss, parseBopQuarter, parseBopMonth, parseNsdlYear };

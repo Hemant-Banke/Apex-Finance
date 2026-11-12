@@ -73,8 +73,12 @@ const SYMBOL_EMOJI = {
   'UNLISTED-BOND': '📜', 'OTHER-ASSET': '💠',
 };
 
-// logo.dev serves another company's logo for these (Sky Gold gets Amazon's, even by its own domain), so they draw the type glyph.
-const WRONG_LOGOS = new Set(['SKYGOLD.NS', 'SKYGOLD.BO']);
+// logo.dev serves another company's logo for these, so they draw the type glyph. Re-check before adding.
+const WRONG_LOGOS = new Set([]);
+
+// logo.dev returns a blank white image for some tickers at small sizes (TCS.NS at 60–68px),
+// so every request is at least this size; one URL per symbol also shares the browser cache.
+const MIN_LOGO_PX = 128;
 
 // Equity-like assets resolve on logo.dev's /ticker endpoint; crypto has its own
 // /crypto endpoint. Everything else (bonds, commodities, physical & unlisted
@@ -110,7 +114,7 @@ export default function AssetIcon({ symbol, type = 'other', size = 34, nudge = t
   // to a new symbol re-attempts its logo without a stale "broken" state.
   const [failedSym, setFailedSym] = useState(null);
   const tint = TYPE_TINT[type] || TYPE_TINT.other;
-  const src  = logoSrc(symbol, type, Math.round(size * 2));
+  const src  = logoSrc(symbol, type, Math.max(MIN_LOGO_PX, Math.round(size * 2)));
 
   const shell = {
     width: size, height: size, flexShrink: 0,

@@ -34,6 +34,18 @@ const VIEWS = {
     ],
     line: { key: 'reserves', name: 'Added to reserves' },
   },
+  gross: {
+    label: 'In and out',
+    sub: 'Foreign investment gross: what arrived (above zero) and what left (below), whether foreigners taking money home or Indians investing abroad. The line is the net. Since FY24.',
+    bars: [
+      { key: 'diIn', name: 'FDI arriving', color: CHART_COLORS[0] },
+      { key: 'piIn', name: 'Portfolio arriving', color: CHART_COLORS[1] },
+      { key: 'diOut', name: 'FDI leaving', color: `color-mix(in srgb, ${CHART_COLORS[0]} 50%, #0B0D10)` },
+      { key: 'piOut', name: 'Portfolio leaving', color: `color-mix(in srgb, ${CHART_COLORS[1]} 50%, #0B0D10)` },
+    ],
+    line: { key: 'invNet', name: 'Net foreign investment' },
+    only: (r) => r.diIn != null,
+  },
 };
 
 /** The balance of payments quarter by quarter: the current account's parts, or the capital that financed it. */
@@ -51,10 +63,14 @@ export default function BopHistory({ quarters }) {
       di: n('di'), pi: n('pi'), nri: n('nri'), ecb: n('ecb'),
       other: Math.round((capital - named) * 10) / 10,
       reserves: n('reserves') == null ? null : -n('reserves'),
+      diIn: q.items.di?.cr ?? null, diOut: q.items.di?.dr != null ? -q.items.di.dr : null,
+      piIn: q.items.pi?.cr ?? null, piOut: q.items.pi?.dr != null ? -q.items.pi.dr : null,
+      invNet: n('di') != null && n('pi') != null ? Math.round((n('di') + n('pi')) * 10) / 10 : null,
     };
   }), [quarters]);
+  const shown = v.only ? rows.filter(v.only) : rows;
 
-  if (!rows.length) return null;
+  if (!shown.length) return null;
 
   return (
     <Card>
@@ -63,11 +79,11 @@ export default function BopHistory({ quarters }) {
           options={Object.entries(VIEWS).map(([key, o]) => ({ key, label: o.label }))} />}
         style={{ marginBottom: 18 }} />
       <ResponsiveContainer width="100%" height={280}>
-        <ComposedChart data={rows} stackOffset="sign" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
+        <ComposedChart data={shown} stackOffset="sign" margin={{ top: 4, right: 4, left: 0, bottom: 0 }}>
           <XAxis dataKey="label" tick={AXIS} axisLine={false} tickLine={false} dy={8} minTickGap={18} />
           <YAxis tick={AXIS} axisLine={false} tickLine={false} width={48} tickFormatter={x => usdBn(x, { digits: 0 })} />
           <ReferenceLine y={0} stroke="var(--color-border-hover)" />
-          <Tooltip isAnimationActive={false} cursor={<BandCursor count={rows.length} />}
+          <Tooltip isAnimationActive={false} cursor={<BandCursor count={shown.length} />}
             content={<ChartTooltip formatValue={x => usdBn(x, { signed: true })} />} />
           <Legend wrapperStyle={{ fontSize: 11, color: '#878D97', paddingTop: 12 }} iconType="circle" iconSize={7} />
           {v.bars.map(b => <Bar key={b.key} dataKey={b.key} name={b.name} stackId="s" fill={b.color} maxBarSize={22} isAnimationActive={false} />)}

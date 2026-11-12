@@ -224,6 +224,9 @@ export const economyAPI = {
   headline: () => api.get('/economy/headline'),
   external: () => api.get('/economy/external'),
   domestic: () => api.get('/economy/domestic'),
+  production: () => api.get('/economy/production'),
+  world: () => api.get('/economy/world'),
+  markets: () => api.get('/economy/markets'),
   story: () => api.get('/economy/story'),
 };
 

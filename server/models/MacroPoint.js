@@ -4,7 +4,7 @@ const mongoose = require('mongoose');
 const macroPointSchema = new mongoose.Schema({
   series: { type: String, required: true },
   date: { type: String, required: true },   // "YYYY-MM-DD", the END of the period it covers
-  freq: { type: String, enum: ['D', 'W', 'F', 'M', 'Q'], required: true },
+  freq: { type: String, enum: ['D', 'W', 'F', 'M', 'Q', 'A'], required: true },
   value: { type: Number, required: true },
   src: String,
 }, { timestamps: true });

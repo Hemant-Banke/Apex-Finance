@@ -85,7 +85,14 @@
 ### economy
 - `economy/StoryGrid.jsx` — The "What's happening" findings, one ruled row each: the key figure (`stat`), the headline (its sentence opens under "Why"), then a small labelled trend (`spark`) or signed in/out bars (`bars`), with a link that scrolls to the chart. `StoryLede` is the lede paragraph with its figures lifted out.
 - `economy/BopFlow.jsx` — One quarter's balance of payments as a Sankey (earned and borrowed → India → spent and sent), a quarter picker and a one-line summary.
-- `economy/BopHistory.jsx` — Quarterly BoP bars: current account by part, or capital flows by channel, with the CA / reserves line.
+- `economy/BopHistory.jsx` — Quarterly BoP bars: current account by part, capital flows by channel, or foreign investment gross in/out (FDI and portfolio arriving vs leaving, since FY24), with the CA / reserves / net line.
+- `economy/WorldStanding.jsx` — India's share of world output (PPP) since 2000 against China and the US, IMF projections dashed; and who supplies the world's growth in a year (share × growth, top 10 + the rest).
+- `economy/PeerCompare.jsx` — India against 11 peer economies and the world/emerging/advanced groups, one measure at a time (growth, investment, savings, manufacturing, FDI, current account, inflation, income): a ranked bar list and the measure over time.
+- `economy/Contribution.jsx` — `ContributionChart` (stacked contributions to growth in pp per quarter + the total's growth line; click selects a quarter) and `ContributionTable` (share · growth · contribution as a `DivergingBar`, rows summing to the total).
+- `economy/Production.jsx` — What India makes: GVA by industry as contributions to output growth, a share-of-output bar and the selected quarter's ledger.
+- `economy/Spending.jsx` — What the output is spent on: households, investment, government, net exports, rest — sources of growth, or shares of GDP.
+- `economy/CapitalRotation.jsx` — Country stock markets in US dollars (US-listed country funds) ranked over a window with the gap to the world's market; the pull strip: US 10Y, dollar index, India's yield premium.
+- `economy/SavingInvestment.jsx` — Gross saving by sector against fixed investment, % of GDP by fiscal year, with the spare saving.
 - `economy/ReservesRupee.jsx` — Weekly forex reserves by holding (stacked) beside USD/INR.
 - `economy/FpiFlows.jsx` — Monthly FPI net flows (equity / debt / other) with calendar-year totals.
 - `economy/FundFlows.jsx` — AMFI monthly net inflows by class (active equity, index & ETFs, hybrid, gold/silver ETFs; debt optional), industry and equity AUM, folios.
@@ -159,7 +166,7 @@
 - `Goals.jsx` — Goals (`/goals`, own sidebar entry): loads the spending profile, accounts and portfolio (the plan's inputs), renders `GoalsView`.
 - `Plan.jsx` — the Freedom Plan, FIRE & retirement (`/plan`): `FreedomHero`, assumptions, `Journey`, assumptions, the path, retirement check (surplus/shortfall, SIP to close, money lasts until), runway tiers, sensitivity, levers.
 - `Markets.jsx` — Indian market overview, growth chart, sectors, flows.
-- `Economy.jsx` — India's economy (`/economy`): GDP/rates/rupee/reserves/current-account masthead, BoP flow and history, reserves and rupee, FPI flows, the FII/DII `FlowsPanel` (also on Markets); then money inside the country (fund flows, banks, liquidity and money supply). Opens with "What's happening": the lede paragraph and `StoryGrid`.
+- `Economy.jsx` — India against the world (`/economy`): masthead (growth, size and rank, share of world output and growth, investment rate, current account, rupee), "What's happening" (lede + `StoryGrid`), then India in the world (`WorldStanding`, `PeerCompare`) → what it makes and spends (`Production`, `Spending`) → where global capital goes (`CapitalRotation`, INDA vs the world in `PriceGrapher`, `FpiFlows`) → money crossing the border (`BopFlow`, `BopHistory`, `ReservesRupee`) → capital at home (`SavingInvestment`, `FundFlows`, `BankCredit`, `LiquidityMoney`).
 - `Stock.jsx` — One company in full; `/markets/stocks/:nse` and `/markets/world/:yahoo` (`global` prop).
 - `Asset.jsx` — Price page for any non-NSE-equity instrument.
 - `Settings.jsx` — Subscriptions, custom categories, and AI (connections + the connector); `?tab=` opens a section.
@@ -189,7 +196,7 @@
 - `goalMath.js` — Dependency-free goal maths shared with the plan worker: `PRIORITIES`, `ASSETS`, `STRATEGIES`, `PAYOUT_MIX`, `mixAt` (glide path), `mixReturn`, `monthsBetween`, `withdrawals`, `requiredCorpus`, `addMonths`, `horizonLabel`.
 - `calendar.js` — Calendar performance, pure: `rollUp(days, 'day'|'month'|'year')` (gain summed, return compounded), `metricOf`, `periodStats` (best/worst, up/down, mean/median, sd, streaks), `maxDrawdown`, `cashTotals`, `byWeekday`, `byCalendarMonth`, `scaleCap`, `periodLabel`.
 - `moneyFlow.js` — Money-flow vocabulary, pure: `SOURCES` / `USES` (key, label, fixed hue; cash in muted ink), `flowValues(row)` (net cash/debt split onto their side), `sumRows(rows, div)`, `isActive`, `flowRatios` (savings, invest, lifestyle).
-- `economy.js` — `usdBn` (US$ billions), `FLOW_TONE` (one hue per kind of cross-border money), `bopFlows(items)` (a quarter's BoP as balanced inflows / outflows).
+- `economy.js` — `usdBn` (US$ billions), `signedPct`, `FLOW_TONE` (one hue per kind of cross-border money), `bopFlows(items)` (a quarter's BoP as balanced inflows / outflows).
 - `goalPlan.js` — The plan across all goals (pure): `fundingSources` (liquid money per account by class, less the reserve), `buildPlan` (seeded Monte Carlo + greedy marginal allocation, strict priority tiers to target odds, scarcity-priced pools, earmarks, monthly phases, routing to accounts, moves, payouts), `planLevers`, `goalLevers`, `PLAN_DEFAULTS`, `withDefaults`, `PLAN_METHOD` (the fixed constants — scenarios, λ, κ, step size, price cap, seed — so the method modal never states a number the code does not use).
 - `goalPlan.worker.js` — Runs `buildPlan` then the levers off the main thread.
 - `useGoalPlan.js` — `useGoalPlan(input, settings, focusId)` (worker, debounced, stale answers dropped), `goalPlanInput` (slims goals/accounts/portfolio/spending for the worker), `load`/`saveGoalPlanSettings` (localStorage `apex_goal_plan`).
@@ -304,7 +311,7 @@
 - `networth.js` — Net worth series (`basis=assets` → the asset book alone, Analytics' chart), ensure, rebuild.
 - `market.js` — Asset search, price, OHLC, index series (`INR:<symbol>` = a foreign index converted to ₹ day by day; `RATE:<pct>` = a fixed annual return).
 - `markets.js` — Markets page: overview, sectors, stocks, assets, flows.
-- `economy.js` — `/api/economy`: `headline`, `external`, `domestic`, `story` (reads MacroPoint only).
+- `economy.js` — `/api/economy`: `headline`, `external`, `domestic`, `production`, `world`, `markets`, `story` (MacroPoint only, except markets and the rupee from the price cache).
 - `categories.js` — Category list/create/delete.
 - `import.js` — Statement parse → resolve symbols → categorise.
 
@@ -337,7 +344,8 @@
 - `categoryProfileService.js` — Learn/predict categories from user history.
 - `oauthService.js` — Verify Google/Apple identity tokens.
 - `indiaMarketService.js` — NSE indices, asset classes, breadth, flows; historical index P/E from niftyindices (`resolvePeIndex`, `getIndexPeHistory`).
-- `economyService.js` — The Economy page's series into MacroPoint: RBI press releases via the archive postback (weekly supplement → reserves, bank credit/deposits; quarterly and monthly BoP), RBI home-page policy rates, NSDL monthly FPI (equity/debt/hybrid), MoSPI quarterly GDP, FRED 10Y yield, AMFI monthly fund flows (XLS), RBI sectoral credit growth (release text), and from the weekly supplement M3, currency and daily liquidity. `refreshEconomy` (6-hourly from index.js, backfills once; RBI parsers are versioned so a new field re-reads old releases), `getHeadline`, `getExternal`, `getDomestic`, `getStory` (`{ lede, findings }`: rule-based sentences, each a comparison the data proves); parsers exported.
+- `economyService.js` — The Economy page's series into MacroPoint: RBI press releases via the archive postback (weekly supplement → reserves, bank credit/deposits; quarterly and monthly BoP), RBI home-page policy rates, NSDL monthly FPI (equity/debt/hybrid), MoSPI national accounts (GDP, GVA by industry and GDP by expenditure each quarter, real and nominal; gross saving by sector each year — paged, 200 rows a page), FRED 10Y yield, AMFI monthly fund flows (XLS), RBI sectoral credit growth (release text), and from the weekly supplement M3, currency and daily liquidity. `refreshEconomy` (6-hourly from index.js, backfills once; RBI parsers are versioned so a new field re-reads old releases), `getHeadline`, `getExternal`, `getDomestic`, `getProduction` (contributions to growth in pp that sum to the total; shares over four quarters; saving and investment as % of fiscal-year GDP), `getStory` (`{ lede, findings }`: rule-based sentences, each a comparison the data proves); parsers exported.
+- `worldEconomyService.js` — India against the world. IMF DataMapper (growth, inflation, current account, GDP in $, share of world output, income per head, debt; 2000 → projections; growth/share/size for every IMF country so the world's growth can be split and India ranked) and the World Bank (investment, saving, manufacturing, FDI, remittances, exports) into MacroPoint as `freq: 'A'`, refreshed at most every 3 days. `getWorld` (peers, groups, contributions to world growth, size rank), `getMarkets` (country funds' dollar returns over 1M…5Y, US 10Y and dollar index, memo 30 min).
 - `sectorService.js` — Nifty 500 sector map, market caps, peers, index composition (`getComposition`, free-float weights), `peekClassification` (cache-only sector + cap rank; warms in background), `matchUniverseName` (exact normalised name → NSE symbol).
 - `stockService.js` — One company (NSE, or abroad with `global`): price, risk, financials, valuation, holders, peers, SIP/rolling.
 - `screenerService.js` — Screener.in filings, shareholding and annual-report links; falls back to standalone when consolidated is empty or stale; the half-year balance sheet is `interim`, not an annual row.

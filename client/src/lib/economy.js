@@ -7,6 +7,12 @@ export function usdBn(v, { signed = false, digits = 1 } = {}) {
   return `${sign}$${Math.abs(v).toFixed(digits)}B`;
 }
 
+/** A signed percentage with a true minus: "+11.6%", "−5.4%". */
+export function signedPct(v, digits = 1) {
+  if (v == null || isNaN(v)) return '—';
+  return `${v < 0 ? '−' : v > 0 ? '+' : ''}${Math.abs(v).toFixed(digits)}%`;
+}
+
 // One hue per kind of money, the same on both sides of the border (identity, never gain/loss).
 export const FLOW_TONE = {
   trade: CHART_COLORS[1],
