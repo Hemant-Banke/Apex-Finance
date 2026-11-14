@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ComposedChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -7,6 +7,7 @@ import ChartTooltip from '../charts/ChartTooltip';
 import BandCursor from '../charts/BandCursor';
 import { MastheadFigure } from '../ui/Masthead';
 import { CHART_COLORS, formatCrore, axisCompact, monthYearShort, monthLabel } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 const MONTHS_SHOWN = 36;
@@ -24,7 +25,7 @@ const crore = (v) => `${(v / 1e7).toFixed(2)} Cr`;
 
 /** Household money arriving through mutual funds, by asset class (AMFI). Debt is optional: it is mostly corporate treasury cash and swamps the rest. */
 export default function FundFlows({ funds }) {
-  const [view, setView] = useState('long');
+  const [view, setView] = useBackState('econ.funds.view', 'long');
   const rows = useMemo(() => funds.slice(-MONTHS_SHOWN).map(m => ({ ...m, date: m.date.slice(0, 7) })), [funds]);
   const shown = CLASSES.filter(c => view === 'all' || !c.debt);
 

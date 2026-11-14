@@ -12,6 +12,7 @@ import GardenEmpty from '../ui/GardenEmpty';
 import Divider from '../ui/Divider';
 import BandCursor from './BandCursor';
 import { TooltipPanel } from './ChartTooltip';
+import { useBackState } from '../../lib/backState';
 
 const CASH_HOME = { bank: 'bank accounts', brokerage: 'brokerage accounts', retirement: 'retirement accounts', wallet: 'wallets', other: 'other accounts' };
 
@@ -99,9 +100,9 @@ const joinAnd = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join('
 
 /** Where each month's money came from and where it went: the months, one month (or the average) in full, and what it adds up to. */
 export default function MoneyFlow() {
-  const [months, setMonths] = useState(12);
+  const [months, setMonths] = useBackState('moneyflow.months', 12);
   const [data, setData] = useState(null);
-  const [focus, setFocus] = useState(null);   // a month key, or null for the average month
+  const [focus, setFocus] = useBackState('moneyflow.focus', null);   // a month key, or null for the average month
 
   useEffect(() => {
     let live = true;

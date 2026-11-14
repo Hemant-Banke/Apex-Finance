@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { X } from 'lucide-react';
 import { CHART_COLORS, compactIfLarge, formatCurrency } from '../../lib/utils';
 import ShowMore from '../ui/ShowMore';
 import HoldingLink from './HoldingLink';
 import AllocationBar, { OTHER_TONE, CASH_TONE } from './AllocationBar';
 import { STYLES } from '../../lib/portfolioStyle';
+import { useBackState } from '../../lib/backState';
 
 const CLASS_META = [
   ['equity',    'Equity',       CHART_COLORS[1]],
@@ -82,13 +83,13 @@ function membersOf({ bar, key }, profile, cash) {
  */
 export default function PortfolioProfile({ profile, cash = 0 }) {
   // One open slice across all three bars: { bar, key, label, color }.
-  const [picked, setPicked] = useState(null);
+  const [picked, setPicked] = useBackState('profile.picked', null);
   useEffect(() => {
     if (!picked) return;
     const onKey = (e) => { if (e.key === 'Escape') setPicked(null); };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [picked]);
+  }, [picked, setPicked]);
 
   if (!profile?.total) return null;
   const pick = (bar, items) => (key) => {

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -9,6 +9,7 @@ import Sparkline from '../ui/Sparkline';
 import { CHART_COLORS, formatPoints, monthLabel, pnlColor } from '../../lib/utils';
 import { assetPath } from '../../lib/markets';
 import { signedPct } from '../../lib/economy';
+import { useBackState } from '../../lib/backState';
 
 const WINDOWS = [
   { key: '1m', label: '1M' }, { key: '3m', label: '3M' }, { key: '6m', label: '6M' }, { key: 'ytd', label: 'YTD' },
@@ -36,7 +37,7 @@ function Pull({ label, value, sub, series, tone }) {
  * actually earns) against the world, and the dollar's pull on all of them.
  */
 export default function CapitalRotation({ data, gsec10y }) {
-  const [win, setWin] = useState('1y');
+  const [win, setWin] = useBackState('econ.rotation.win', '1y');
   const world = data.markets.find(m => m.iso === 'WLD');
   const rows = useMemo(() => data.markets.filter(m => m.returns[win] != null)
     .map(m => ({ ...m, r: m.returns[win], gap: world?.returns[win] != null ? m.returns[win] - world.returns[win] : null }))

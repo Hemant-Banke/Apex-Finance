@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -7,6 +6,7 @@ import ShowMore from '../ui/ShowMore';
 import ChartTooltip from '../charts/ChartTooltip';
 import { CHART_COLORS, formatPct, pnlColor, fiscalYear, fiscalQuarter } from '../../lib/utils';
 import { companyMoney } from '../../lib/markets';
+import { useBackState } from '../../lib/backState';
 
 /**
  * How the BUSINESS has done, as opposed to the share — from the company's own filings.
@@ -137,8 +137,8 @@ const globalLabels = {
 };
 
 export default function CompanyFinancials({ financials, money = companyMoney() }) {
-  const [period, setPeriod] = useState('annual');
-  const [measure, setMeasure] = useState('pl');
+  const [period, setPeriod] = useBackState('financials.period', 'annual');
+  const [measure, setMeasure] = useBackState('financials.measure', 'pl');
   if (!financials?.annual?.length && !financials?.quarterly?.length) return null;
 
   const isBank = financials.kind === 'bank';

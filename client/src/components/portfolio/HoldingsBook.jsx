@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import AssetIcon from '../market/AssetIcon';
 import HoldingLink from './HoldingLink';
@@ -9,6 +8,7 @@ import {
   formatCurrency, formatNativeCurrency, compactIfLarge, formatPct, formatSigned, formatCount, formatDate, pnlColor,
 } from '../../lib/utils';
 import { assetTypeLabel, isSelfPricedHolding } from '../../lib/constants';
+import { useBackState } from '../../lib/backState';
 
 const gridOf = (sell) => `minmax(0, 1.5fr) minmax(110px, 1.5fr) 104px 92px 74px ${sell ? '86px' : '18px'}`;
 // `key: null` is a label only: the bar is drawn from value, which Value already sorts.
@@ -58,8 +58,8 @@ function Stat({ label, children, color, sub, plain = false }) {
  * (id → name) names where a position is held when it spans accounts.
  */
 export default function HoldingsBook({ holdings = [], onSell, accountNames, initial = 8 }) {
-  const [sort, setSort] = useState({ key: 'value', dir: -1 });
-  const [open, setOpen] = useState(null);
+  const [sort, setSort] = useBackState('holdings.sort', { key: 'value', dir: -1 });
+  const [open, setOpen] = useBackState('holdings.open', null);
   if (!holdings.length) return null;
 
   const rows = [...holdings].sort((a, b) => {

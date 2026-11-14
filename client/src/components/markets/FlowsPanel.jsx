@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
   ComposedChart, Bar, Line, LineChart, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend,
 } from 'recharts';
@@ -8,6 +8,7 @@ import ChartTooltip from '../charts/ChartTooltip';
 import BandCursor from '../charts/BandCursor';
 import SegmentedControl from '../ui/SegmentedControl';
 import { CHART_COLORS, formatCrore, pnlColor, axisCompact, dayLabel, formatCount, ACTIVE_DOT } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 /**
  * Where the big money is going — the institutions, the funds, and the crowd.
@@ -84,7 +85,7 @@ function FlowLedger({ summary }) {
 
 /** Daily bars, or the same days as running totals — the drift a month of bars hides. */
 function FlowChart({ daily }) {
-  const [view, setView] = useState('daily');
+  const [view, setView] = useBackState('markets.flows.view', 'daily');
 
   const rows = useMemo(() => {
     // Start where the INSTITUTIONAL series start. The SEBI fund history reaches back

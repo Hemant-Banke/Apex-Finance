@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -7,6 +7,7 @@ import { MastheadFigure } from '../ui/Masthead';
 import ChartTooltip from '../charts/ChartTooltip';
 import { RangeBar } from './PricePerformance';
 import { monthYearShort, ACTIVE_DOT } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 /**
  * Is the share cheap or dear against its OWN past? Weekly P/E (close ÷ trailing EPS known
@@ -33,7 +34,7 @@ function verdict(name, cur, w, years) {
 
 export default function PeHistory({ history, name, sub, note, own }) {
   const available = WINDOWS.filter(([k]) => history?.windows?.[k]);
-  const [k, setK] = useState(() => (available.find(([x]) => x === '5y') || available[available.length - 1])?.[0]);
+  const [k, setK] = useBackState('pe.window', () => (available.find(([x]) => x === '5y') || available[available.length - 1])?.[0]);
   const win = available.find(([x]) => x === k) || available[available.length - 1];
 
   const data = useMemo(() => {

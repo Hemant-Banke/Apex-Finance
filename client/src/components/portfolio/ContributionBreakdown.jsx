@@ -8,6 +8,7 @@ import ShowMore from '../ui/ShowMore';
 import SegmentedControl from '../ui/SegmentedControl';
 import AssetIcon from '../market/AssetIcon';
 import HoldingLink from './HoldingLink';
+import { useBackState } from '../../lib/backState';
 
 /**
  * What made the window's return: each holding's gain over the whole book's committed
@@ -72,7 +73,7 @@ function Group({ title, rows, maxPp }) {
 
 // `account` scopes it to one account; `bare` drops the card when it sits inside another.
 export default function ContributionBreakdown({ account, bare = false }) {
-  const [days,    setDays]    = useState(365);
+  const [days,    setDays]    = useBackState('contribution.days', 365);
   const [data,    setData]    = useState(null);
   const [loading, setLoading] = useState(true);
 

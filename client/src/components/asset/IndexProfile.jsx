@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { formatPct, formatPoints, pnlColor } from '../../lib/utils';
 import { stockPath } from '../../lib/markets';
@@ -9,6 +8,7 @@ import SegmentedControl from '../ui/SegmentedControl';
 import DivergingBar from '../ui/DivergingBar';
 import AllocationBar from '../portfolio/AllocationBar';
 import { StatGrid } from '../stock/PricePerformance';
+import { useBackState } from '../../lib/backState';
 
 /** An NSE index read like a fund: what it costs, how broad today's move is, and what it holds. */
 export default function IndexProfile({ p, name, changePct }) {
@@ -45,7 +45,7 @@ const COLS = 'minmax(170px, 1.6fr) minmax(110px, 1fr) 64px 64px 64px minmax(130p
 const VIEWS = [{ key: 'weight', label: 'By weight' }, { key: 'movers', label: "Today's movers" }];
 
 function Composition({ c, name, changePct }) {
-  const [view, setView] = useState('weight');
+  const [view, setView] = useBackState('index.view', 'weight');
   const movers = view === 'movers';
   const rows = movers
     ? [...c.holdings].sort((a, b) => (b.contrib1d ?? -Infinity) - (a.contrib1d ?? -Infinity))

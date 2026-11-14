@@ -67,7 +67,7 @@
 - `import/ConfidenceBadge.jsx` — Single confidence pill for the whole parsed file.
 
 ### layout
-- `layout/AppShell.jsx` — App frame: sidebar navigation, the top bar, and the page outlet (a layout route — it stays mounted across pages; pages render through `<Outlet>` under `Suspense`).
+- `layout/AppShell.jsx` — App frame: sidebar navigation, the top bar, and the page outlet (a layout route — it stays mounted across pages; pages render through `<Outlet>` under `Suspense`, keyed by path). `useScrollMemory` on `<main>`: Back restores the scroll, a new page opens at the top.
 - `layout/TopBar.jsx` — The sticky top bar: back link, a one-line breadcrumb (section icon + section › page name), page actions, global market search (⌘K). Pages fill it with `<PageBar back title actions>` — back/title as data through context, actions portalled; `TopBarProvider` holds the state.
 - `layout/PriceBasis.jsx` — Sidebar card: the Live prices switch and what every figure is really as of ("Assets at close of Mon 5 Oct · cash as of today", "Live · 18:02", or "Quotes unavailable · showing close of …" when a live fetch fell back), read from the last priced response's `asof`.
 - `layout/DesktopOnly.jsx` — Gates the app to wide, hover-capable screens.
@@ -208,6 +208,7 @@
 - `planModel.js` — `planModel(data, settings)`: the whole FIRE plan from summary + portfolio + spending profile; `loadPlanSettings`, `journeyMarks`, `PLAN_DEFAULTS`, `PLAN_STORE_KEY`. Shared by Plan and Dashboard.
 - `fire.js` — Pure FIRE maths in today's rupees: `realRate`, `fireNumber`, `yearsToTarget`, `coastNumber`, `requiredMonthly`, `corpusForYears`, `project`.
 - `portfolioStyle.js` — `STYLES` bands and `portfolioStyle(profile, cash)` → growth share + verdict (PortfolioProfile, Dashboard).
+- `backState.js` — Back memory. `useBackState(id, initial)` is `useState` kept per history entry (sessionStorage `apex_back`), so Back returns a page to its selections; `useScrollMemory(ref)` does the same for a scroll box.
 - `chartStudies.js` — The indicators and comparisons shared by every `PriceGrapher` (localStorage `apex_chart_studies`): `loadStudies`, `saveIndicators`, `saveCompareChange(prev, next, catalogue)` — saves only add/remove gestures, so a page's default benchmark is never stored.
 - `indicators.js` — Technical indicators, pure: `INDICATOR_TYPES` (sma, ema, bb, rsi + their editable `params`), instances `{ id, type, period, width? }` via `newIndicator`, `indicatorLabel`, `clampParam`, `computeIndicator(ind, values)`, `lookbackDays(inds)` (warm-up to fetch, 50-day buckets), `paddedDays(days, opts)` for daily-series fetchers.
 - `accountPickerOptions.jsx` — account-type icons (`TYPE_ICON`), per-type colour + group name (`ACCOUNT_TYPE_STYLE`), TypePicker options.

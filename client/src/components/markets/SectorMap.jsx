@@ -12,6 +12,7 @@ import { TooltipPanel } from '../charts/ChartTooltip';
 import { marketsAPI } from '../../lib/api';
 import { formatPct, pnlColor, formatCrore, formatPoints as pp, signedTone } from '../../lib/utils';
 import { WINDOWS, windowOf, formatLevel, stockPath } from '../../lib/markets';
+import { useBackState } from '../../lib/backState';
 
 /**
  * Where the money is moving — between sectors, and inside each one.
@@ -240,8 +241,8 @@ export default function SectorMap({ refreshKey = 0 }) {
   const navigate = useNavigate();
   const [data, setData]   = useState(null);
   const [error, setError] = useState(false);
-  const [win, setWin]     = useState('1m');
-  const [focus, setFocus] = useState(null);   // sector key, or null for the whole market
+  const [win, setWin]     = useBackState('markets.sectors.win', '1m');
+  const [focus, setFocus] = useBackState('markets.sectors.focus', null);   // sector key, or null for the whole market
   const w = windowOf(win);
 
   // Re-fetched (fresh) when the page's refresh button bumps `refreshKey`; the map that

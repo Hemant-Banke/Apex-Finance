@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { CHART_COLORS, compactIfLarge, formatPct, formatPoints, formatSigned, pnlColor } from '../../lib/utils';
 import { assetTypeLabel } from '../../lib/constants';
 import Card from '../ui/Card';
@@ -7,6 +7,7 @@ import SegmentedControl from '../ui/SegmentedControl';
 import ShowMore from '../ui/ShowMore';
 import AllocationBar, { OTHER_TONE, CASH_TONE } from './AllocationBar';
 import PortfolioProfile, { Figure } from './PortfolioProfile';
+import { useBackState } from '../../lib/backState';
 
 const LENSES = {
   type:    { label: 'Asset type', noun: 'asset types' },
@@ -61,8 +62,8 @@ export default function AllocationPanel({ holdings = [], cash = 0, accountNames,
     .filter(([k]) => k !== 'account' || spansAccounts)
     .map(([key, l]) => ({ key, label: l.label }));
 
-  const [lens, setLens]     = useState('type');
-  const [active, setActive] = useState(null);
+  const [lens, setLens]     = useBackState('allocation.lens', 'type');
+  const [active, setActive] = useBackState('allocation.active', null);
 
   const { rows, bar, costBar, stats } = useMemo(() => {
     const groups = groupBy(holdings, lens, accountNames)

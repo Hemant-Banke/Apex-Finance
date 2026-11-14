@@ -5,6 +5,7 @@ import SectionHeader from '../ui/SectionHeader';
 import SegmentedControl from '../ui/SegmentedControl';
 import { TooltipPanel } from '../charts/ChartTooltip';
 import { bopFlows, usdBn } from '../../lib/economy';
+import { useBackState } from '../../lib/backState';
 
 const LABEL_GUTTER = 230;
 // Sentence case inside a sentence, keeping acronyms: "Foreign loans (ECB)" → "foreign loans (ECB)".
@@ -78,7 +79,7 @@ function summary(q, flows) {
 /** The balance of payments for one quarter as a flow: money earned and borrowed on the left, spent and sent on the right. */
 export default function BopFlow({ quarters }) {
   const recent = quarters.slice(-6);
-  const [date, setDate] = useState(recent[recent.length - 1]?.date);
+  const [date, setDate] = useBackState('econ.bop.date', recent[recent.length - 1]?.date);
   const q = recent.find(r => r.date === date) || recent[recent.length - 1];
   const boxRef = useRef(null);
   const [hover, setHover] = useState(null);

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -7,6 +7,7 @@ import ChartTooltip from '../charts/ChartTooltip';
 import BandCursor from '../charts/BandCursor';
 import { CHART_COLORS} from '../../lib/utils';
 import { FLOW_TONE, usdBn } from '../../lib/economy';
+import { useBackState } from '../../lib/backState';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 
@@ -50,7 +51,7 @@ const VIEWS = {
 
 /** The balance of payments quarter by quarter: the current account's parts, or the capital that financed it. */
 export default function BopHistory({ quarters }) {
-  const [view, setView] = useState('current');
+  const [view, setView] = useBackState('econ.bopHistory.view', 'current');
   const v = VIEWS[view];
 
   const rows = useMemo(() => quarters.map(q => {

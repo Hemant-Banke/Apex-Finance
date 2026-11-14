@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
@@ -6,6 +6,7 @@ import SegmentedControl from '../ui/SegmentedControl';
 import ChartTooltip from '../charts/ChartTooltip';
 import { ContributionChart, ContributionTable } from './Contribution';
 import { CHART_COLORS, ACTIVE_DOT } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 const RULE = { stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' };
@@ -22,13 +23,13 @@ const VIEWS = [{ key: 'growth', label: 'Sources of growth' }, { key: 'shares', l
 
 /** What the output is spent on: households, investment, government and the rest of the world. */
 export default function Spending({ quarters }) {
-  const [view, setView] = useState('growth');
+  const [view, setView] = useBackState('econ.spending.view', 'growth');
   const rows = useMemo(() => quarters.map(q => ({
     label: q.short, total: q.gdpYoY,
     ...Object.fromEntries(PARTS.map(p => [p.key, q.spend[p.key]?.contrib ?? null])),
     ...Object.fromEntries(PARTS.map(p => [`${p.key}Share`, q.spend[p.key]?.share ?? null])),
   })), [quarters]);
-  const [sel, setSel] = useState(rows.length - 1);
+  const [sel, setSel] = useBackState('econ.spending.sel', rows.length - 1);
   const q = quarters[sel] || quarters[quarters.length - 1];
   if (!q) return null;
   const table = PARTS.map(p => ({ ...p, ...q.spend[p.key] }));

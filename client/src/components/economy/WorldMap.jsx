@@ -8,6 +8,7 @@ import Flag from './Flag';
 import { CHART_COLORS, signedTone } from '../../lib/utils';
 import { signedPct } from '../../lib/economy';
 import GEO from '../../lib/worldMap.json';
+import { useBackState } from '../../lib/backState';
 
 // The geometry's ISO code where the IMF uses its own (Kosovo, West Bank and Gaza).
 const GEO_ALIAS = { XKX: 'UVK', PSE: 'WBG' };
@@ -116,7 +117,7 @@ function Leaders({ title, rows, m, onPick, selected }) {
  * (or picking it) makes it the page's subject; the figures below follow it.
  */
 export default function WorldMap({ map, markets, year, selected, onSelect }) {
-  const [key, setKey] = useState('capital');
+  const [key, setKey] = useBackState('econ.map.metric', 'capital');
   const [hover, setHover] = useState(null);
   const [pos, setPos] = useState(null);
   const wrap = useRef(null);

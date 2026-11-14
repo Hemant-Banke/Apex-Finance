@@ -1,4 +1,4 @@
-import { Suspense, useState } from 'react';
+import { Suspense, useRef, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import Spinner from '../ui/Spinner';
 import { useAuth } from '../../context/AuthContext';
@@ -12,6 +12,7 @@ import TopBar, { TopBarProvider } from './TopBar';
 import { usePricing } from '../../context/PricingContext';
 import { networthAPI } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
+import { useScrollMemory } from '../../lib/backState';
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Overview' },
@@ -37,6 +38,8 @@ export default function AppShell() {
   // Bumping this remounts the routed page below, re-running its mount-time
   // fetch so the UI reflects freshly rebuilt stores without a full reload.
   const [refreshKey, setRefreshKey] = useState(0);
+  const mainRef = useRef(null);
+  useScrollMemory(mainRef);
 
   const handleRebuild = async () => {
     setRebuilding(true);
@@ -214,7 +217,7 @@ export default function AppShell() {
 
       {/* ── Main Content ── the top bar sticks inside the scroll box, so it stays put like the sidebar. */}
       <TopBarProvider>
-      <main style={{
+      <main ref={mainRef} style={{
         flex: 1,
         minWidth: 0,
         // The scrollbar is ALWAYS there (its track is transparent): a page loads short (a
@@ -228,8 +231,8 @@ export default function AppShell() {
         zIndex: 1,
       }}>
         <TopBar section={section} />
-        {/* Remounted on a rebuild or a flip of the price basis, so every figure refetches. */}
-        <div key={`${refreshKey}-${live}`} style={{
+        {/* Remounted on a rebuild, a flip of the price basis, or a new path (stock A → stock B), so every figure refetches. */}
+        <div key={`${refreshKey}-${live}-${pathname}`} style={{
           maxWidth: 1060,
           margin: '0 auto',
           padding: '32px 48px 60px',

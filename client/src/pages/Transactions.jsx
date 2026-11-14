@@ -35,6 +35,7 @@ import {
   ArrowLeftRight, Upload, Search, X, Plus, CalendarRange, SlidersHorizontal, Download, Trash2, ChevronDown,
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { useBackState } from '../lib/backState';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
 const PAGE = 40;
@@ -124,8 +125,8 @@ export default function Transactions() {
   const [day, setDay]         = useState(null);              // list-only: one day picked on the calendar
   const [searchBox, setSearchBox] = useState('');
   const [search, setSearch]   = useState('');
-  const [amount, setAmount]   = useState({ min: '', max: '' });
-  const [sort, setSort]       = useState('date');
+  const [amount, setAmount]   = useBackState('tx.amount', { min: '', max: '' });
+  const [sort, setSort]       = useBackState('tx.sort', 'date');
 
   // ── Data ──────────────────────────────────────────────────────────────────
   const [accounts, setAccounts] = useState([]);

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useBackState } from '../../lib/backState';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 /**
@@ -37,7 +37,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 export default function ShowMore({
   items = [], render, initial = 6, ends = false, noun = 'rows', wrap, renderFold, toggleStyle,
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useBackState(`more:${noun}:${initial}`, false);
   const collapsible = items.length > initial + 2;
   const expanded = open || !collapsible;
   const hidden = items.length - initial;

@@ -33,6 +33,7 @@ import {
   Landmark, Wallet, Briefcase, BarChart2, Upload
 } from 'lucide-react';
 import { useToast } from '../context/ToastContext';
+import { useBackState } from '../lib/backState';
 
 const SKIP_DELETE_KEY = 'apex_skip_tx_delete';
 
@@ -118,8 +119,8 @@ export default function AccountDetail() {
   const [profile, setProfile]               = useState(null);
   const [perf, setPerf]                     = useState(null);
   // Activity list: which kind of movement, and how many rows are on show.
-  const [txFilter, setTxFilter]             = useState('all');
-  const [txShown,  setTxShown]              = useState(TX_PAGE);
+  const [txFilter, setTxFilter]             = useBackState('account.txFilter', 'all');
+  const [txShown,  setTxShown]              = useBackState('account.txShown', TX_PAGE);
   // Rename / edit-details modal
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [details, setDetails]         = useState({ name: '', description: '' });

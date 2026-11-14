@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import SegmentedControl from '../ui/SegmentedControl';
 import ChartTooltip from '../charts/ChartTooltip';
 import { CHART_COLORS, ACTIVE_DOT, formatPoints } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 const RULE = { stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' };
@@ -21,7 +22,7 @@ const LINES = [
 export default function WorldStanding({ world }) {
   const { imf, contributions, thisYear } = world;
   const years = Object.keys(contributions).map(Number).sort();
-  const [year, setYear] = useState(years.includes(thisYear) ? thisYear : years[years.length - 1]);
+  const [year, setYear] = useBackState('econ.standing.year', years.includes(thisYear) ? thisYear : years[years.length - 1]);
   const c = contributions[year];
 
   // Two keys per country: the record up to last year, then IMF projections joined to it.

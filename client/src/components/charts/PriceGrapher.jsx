@@ -12,6 +12,7 @@ import { indicatorTypeOf, indicatorLabel, computeIndicator, lookbackDays, padded
 import { DateRangePicker } from '../forms/DatePicker';
 import { BENCHMARKS } from '../../lib/constants';
 import { loadStudies, saveIndicators, saveCompareChange } from '../../lib/chartStudies';
+import { useBackState } from '../../lib/backState';
 import ChartTooltip from './ChartTooltip';
 import CompareIndexDialog from './CompareIndexDialog';
 import SegmentedControl from '../ui/SegmentedControl';
@@ -538,16 +539,23 @@ export default function PriceGrapher({
   const pgFlatFillId = `pgFF${uid}`;
 
   const initRange = ranges.find(r => r.label === defaultRange) ?? ranges[ranges.length - 2] ?? ranges[0];
-  const [range,       setRange]       = useState(initRange);
-  const [custom,      setCustom]      = useState(null);    // { from, to } — dates picked on the calendar
+  // Kept per history entry, so Back returns to the same window, view and lines.
+  const mem = `chart:${symbol ?? (typeof title === 'string' ? title : 'main')}`;
+  const [rangeLabel,  setRangeLabel]  = useBackState(`${mem}.range`, initRange.label);
+  const range = ranges.find(r => r.label === rangeLabel) ?? initRange;
+  const [custom,      setCustom]      = useBackState(`${mem}.custom`, null);    // { from, to } — dates picked on the calendar
   const [draft,       setDraft]       = useState({ from: null, to: null });
-  const [view,        setView]        = useState(defaultView); // 'complete' | 'growth'
+  const [view,        setView]        = useBackState(`${mem}.view`, defaultView); // 'complete' | 'growth'
   const [rawData,     setRawData]     = useState([]);      // as fetched, incl. any warm-up history
   const [loading,     setLoading]     = useState(!staticData);
   // Indicators and comparisons are shared by every chart (lib/chartStudies); the page's own default is added on top.
   const [saved] = useState(() => (saveStudies ? loadStudies() : { indicators: [], compare: [], added: [] }));
-  const [indicators,  setIndicators]  = useState(saved.indicators); // [{ id, type, period, width? }] — see lib/indicators
-  useEffect(() => { if (saveStudies) saveIndicators(indicators); }, [saveStudies, indicators]);
+  const [indicators,  setIndicatorsRaw]  = useBackState(`${mem}.indicators`, saved.indicators); // [{ id, type, period, width? }] — see lib/indicators
+  const setIndicators = useCallback((next) => setIndicatorsRaw(prev => {
+    const n = typeof next === 'function' ? next(prev) : next;
+    if (saveStudies) saveIndicators(n);
+    return n;
+  }), [saveStudies, setIndicatorsRaw]);
 
   // The window on screen: a preset, or the calendar's dates (fetched as "since `from`").
   const win = useMemo(() => (custom
@@ -558,10 +566,10 @@ export default function PriceGrapher({
 
   // ── Benchmark comparison (growth view only) ───────────────────────────────
   const [compareOpen,    setCompareOpen]    = useState(false);
-  const [compareSymbols, setCompareSymbols] = useState(() => [...new Set([...defaultCompare, ...saved.compare.filter(s => s !== symbol)])]);
+  const [compareSymbols, setCompareSymbols] = useBackState(`${mem}.compare`, () => [...new Set([...defaultCompare, ...saved.compare.filter(s => s !== symbol)])]);
   const [compareSeries,  setCompareSeries]  = useState({});       // symbol -> [{date,close}]
   // Any ticker or fixed rate the user brought, plus saved lines this chart's catalogue lacks.
-  const [addedBenchmarks, setAddedBenchmarks] = useState(() => saved.added.filter(b =>
+  const [addedBenchmarks, setAddedBenchmarks] = useBackState(`${mem}.added`, () => saved.added.filter(b =>
     b.symbol !== symbol && saved.compare.includes(b.symbol) && !benchmarks.some(x => x.symbol === b.symbol)));
   const allBenchmarks = useMemo(() => [...addedBenchmarks, ...benchmarks], [addedBenchmarks, benchmarks]);
   const catalogueRef = useRef(allBenchmarks);
@@ -573,12 +581,12 @@ export default function PriceGrapher({
       if (saveStudies) saveCompareChange(prev, n, [...extra, ...catalogueRef.current]);
       return n;
     });
-  }, [saveStudies]);
+  }, [saveStudies, setCompareSymbols]);
   const addBenchmark = useCallback((b) => {
     setAddedBenchmarks(list => (list.some(x => x.symbol === b.symbol) || benchmarks.some(x => x.symbol === b.symbol) ? list : [b, ...list]));
     changeCompare(sel => (sel.includes(b.symbol) ? sel : [...sel, b.symbol]), [b]);
     setView('growth');   // a comparison only means something rebased
-  }, [benchmarks, changeCompare]);
+  }, [benchmarks, changeCompare, setAddedBenchmarks, setView]);
   const slotsRef = useRef({});
   const { colorOf: benchmarkColor, labelOf: benchmarkLabel } = useMemo(
     () => benchmarkLookups(allBenchmarks, { ...assignSlots(slotsRef.current, [...compareSymbols, ...indicators.map(i => indSlot(i.id))]) }),
@@ -1236,7 +1244,7 @@ export default function PriceGrapher({
 
             {/* Range selector — a preset, or any dates from the calendar beside it. */}
             <SegmentedControl size="sm" ariaLabel="Range" value={custom ? null : range.label}
-              onChange={l => { setRange(ranges.find(r => r.label === l)); setCustom(null); clearSelection(); }}
+              onChange={l => { setRangeLabel(l); setCustom(null); clearSelection(); }}
               options={ranges.map(r => ({ key: r.label, label: r.label }))}>
               <DateRangePicker
                 value={draft}

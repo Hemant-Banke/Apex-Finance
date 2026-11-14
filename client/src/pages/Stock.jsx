@@ -21,6 +21,7 @@ import { StatGrid, RangeBar, Performance } from '../components/stock/PricePerfor
 import PositionCard from '../components/portfolio/PositionCard';
 import AssetIcon from '../components/market/AssetIcon';
 import HoldingExperience from '../components/asset/HoldingExperience';
+import { useBackState } from '../lib/backState';
 
 /**
  * One company, in full: the share, the business, and how both compare.
@@ -219,7 +220,7 @@ function Analysts({ a, price, earnings, money }) {
 // ── About ───────────────────────────────────────────────────────────────────────
 
 function About({ profile }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useBackState('stock.about', false);
   if (!profile?.description && !profile?.website) return null;
   return (
     <Card>

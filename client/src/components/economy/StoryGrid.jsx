@@ -1,9 +1,9 @@
-import { useState } from 'react';
 import { ArrowDownRight, ChevronDown } from 'lucide-react';
 import Card from '../ui/Card';
 import Sparkline from '../ui/Sparkline';
 import { CHART_COLORS, formatCrore, formatPoints } from '../../lib/utils';
 import { usdBn, signedPct } from '../../lib/economy';
+import { useBackState } from '../../lib/backState';
 
 const scrollTo = (id) => document.getElementById(`econ-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -69,7 +69,7 @@ function Bars({ bars }) {
 }
 
 function Finding({ f, first }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useBackState('econ.story.open', false);
   return (
     <div className="story-row" style={{ borderTop: first ? 'none' : '1px solid var(--color-border-subtle)' }}>
       <div>

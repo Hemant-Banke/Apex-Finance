@@ -7,6 +7,7 @@ import ShowMore from '../ui/ShowMore';
 import { marketsAPI } from '../../lib/api';
 import { formatPct, pnlColor } from '../../lib/utils';
 import { stockPath, globalStockPath, companyMoney } from '../../lib/markets';
+import { useBackState } from '../../lib/backState';
 
 /**
  * The company among its peers: size, valuation and share price from the page payload, and
@@ -79,7 +80,7 @@ const Standing = ({ label, value }) => value ? (
 
 export default function Peers({ peers, symbol, global, money, sectorMedianPe }) {
   const [growth, setGrowth] = useState(null);
-  const [w, setW] = useState('3y');
+  const [w, setW] = useBackState('peers.window', '3y');
 
   useEffect(() => {
     let live = true;

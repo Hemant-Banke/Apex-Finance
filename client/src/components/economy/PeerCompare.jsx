@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine, Legend } from 'recharts';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import SegmentedControl from '../ui/SegmentedControl';
 import ChartTooltip from '../charts/ChartTooltip';
 import { CHART_COLORS, ACTIVE_DOT } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 const AXIS = { fill: '#878D97', fontSize: 11 };
 const RULE = { stroke: 'var(--color-text-primary)', strokeOpacity: 0.14, strokeWidth: 1, strokeDasharray: '3 3' };
@@ -36,7 +37,7 @@ const historyFor = (focus) => [
  * one measure at a time, now and over time. `focusName` names a focus that is not one of the peers.
  */
 export default function PeerCompare({ world, focus = 'IND', focusName }) {
-  const [key, setKey] = useState('growth');
+  const [key, setKey] = useBackState('econ.peers.metric', 'growth');
   const m = METRICS.find(x => x.key === key);
   const src = useMemo(() => world[m.src]?.[key] || {}, [world, m, key]);
   const names = useMemo(() => ({ ...Object.fromEntries([...world.peers, ...world.groups].map(p => [p.iso, p.name])), ...(focusName ? { [focus]: focusName } : {}) }), [world, focus, focusName]);

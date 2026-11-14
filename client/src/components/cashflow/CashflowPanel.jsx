@@ -10,6 +10,7 @@ import CategoryBreakdown from '../charts/CategoryBreakdown';
 import MonthlyLedger from '../charts/MonthlyLedger';
 import CashflowProfile from './CashflowProfile';
 import SpendingPatterns from './SpendingPatterns';
+import { useBackState } from '../../lib/backState';
 
 const RANGES = [3, 6, 12, 24];
 
@@ -19,7 +20,7 @@ const RANGES = [3, 6, 12, 24];
  * `refreshKey` refetches after a transaction changes.
  */
 export default function CashflowPanel({ accountId, balance, isDebt, refreshKey }) {
-  const [months, setMonths] = useState(12);
+  const [months, setMonths] = useBackState('cashflow.months', 12);
   const [data, setData] = useState(null);
   const req = useRef(0);
   const { label, describe } = useCategoryNames();

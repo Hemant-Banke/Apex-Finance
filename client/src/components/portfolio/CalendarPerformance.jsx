@@ -14,6 +14,7 @@ import GardenEmpty from '../ui/GardenEmpty';
 import DivergingBar from '../ui/DivergingBar';
 import { MastheadFigure } from '../ui/Masthead';
 import { TooltipPanel } from '../charts/ChartTooltip';
+import { useBackState } from '../../lib/backState';
 
 /**
  * Performance by calendar period — the book's return and gain, and the cashflow, per day,
@@ -282,10 +283,10 @@ function YearlyView({ years, measure, metric, today, onHover, onPick }) {
 export default function CalendarPerformance() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [measure, setMeasure] = useState('assets');
-  const [grain, setGrain] = useState('month');
-  const [metric, setMetric] = useState('ret');
-  const [year, setYear] = useState(null);
+  const [measure, setMeasure] = useBackState('calendar.measure', 'assets');
+  const [grain, setGrain] = useBackState('calendar.grain', 'month');
+  const [metric, setMetric] = useBackState('calendar.metric', 'ret');
+  const [year, setYear] = useBackState('calendar.year', null);
   const [hover, setHover] = useState(null);
 
   useEffect(() => {

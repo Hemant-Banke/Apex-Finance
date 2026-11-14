@@ -24,6 +24,7 @@ import AllocationPanel from '../components/portfolio/AllocationPanel';
 import PerformancePanel from '../components/portfolio/PerformancePanel';
 import CalendarPerformance from '../components/portfolio/CalendarPerformance';
 import { paddedDays } from '../lib/indicators';
+import { useBackState } from '../lib/backState';
 
 /**
  * The month ranges, picked ON the section they govern (a `SegmentedControl` in the
@@ -46,7 +47,7 @@ const fetchNetAssets = (days, growth, opts) => networthAPI.getDaily(paddedDays(d
 
 export default function Analytics() {
   const toast = useToast();
-  const [months,    setMonths]    = useState(12);
+  const [months,    setMonths]    = useBackState('analytics.months', 12);
   const [portfolio, setPortfolio] = useState(null);
   const [ie,        setIe]        = useState([]);
   const [ec,        setEc]        = useState([]);   // where it goes

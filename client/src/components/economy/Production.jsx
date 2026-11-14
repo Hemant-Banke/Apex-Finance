@@ -1,8 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Card from '../ui/Card';
 import SectionHeader from '../ui/SectionHeader';
 import { ContributionChart, ContributionTable } from './Contribution';
 import { CHART_COLORS } from '../../lib/utils';
+import { useBackState } from '../../lib/backState';
 
 // Biggest first; one palette slot each, never cycled.
 const INDUSTRIES = [
@@ -22,7 +23,7 @@ export default function Production({ quarters }) {
     label: q.short, total: q.gvaYoY,
     ...Object.fromEntries(INDUSTRIES.map(i => [i.key, q.industries[i.key]?.contrib ?? null])),
   })), [quarters]);
-  const [sel, setSel] = useState(rows.length - 1);
+  const [sel, setSel] = useBackState('econ.production.sel', rows.length - 1);
   const q = quarters[sel] || quarters[quarters.length - 1];
   if (!q) return null;
 
