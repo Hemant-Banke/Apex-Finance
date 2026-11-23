@@ -59,7 +59,9 @@ async function getPeerGrowth(symbol, { global = false } = {}) {
     group: global ? 'Often compared with' : stock.peers?.sector?.label || null,
     rows, median,
   };
-  _memo.set(key, { at: Date.now(), data });
+  // A peer whose filings failed to load would vanish for hours; keep such a result a minute only.
+  const complete = stock.peers && filings.every(Boolean);
+  _memo.set(key, { at: complete ? Date.now() : Date.now() - TTL_MS + 60 * 1000, data });
   return data;
 }
 

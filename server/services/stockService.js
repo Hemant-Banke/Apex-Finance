@@ -526,8 +526,9 @@ async function getStock(symbol, { fresh = false, global = false } = {}) {
     },
   };
 
-  // A page built without quoteSummary is kept only briefly, so the next visit retries it.
-  _memo.set(key, { at: q.price ? Date.now() : Date.now() - TTL_MS + 60 * 1000, data });
+  // A page missing a part that failed to load is kept only briefly, so the next visit retries it.
+  const complete = q.price && co && data.peers;
+  _memo.set(key, { at: complete ? Date.now() : Date.now() - TTL_MS + 60 * 1000, data });
   return data;
 }
 

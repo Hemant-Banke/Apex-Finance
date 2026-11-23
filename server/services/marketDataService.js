@@ -70,7 +70,38 @@ async function _fetchRangeRaw(assetSymbol, assetType, startMs, endMs) {
     period1: Math.floor(_adjustDateForYF(startMs, assetType) / 1000),
     period2: Math.floor((_adjustDateForYF(endMs, assetType) + DAY_MS) / 1000), // +1 day buffer
   }, 12000);
-  return result ? { closes: closesByDay(result), currency: result.meta?.currency || null } : null;
+  if (!result) return null;
+  const closes = closesByDay(result);
+  if (assetType !== 'crypto') await _fillDroppedSessions(assetSymbol, result, closes);
+  return { closes, currency: result.meta?.currency || null };
+}
+
+const DROPPED_LOOKBACK_MS = 7 * DAY_MS;
+
+/**
+ * Yahoo's daily series can hold a recent session as a null bar for days (SKYGOLD.NS on
+ * 16 Nov 2026), so 1D measured from the session before. Such a day is rebuilt from intraday.
+ */
+async function _fillDroppedSessions(symbol, result, closes) {
+  const today = todayMs();
+  const missing = (result.timestamp || []).map(t => midnight(t * 1000))
+    .filter(d => d < today && d >= today - DROPPED_LOOKBACK_MS && closes[d] == null);
+  if (!missing.length) return;
+
+  const [week, day] = await Promise.all([
+    fetchChart(symbol, { range: '5d', interval: '15m' }),
+    fetchChart(symbol, { range: '1d', interval: '15m' }),
+  ]);
+  const bars = closesByDay(week);
+  const sessions = Object.keys(bars).map(Number).sort((a, b) => a - b);
+  // The official close (closing auction) beats the last 15m bar, but is known only for the prior session.
+  const latest = day?.timestamp?.length ? midnight(day.timestamp[0] * 1000) : null;
+  const prevClose = day?.meta?.chartPreviousClose;
+  for (const d of missing) {
+    const i = sessions.indexOf(d);
+    if (i < 0) continue;
+    closes[d] = sessions[i + 1] === latest && prevClose != null ? _round2(prevClose) : bars[d];
+  }
 }
 
 /**
@@ -498,8 +529,15 @@ async function fetchPriceOnDate({ assetSymbol, assetType, purity }, dateMs) {
 let _yahooSession = null;   // { cookie, crumb, at }
 const YAHOO_SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 
-async function _getYahooSession(force = false) {
-  if (!force && _yahooSession && Date.now() - _yahooSession.at < YAHOO_SESSION_TTL_MS) return _yahooSession;
+// Concurrent callers share one mint: parallel mints got the crumb endpoint rate-limited.
+let _sessionMint = null;
+function _getYahooSession(force = false) {
+  if (!force && _yahooSession && Date.now() - _yahooSession.at < YAHOO_SESSION_TTL_MS) return Promise.resolve(_yahooSession);
+  if (!_sessionMint) _sessionMint = _mintYahooSession().finally(() => { _sessionMint = null; });
+  return _sessionMint;
+}
+
+async function _mintYahooSession() {
   try {
     const ua = { 'User-Agent': YF_HEADERS['User-Agent'] };
     const first = await fetch('https://fc.yahoo.com/', { headers: ua, redirect: 'manual', signal: AbortSignal.timeout(8000) });
